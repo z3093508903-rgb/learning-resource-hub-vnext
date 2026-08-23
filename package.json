@@ -5,10 +5,12 @@
   "description": "Clean component-first rewrite of Learning Resource Hub.",
   "main": "main.js",
   "scripts": {
-    "check": "node --check src/entry.cjs && node --check src/anki-launch.cjs && node --check src/usage-polish.cjs && node --check src/main.cjs && node --check src/model.cjs",
+    "check": "node --check src/entry.cjs && node --check src/anki-launch.cjs && node --check src/usage-polish.cjs && node --check src/release-hardening.cjs && node --check src/main.cjs && node --check src/model.cjs && node --check scripts/check-release.mjs",
     "build": "node build.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.cjs",
-    "release:check": "npm run check && npm run build && npm test",
+    "release:validate": "node scripts/check-release.mjs",
+    "release:check": "npm run check && npm run build && npm test && npm run release:validate",
+    "release:check:strict": "npm run check && npm run build && npm test && node scripts/check-release.mjs --strict",
     "deploy:local": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-local.ps1"
   },
   "license": "MIT"
