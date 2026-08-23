@@ -2,14 +2,102 @@
 
 const BaseResourceHubNextPlugin = require('./main.cjs');
 const { shell } = require('electron');
+const path = require('node:path');
 const {
   launchAnkiProcess,
   resolveAnkiExecutable,
   resolveAnkiProfileExecutable
 } = require('./anki-launch.cjs');
 const { findOpenVaultLeaf } = require('./usage-polish.cjs');
+const {
+  DEFAULT_ANKI_ENDPOINT,
+  DEFAULT_BACKUP_RETENTION,
+  normalizeAnkiEndpoint,
+  pruneStateBackups,
+  revealLoadedLeaf
+} = require('./release-hardening.cjs');
 
 class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
+  async onload() {
+    this._vaultLifecycleReady = false;
+    await super.onload();
+
+    const activateVaultLifecycle = async () => {
+      if (this._vaultLifecycleReady) return;
+      this._vaultLifecycleReady = true;
+      await super.validateVaultRefs();
+    };
+
+    if (typeof this.app.workspace?.onLayoutReady === 'function') {
+      this.app.workspace.onLayoutReady(() => {
+        void activateVaultLifecycle().catch((error) => console.error('Learning Resource Hub: vault validation failed after layout ready.', error));
+      });
+    } else {
+      await activateVaultLifecycle();
+    }
+  }
+
+  async validateVaultRefs() {
+    if (!this._vaultLifecycleReady) return false;
+    return super.validateVaultRefs();
+  }
+
+  async handleVaultRename(...args) {
+    if (!this._vaultLifecycleReady) return;
+    return super.handleVaultRename(...args);
+  }
+
+  async handleVaultDelete(...args) {
+    if (!this._vaultLifecycleReady) return;
+    return super.handleVaultDelete(...args);
+  }
+
+  async handleVaultCreate(...args) {
+    if (!this._vaultLifecycleReady) return;
+    return super.handleVaultCreate(...args);
+  }
+
+  async openWorkbench(options = {}) {
+    const requestedRoute = options.route;
+    const initialView = await super.openWorkbench(requestedRoute ? { ...options, route: '' } : options);
+    const leaf = this.workbenchLeaf;
+    const loadedView = await revealLoadedLeaf(this.app.workspace, leaf);
+    if (requestedRoute && typeof loadedView?.navigate === 'function') {
+      await loadedView.navigate(requestedRoute, options);
+    }
+    return loadedView || initialView;
+  }
+
+  async revealVaultEntry(entry) {
+    const leaf = this.app.workspace.getLeavesOfType?.('file-explorer')?.[0];
+    if (leaf) {
+      const explorer = await revealLoadedLeaf(this.app.workspace, leaf);
+      if (explorer?.revealInFolder) {
+        await explorer.revealInFolder(entry);
+        return true;
+      }
+    }
+    return super.revealVaultEntry(entry);
+  }
+
+  async invokeAnki(action, params = {}) {
+    const source = Object.values(this.state.sources || {})
+      .find((item) => item.type === 'anki' && !item.deletedAt);
+    const endpoint = normalizeAnkiEndpoint(source?.endpoint || DEFAULT_ANKI_ENDPOINT);
+    if (source) {
+      source.endpoint = endpoint;
+      source.identity = endpoint.toLowerCase();
+    }
+    return super.invokeAnki(action, params);
+  }
+
+  async createStateBackup(label = 'manual') {
+    const backupName = await super.createStateBackup(label);
+    const backupDir = path.join(this.pluginStorageDir(), 'backups');
+    pruneStateBackups(backupDir, DEFAULT_BACKUP_RETENTION);
+    return backupName;
+  }
+
   resolveAnkiExecutable(configured = '') {
     return resolveAnkiExecutable(configured);
   }
