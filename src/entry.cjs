@@ -38,22 +38,22 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   }
 
   async validateVaultRefs() {
-    if (!this._vaultLifecycleReady) return false;
+    if (this._vaultLifecycleReady === false) return false;
     return super.validateVaultRefs();
   }
 
   async handleVaultRename(...args) {
-    if (!this._vaultLifecycleReady) return;
+    if (this._vaultLifecycleReady === false) return;
     return super.handleVaultRename(...args);
   }
 
   async handleVaultDelete(...args) {
-    if (!this._vaultLifecycleReady) return;
+    if (this._vaultLifecycleReady === false) return;
     return super.handleVaultDelete(...args);
   }
 
   async handleVaultCreate(...args) {
-    if (!this._vaultLifecycleReady) return;
+    if (this._vaultLifecycleReady === false) return;
     return super.handleVaultCreate(...args);
   }
 
