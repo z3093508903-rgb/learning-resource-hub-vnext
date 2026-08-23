@@ -75,6 +75,6 @@ test('entry delays vault lifecycle work until layout ready', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'src', 'entry.cjs'), 'utf8');
   assert.match(source, /_vaultLifecycleReady = false/);
   assert.match(source, /onLayoutReady/);
-  assert.match(source, /if \(!this\._vaultLifecycleReady\) return false/);
-  assert.match(source, /if \(!this\._vaultLifecycleReady\) return;/);
+  assert.match(source, /if \(this\._vaultLifecycleReady === false\) return false/);
+  assert.match(source, /if \(this\._vaultLifecycleReady === false\) return;/);
 });
