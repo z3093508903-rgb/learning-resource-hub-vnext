@@ -94,7 +94,11 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async createStateBackup(label = 'manual') {
     const backupName = await super.createStateBackup(label);
     const backupDir = path.join(this.pluginStorageDir(), 'backups');
-    pruneStateBackups(backupDir, DEFAULT_BACKUP_RETENTION);
+    try {
+      pruneStateBackups(backupDir, DEFAULT_BACKUP_RETENTION);
+    } catch (error) {
+      console.warn('Learning Resource Hub: failed to prune old state backups.', error);
+    }
     return backupName;
   }
 
