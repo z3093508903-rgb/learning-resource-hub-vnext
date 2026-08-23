@@ -105,6 +105,12 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async ensureAnkiRunning() {
     const source = Object.values(this.state.sources)
       .find((item) => item.type === 'anki' && !item.deletedAt) || {};
+    const endpoint = normalizeAnkiEndpoint(source.endpoint || DEFAULT_ANKI_ENDPOINT);
+    if (source.id) {
+      source.endpoint = endpoint;
+      source.identity = endpoint.toLowerCase();
+    }
+
     try {
       await this.invokeAnki('version');
       return;
