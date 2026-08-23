@@ -24,3 +24,6 @@ jobs:
 
       - name: Run release checks
         run: npm run release:check
+
+      - name: Verify committed main.js is current
+        run: git diff --exit-code -- main.js
