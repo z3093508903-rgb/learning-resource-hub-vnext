@@ -1,0 +1,24 @@
+node_modules/
+.obsidian/
+data.json
+*.tmp
+*.bak
+Thumbs.db
+.DS_Store
+
+# 本机构建与部署核验产物
+.deploy.local.json
+deploy-backups/
+release-check-*.log
+
+# 本机环境、覆盖率与密钥材料
+.env
+.env.*
+!.env.example
+coverage/
+.nyc_output/
+*.pem
+*.key
+*.p12
+*.pfx
+*.secret

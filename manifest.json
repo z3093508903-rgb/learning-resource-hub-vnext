@@ -1,0 +1,9 @@
+{
+  "id": "learning-resource-hub-next",
+  "name": "Learning Resource Hub Next",
+  "version": "0.2.0-alpha.12.4",
+  "minAppVersion": "1.7.2",
+  "description": "A clean, component-first learning resource workbench for Obsidian.",
+  "author": "时运Ⅲ",
+  "isDesktopOnly": true
+}

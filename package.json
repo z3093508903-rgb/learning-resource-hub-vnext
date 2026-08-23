@@ -1,0 +1,15 @@
+{
+  "name": "learning-resource-hub-next",
+  "version": "0.2.0-alpha.12.4",
+  "private": true,
+  "description": "Clean component-first rewrite of Learning Resource Hub.",
+  "main": "main.js",
+  "scripts": {
+    "check": "node --check src/entry.cjs && node --check src/anki-launch.cjs && node --check src/usage-polish.cjs && node --check src/main.cjs && node --check src/model.cjs",
+    "build": "node build.mjs",
+    "test": "node --test --test-concurrency=1 tests/*.test.cjs",
+    "release:check": "npm run check && npm run build && npm test",
+    "deploy:local": "npm run build && powershell -NoProfile -ExecutionPolicy Bypass -File scripts/deploy-local.ps1"
+  },
+  "license": "MIT"
+}
