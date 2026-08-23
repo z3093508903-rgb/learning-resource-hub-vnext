@@ -11,7 +11,7 @@ The current public snapshot is a pre-release build. It supports project-based or
 - Release stage: public beta preparation
 - Mobile support: not available
 
-This repository is not yet an Obsidian Community Plugin release. The final public documentation, screenshots, license file, compatibility matrix, and release notes are still being prepared.
+This repository is not yet an Obsidian Community Plugin release. The final public documentation, screenshots, compatibility matrix, and release notes are still being prepared.
 
 ## Main capabilities
 
@@ -31,9 +31,10 @@ This repository is not yet an Obsidian Community Plugin release. The final publi
 - The plugin does not include telemetry or advertising.
 - Bilibili features access public Bilibili endpoints.
 - OpenList features access the service configured by the user. Remote OpenList connections require HTTPS; loopback HTTP remains available for local services.
-- Anki features connect to the user's local AnkiConnect endpoint.
+- AnkiConnect requests are restricted to the local machine (`127.0.0.1`, `localhost`, or `::1`).
 - Local-folder import only scans a folder explicitly selected by the user.
 - Removing an indexed Vault reference does not delete the underlying Vault file.
+- State backups are stored under the plugin's local `backups/` directory; the newest 10 `state-*.json` backups are retained automatically.
 
 Never commit `data.json`, `.deploy.local.json`, credentials, tokens, cookies, local backups, or real user screenshots.
 
@@ -68,6 +69,8 @@ Release check:
 npm run release:check
 ```
 
+`npm run release:check` performs syntax checks, rebuilds `main.js`, runs the test suite, and validates the release workspace. GitHub Actions runs the same check for pull requests. A formal `x.y.z` tag additionally runs the strict release gate and, if it passes, publishes `main.js`, `manifest.json`, and `styles.css` as GitHub Release assets.
+
 The generated plugin files are:
 
 ```text
@@ -86,4 +89,4 @@ Real-environment acceptance is still required for themes, narrow windows, keyboa
 
 ## License
 
-The final `LICENSE` file will be added before the first formal public release. The package metadata currently records the intended license as MIT.
+MIT License. See [LICENSE](LICENSE).
