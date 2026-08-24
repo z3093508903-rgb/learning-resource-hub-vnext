@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - preview/go-study-0.3.0-beta.1
+    paths-ignore:
+      - preview-release-status.json
 
 permissions:
   contents: write
@@ -139,3 +141,22 @@ jobs:
               "dist-preview/go-study-preview/styles.css" \
               "dist-preview/go-study-preview/TESTING.md"
           fi
+
+      - name: Record published prerelease
+        shell: bash
+        run: |
+          cat > preview-release-status.json <<EOF
+          {
+            "status": "published",
+            "version": "${PREVIEW_VERSION}",
+            "pluginId": "${PREVIEW_ID}",
+            "releaseTag": "${RELEASE_TAG}",
+            "releaseUrl": "https://github.com/${GITHUB_REPOSITORY}/releases/tag/${RELEASE_TAG}",
+            "sourceSha": "${GITHUB_SHA}"
+          }
+          EOF
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add preview-release-status.json
+          git commit -m "chore: record Go Study Preview ${PREVIEW_VERSION} release"
+          git push origin HEAD:preview/go-study-0.3.0-beta.1
