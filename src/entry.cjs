@@ -39,6 +39,7 @@ const {
   relinkOpenListResource
 } = require('./resource-relink.cjs');
 const { registerResourceRelinkCommands } = require('./resource-relink-ui.cjs');
+const { registerLearningCaptureCommands } = require('./learning-capture.cjs');
 
 class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async onload() {
@@ -46,6 +47,7 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     this.activeMediaSession = null;
     await super.onload();
     registerResourceRelinkCommands(this);
+    registerLearningCaptureCommands(this);
 
     if (typeof this.registerObsidianProtocolHandler === 'function') {
       this.registerObsidianProtocolHandler(REFERENCE_ACTION, (params) => {
@@ -124,6 +126,19 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
       new Notice(`跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
       return false;
     }
+  }
+
+  async openResourceAction(resource, actionType, target, options = {}) {
+    const opened = await super.openResourceAction(resource, actionType, target, options);
+    if (opened && actionType === 'play' && resource?.id && this.state.resources?.[resource.id]) {
+      const resume = this.state.resources[resource.id].resume?.position;
+      this.activeMediaSession = {
+        resourceId: resource.id,
+        startedAt: new Date().toISOString(),
+        lastKnownPosition: resume ? { ...resume } : null
+      };
+    }
+    return opened;
   }
 
   async relinkOpenListResourceToPath(resourceId, remotePath) {
