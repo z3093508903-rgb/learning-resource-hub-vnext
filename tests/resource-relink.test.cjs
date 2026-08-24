@@ -87,6 +87,30 @@ test('single-resource relink preserves Resource ID and records the previous loca
   });
 });
 
+test('single-resource relink moves stored display roots instead of creating a second virtual folder', () => {
+  const state = stateWithResources(['/旧课程/章节/17.mp4']);
+  state.projects.p1 = { id: 'p1', title: '测试', moduleIds: ['m1'], updatedAt: '' };
+  state.modules.m1 = {
+    id: 'm1',
+    projectId: 'p1',
+    title: '视频',
+    resourceIds: ['resource-1'],
+    resourceRoots: { 'resource-1': '/旧课程' },
+    resourceGroupIds: [],
+    updatedAt: ''
+  };
+  state.resources['resource-1'].metadata.rootPath = '/旧课程';
+
+  relinkOpenListResource(state, 'resource-1', {
+    remotePath: '/新课程/章节/17.mp4'
+  }, { changedAt: '2026-08-24T13:10:00Z' });
+
+  assert.equal(Object.keys(state.resources).length, 1);
+  assert.equal(state.resources['resource-1'].metadata.rootPath, '/新课程');
+  assert.equal(state.modules.m1.resourceRoots['resource-1'], '/新课程');
+  assert.equal(model.resourceFolderPath(state.resources['resource-1'], model.moduleResourceRoot(state, 'm1', 'resource-1')), '章节');
+});
+
 test('single-resource relink refuses cross-source moves and occupied target locators', () => {
   const state = stateWithResources(['/课程/a.mp4', '/课程/b.mp4']);
   state.sources['source-2'] = { id: 'source-2', type: 'openlist', identity: 'http://127.0.0.1:6244', deletedAt: '' };
@@ -130,6 +154,54 @@ test('safe folder remap previews then atomically preserves IDs while moving matc
   assert.equal(state.resources['resource-1'].metadata.rootPath, '/新课程');
   assert.equal(state.resources['resource-2'].metadata.rootPath, '/新课程');
   assert.equal(state.resources['resource-1'].locatorHistory.at(-1).remotePath, '/旧课程/a.mp4');
+});
+
+test('folder remap updates every module display root and path-scoped group without creating duplicate resources', () => {
+  const state = stateWithResources([
+    '/旧课程/a.mp4',
+    '/旧课程/章节/b.mp4',
+    '/其他/c.mp4'
+  ]);
+  state.projects.p1 = { id: 'p1', title: '测试', moduleIds: ['m1'], updatedAt: '' };
+  state.modules.m1 = {
+    id: 'm1',
+    projectId: 'p1',
+    title: '视频',
+    resourceIds: ['resource-1', 'resource-2', 'resource-3'],
+    resourceRoots: {
+      'resource-1': '/旧课程',
+      'resource-2': '/旧课程',
+      'resource-3': '/其他'
+    },
+    resourceGroupIds: ['g1'],
+    updatedAt: ''
+  };
+  state.resourceGroups.g1 = {
+    id: 'g1',
+    moduleId: 'm1',
+    title: '章节',
+    resourceIds: ['resource-2'],
+    scopePath: '/旧课程/章节',
+    updatedAt: ''
+  };
+  state.resources['resource-1'].metadata.rootPath = '/旧课程';
+  state.resources['resource-2'].metadata.rootPath = '/旧课程';
+  const idsBefore = Object.keys(state.resources).sort();
+
+  const preview = previewSafeOpenListPathRemap(state, {
+    sourceId: 'source-1', oldPrefix: '/旧课程', newPrefix: '/新课程'
+  });
+  const result = applySafeOpenListPathRemap(state, preview, { changedAt: '2026-08-24T13:35:00Z' });
+
+  assert.deepEqual(Object.keys(state.resources).sort(), idsBefore);
+  assert.deepEqual(result.updatedResourceIds, ['resource-1', 'resource-2']);
+  assert.equal(result.associationSync.moduleRootCount, 2);
+  assert.equal(result.associationSync.groupScopeCount, 1);
+  assert.equal(state.modules.m1.resourceRoots['resource-1'], '/新课程');
+  assert.equal(state.modules.m1.resourceRoots['resource-2'], '/新课程');
+  assert.equal(state.modules.m1.resourceRoots['resource-3'], '/其他');
+  assert.equal(state.resourceGroups.g1.scopePath, '/新课程/章节');
+  assert.equal(model.resourceFolderPath(state.resources['resource-2'], model.moduleResourceRoot(state, 'm1', 'resource-2')), '章节');
 });
 
 test('folder remap refuses root-directory operations', () => {
