@@ -1,0 +1,138 @@
+name: Preview Release Runner v3
+
+on:
+  pull_request:
+    branches:
+      - preview-release-runner
+
+permissions:
+  contents: read
+
+jobs:
+  publish-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'preview/go-study-0.3.0-beta.1'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.1
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.1
+    steps:
+      - name: Checkout preview head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify source, build and tests
+        run: npm run check && npm run build && npm test
+
+      - name: Package and validate isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Isolated Go Study preview build for Windows acceptance testing.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error(`Expected view type not found: ${oldView}`);
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const previewManifest = JSON.parse(fs.readFileSync(path.join(out, 'manifest.json'), 'utf8'));
+          if (previewManifest.id !== process.env.PREVIEW_ID) throw new Error('Preview plugin ID isolation failed.');
+          if (previewManifest.name !== process.env.PREVIEW_NAME) throw new Error('Preview plugin name mismatch.');
+          if (previewManifest.version !== process.env.PREVIEW_VERSION) throw new Error('Preview version mismatch.');
+          const previewBundle = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          if (!previewBundle.includes(newView) || previewBundle.includes(oldView)) throw new Error('Preview view isolation failed.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.1
+
+          Isolated Windows acceptance build.
+
+          - Plugin ID: `go-study-preview`
+          - Workbench view: `go-study-preview-workbench`
+          - Separate plugin data from `learning-resource-hub-next`
+          - Permanent backlinks intentionally remain `obsidian://go-study?...`
+
+          ## Install
+          Extract the `go-study-preview` folder into `.obsidian/plugins/`, reload Obsidian, and enable **Go Study Preview**.
+
+          ## Acceptance order
+          1. Keep the existing Learning Resource Hub Next enabled and verify both plugins load.
+          2. Use disposable Preview data to test local video, Bilibili, OpenList, Vault files, Anki, restart persistence, and backup restore.
+          3. For position/capture tests, close the old markdown2potplayer helper and run the Go Study Bridge v1 helper from markdown2potplayer PR #2.
+          4. Run **检查 PotPlayer Bridge**.
+          5. Launch a video from Preview, run **插入当前学习位置**, then click the inserted backlink.
+          6. Run **截图并插入当前学习位置** and verify a PNG under `GoStudy/Captures/`.
+          7. Move/rename a test OpenList file, relink it, and verify the old backlink still works.
+
+          Do not use important production data for this beta.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          NOTES='Isolated Windows acceptance build for Go Study Resource ↔ Position ↔ Note backlinks. Plugin ID: go-study-preview. Workbench view: go-study-preview-workbench. Data is separate from learning-resource-hub-next.'
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md" --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "${{ github.event.pull_request.head.sha }}" \
+              --title "Go Study Preview ${PREVIEW_VERSION}" \
+              --notes "$NOTES" --prerelease \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md"
+          fi
+
+      - name: Verify published prerelease and assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,name,isPrerelease,url,assets > release.json
+          cat release.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const release = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+          if (release.tagName !== process.env.RELEASE_TAG) throw new Error('Published release tag mismatch.');
+          if (!release.isPrerelease) throw new Error('Release was not marked as prerelease.');
+          const names = new Set((release.assets || []).map((asset) => asset.name));
+          for (const required of [`go-study-preview-${process.env.PREVIEW_VERSION}.zip`, 'main.js', 'manifest.json', 'styles.css', 'TESTING.md']) {
+            if (!names.has(required)) throw new Error(`Missing release asset: ${required}`);
+          }
+          NODE
