@@ -114,7 +114,10 @@ module.exports = {
 'use strict';
 
 const model = __rhLoad("model.cjs");
-const { installModelResourceLocatorV2 } = __rhLoad("resource-locator.cjs");
+const {
+  installModelResourceLocatorV2,
+  openListLocatorFromResource
+} = __rhLoad("resource-locator.cjs");
 installModelResourceLocatorV2(model);
 
 const BaseResourceHubNextPlugin = __rhLoad("main.cjs");
@@ -142,12 +145,22 @@ const {
   resolveReferencePlayback,
   updateResumePosition
 } = __rhLoad("resource-resolver.cjs");
+const {
+  applySafeOpenListPathRemap,
+  normalizeStrictOpenListPath,
+  previewSafeOpenListPathRemap,
+  relinkOpenListResource
+} = __rhLoad("resource-relink.cjs");
+const { registerResourceRelinkCommands } = __rhLoad("resource-relink-ui.cjs");
+const { registerLearningCaptureCommands } = __rhLoad("learning-capture.cjs");
 
 class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async onload() {
     this._vaultLifecycleReady = false;
     this.activeMediaSession = null;
     await super.onload();
+    registerResourceRelinkCommands(this);
+    registerLearningCaptureCommands(this);
 
     if (typeof this.registerObsidianProtocolHandler === 'function') {
       this.registerObsidianProtocolHandler(REFERENCE_ACTION, (params) => {
@@ -226,6 +239,73 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
       new Notice(`跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
       return false;
     }
+  }
+
+  async openResourceAction(resource, actionType, target, options = {}) {
+    const opened = await super.openResourceAction(resource, actionType, target, options);
+    if (opened && actionType === 'play' && resource?.id && this.state.resources?.[resource.id]) {
+      const resume = this.state.resources[resource.id].resume?.position;
+      this.activeMediaSession = {
+        resourceId: resource.id,
+        startedAt: new Date().toISOString(),
+        lastKnownPosition: resume ? { ...resume } : null
+      };
+    }
+    return opened;
+  }
+
+  async relinkOpenListResourceToPath(resourceId, remotePath) {
+    const resource = this.state.resources?.[String(resourceId || '')];
+    if (!resource || resource.deletedAt) throw new Error('找不到需要重新关联的学习资源。');
+    const current = openListLocatorFromResource(resource);
+    if (!current) throw new Error('当前资源不是 OpenList 资源。');
+    const normalizedPath = normalizeStrictOpenListPath(remotePath);
+    const source = this.state.sources?.[current.sourceId];
+    if (!source || source.deletedAt || source.type !== 'openlist') throw new Error('找不到这条资源对应的 OpenList 来源。');
+
+    const token = await this.loginOpenList(source);
+    const entry = await this.getOpenList(source, normalizedPath, token);
+    if (!entry || entry.is_dir) throw new Error('目标路径不存在，或目标不是文件。');
+
+    const result = relinkOpenListResource(this.state, resource.id, {
+      sourceId: current.sourceId,
+      remotePath: normalizedPath
+    }, { changedAt: new Date() });
+
+    const size = Number(entry.size);
+    const modified = String(entry.modified || entry.updated_at || result.resource.metadata?.modified || '');
+    result.resource.metadata = {
+      ...(result.resource.metadata || {}),
+      ...(Number.isFinite(size) && size >= 0 ? { size } : {}),
+      ...(modified ? { modified } : {})
+    };
+    result.resource.identityHints = {
+      ...(result.resource.identityHints || {}),
+      fileName: normalizedPath.split('/').filter(Boolean).pop() || result.resource.identityHints?.fileName || '',
+      ...(Number.isFinite(size) && size >= 0 ? { size } : {}),
+      ...(modified ? { modified } : {})
+    };
+
+    await this.persist();
+    await this.workbenchLeaf?.view?.render?.();
+    return result;
+  }
+
+  async previewOpenListFolderRemap(input = {}) {
+    const preview = previewSafeOpenListPathRemap(this.state, input);
+    const source = this.state.sources?.[preview.sourceId];
+    if (!source || source.deletedAt || source.type !== 'openlist') throw new Error('找不到可用的 OpenList 来源。');
+    const token = await this.loginOpenList(source);
+    const target = await this.getOpenList(source, preview.newPrefix, token);
+    if (!target?.is_dir) throw new Error('新目录不存在，或目标不是文件夹。');
+    return preview;
+  }
+
+  async applyOpenListFolderRemap(preview) {
+    const result = applySafeOpenListPathRemap(this.state, preview, { changedAt: new Date() });
+    await this.persist();
+    await this.workbenchLeaf?.view?.render?.();
+    return result;
   }
 
   async validateVaultRefs() {
@@ -355,6 +435,161 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
 }
 
 module.exports = ResourceHubNextPlugin;
+
+},
+"learning-capture.cjs": (module, exports, require) => {
+'use strict';
+
+const { Notice, requestUrl } = require('obsidian');
+const { clipboard } = require('electron');
+const { resolveActiveMediaSession } = __rhLoad("media-session.cjs");
+const { requestPotPlayerBridge } = __rhLoad("potplayer-bridge.cjs");
+const { updateResumePosition } = __rhLoad("resource-resolver.cjs");
+const {
+  buildCaptureMarkdown,
+  buildPositionMarkdown,
+  captureFileName
+} = __rhLoad("resource-note.cjs");
+
+const CAPTURE_FOLDER = 'GoStudy/Captures';
+
+function activeEditor(plugin) {
+  const editor = plugin?.app?.workspace?.activeEditor?.editor;
+  if (!editor || typeof editor.replaceSelection !== 'function') {
+    throw new Error('请先把光标放到一个可编辑的 Markdown 笔记中。');
+  }
+  return editor;
+}
+
+function resolveLearningContext(plugin, bridgeMedia) {
+  return resolveActiveMediaSession(
+    plugin.state,
+    plugin.activeMediaSession,
+    bridgeMedia,
+    (resource) => plugin.resourceActions(resource)
+  );
+}
+
+async function persistRecordedPosition(plugin, resource, position) {
+  updateResumePosition(plugin.state.resources[resource.id], position);
+  plugin.activeMediaSession = {
+    ...(plugin.activeMediaSession || {}),
+    resourceId: resource.id,
+    lastKnownPosition: { ...position },
+    updatedAt: new Date().toISOString()
+  };
+  await plugin.persist();
+  await plugin.workbenchLeaf?.view?.render?.();
+}
+
+async function insertCurrentLearningPosition(plugin, options = {}) {
+  const bridgeRequest = options.bridgeRequest || requestPotPlayerBridge;
+  const response = await bridgeRequest(options.requestUrl || requestUrl, 'current', options.bridgeOptions || {});
+  const context = resolveLearningContext(plugin, response.media);
+  const markdown = buildPositionMarkdown(context.resource, context.position);
+  activeEditor(plugin).replaceSelection(markdown);
+  await persistRecordedPosition(plugin, context.resource, context.position);
+  return { ...context, markdown };
+}
+
+async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
+  if (!vault || typeof vault.getAbstractFileByPath !== 'function' || typeof vault.createFolder !== 'function') {
+    throw new Error('当前 Vault 不支持创建截图目录。');
+  }
+  const parts = String(folderPath || '').split('/').filter(Boolean);
+  let current = '';
+  for (const part of parts) {
+    current = current ? `${current}/${part}` : part;
+    if (!vault.getAbstractFileByPath(current)) await vault.createFolder(current);
+  }
+  return folderPath;
+}
+
+function capturePathCandidate(resource, position, index = 1) {
+  const base = captureFileName(resource, position, 'png');
+  if (index <= 1) return `${CAPTURE_FOLDER}/${base}`;
+  const dot = base.lastIndexOf('.');
+  const stem = dot >= 0 ? base.slice(0, dot) : base;
+  const ext = dot >= 0 ? base.slice(dot) : '';
+  return `${CAPTURE_FOLDER}/${stem}-${index}${ext}`;
+}
+
+function uniqueCapturePath(vault, resource, position) {
+  for (let index = 1; index <= 999; index += 1) {
+    const candidate = capturePathCandidate(resource, position, index);
+    if (!vault.getAbstractFileByPath(candidate)) return candidate;
+  }
+  throw new Error('同一位置的截图文件过多，无法生成唯一文件名。');
+}
+
+function clipboardPngBuffer() {
+  if (!clipboard?.readImage) throw new Error('Electron 剪贴板图片接口不可用。');
+  const image = clipboard.readImage();
+  if (!image || image.isEmpty?.()) throw new Error('Bridge 没有把有效截图写入剪贴板。');
+  const png = image.toPNG?.();
+  if (!png || !png.length) throw new Error('无法把 Bridge 截图转换为 PNG。');
+  return Buffer.from(png);
+}
+
+async function saveCaptureToVault(plugin, resource, position, pngBuffer) {
+  const vault = plugin?.app?.vault;
+  await ensureVaultFolder(vault);
+  const vaultPath = uniqueCapturePath(vault, resource, position);
+  if (typeof vault.createBinary !== 'function') throw new Error('当前 Vault 不支持写入二进制截图。');
+  const bytes = Buffer.from(pngBuffer || []);
+  if (!bytes.length) throw new Error('截图数据为空。');
+  const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  await vault.createBinary(vaultPath, arrayBuffer);
+  return vaultPath;
+}
+
+async function captureFrameAndInsertLearningPosition(plugin, options = {}) {
+  const bridgeRequest = options.bridgeRequest || requestPotPlayerBridge;
+  const response = await bridgeRequest(options.requestUrl || requestUrl, 'capture', options.bridgeOptions || {});
+  const context = resolveLearningContext(plugin, response.media);
+  const png = options.readClipboardPng ? options.readClipboardPng() : clipboardPngBuffer();
+  const vaultPath = await saveCaptureToVault(plugin, context.resource, context.position, png);
+  const markdown = buildCaptureMarkdown(context.resource, context.position, vaultPath);
+  activeEditor(plugin).replaceSelection(markdown);
+  await persistRecordedPosition(plugin, context.resource, context.position);
+  return { ...context, markdown, vaultPath };
+}
+
+function registerLearningCaptureCommands(plugin) {
+  plugin.addCommand({
+    id: 'insert-current-learning-position',
+    name: '插入当前学习位置',
+    callback: () => {
+      void insertCurrentLearningPosition(plugin)
+        .then((result) => new Notice(`已记录：${result.resource.title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`))
+        .catch((error) => new Notice(`记录学习位置失败：${error instanceof Error ? error.message : String(error)}`, 6000));
+    }
+  });
+  plugin.addCommand({
+    id: 'capture-frame-and-insert-learning-position',
+    name: '截图并插入当前学习位置',
+    callback: () => {
+      void captureFrameAndInsertLearningPosition(plugin)
+        .then((result) => new Notice(`截图已保存：${result.vaultPath}`))
+        .catch((error) => new Notice(`截图记录失败：${error instanceof Error ? error.message : String(error)}`, 6000));
+    }
+  });
+}
+
+module.exports = {
+  CAPTURE_FOLDER,
+  activeEditor,
+  captureFrameAndInsertLearningPosition,
+  capturePathCandidate,
+  clipboardPngBuffer,
+  ensureVaultFolder,
+  insertCurrentLearningPosition,
+  persistRecordedPosition,
+  registerLearningCaptureCommands,
+  resolveLearningContext,
+  saveCaptureToVault,
+  uniqueCapturePath
+};
 
 },
 "main.cjs": (module, exports, require) => {
@@ -4211,6 +4446,93 @@ class LegacyImportModal extends Modal {
 module.exports = ResourceHubNextPlugin;
 
 },
+"media-session.cjs": (module, exports, require) => {
+'use strict';
+
+const { openListLocatorFromResource } = __rhLoad("resource-locator.cjs");
+
+function normalizeLocalMediaPath(value) {
+  return String(value || '')
+    .trim()
+    .replace(/^"([\s\S]*)"$/, '$1')
+    .replace(/\\/g, '/')
+    .replace(/\/+$/, '')
+    .toLocaleLowerCase();
+}
+
+function tryUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return ['http:', 'https:', 'file:'].includes(url.protocol) ? url : null;
+  } catch { return null; }
+}
+
+function comparableWebUrl(value) {
+  const url = tryUrl(value);
+  if (!url) return null;
+  const host = url.hostname.toLocaleLowerCase();
+  const pathname = decodeURIComponent(url.pathname || '/').replace(/\/+$/, '') || '/';
+  if (host === 'bilibili.com' || host.endsWith('.bilibili.com')) {
+    return `bili:${host}:${pathname.toLocaleLowerCase()}:p${url.searchParams.get('p') || '1'}`;
+  }
+  return `${url.protocol}//${url.host.toLocaleLowerCase()}${pathname}`;
+}
+
+function openListMediaMatches(state, resource, mediaPath) {
+  const locator = openListLocatorFromResource(resource);
+  if (!locator) return false;
+  const source = state?.sources?.[locator.sourceId];
+  if (!source || source.deletedAt || source.type !== 'openlist' || !source.baseUrl) return false;
+  const base = String(source.baseUrl).replace(/\/+$/, '');
+  const encoded = locator.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
+  const expected = tryUrl(`${base}/d${encoded}`);
+  const current = tryUrl(mediaPath);
+  if (!expected || !current) return false;
+  return expected.origin.toLocaleLowerCase() === current.origin.toLocaleLowerCase()
+    && decodeURIComponent(expected.pathname).toLocaleLowerCase() === decodeURIComponent(current.pathname).toLocaleLowerCase();
+}
+
+function targetMatchesBridgeMedia(state, resource, target, mediaPath) {
+  if (!target || !mediaPath) return false;
+  if (target.type === 'openlist') return openListMediaMatches(state, resource, mediaPath);
+  const expected = target.type === 'potplayer' ? target.target : target.type === 'uri' ? target.uri : '';
+  if (!expected) return false;
+  const expectedUrl = comparableWebUrl(expected);
+  const currentUrl = comparableWebUrl(mediaPath);
+  if (expectedUrl || currentUrl) return Boolean(expectedUrl && currentUrl && expectedUrl === currentUrl);
+  return normalizeLocalMediaPath(expected) === normalizeLocalMediaPath(mediaPath);
+}
+
+function resolveActiveMediaSession(state, activeSession, bridgeMedia, resolveActions) {
+  const resourceId = String(activeSession?.resourceId || '');
+  const resource = state?.resources?.[resourceId];
+  if (!resource || resource.deletedAt) throw new Error('当前没有有效的 Go Study 学习会话，请先从 Go Study 启动资源。');
+  if (!bridgeMedia?.path) throw new Error('PotPlayer 当前媒体无法识别。');
+  if (typeof resolveActions !== 'function') throw new Error('资源启动解析器不可用。');
+  const actions = resolveActions(resource) || {};
+  if (!actions.playTarget) throw new Error('当前学习资源没有可验证的视频播放目标。');
+  if (!targetMatchesBridgeMedia(state, resource, actions.playTarget, bridgeMedia.path)) {
+    throw new Error('PotPlayer 当前媒体与 Go Study 最近启动的资源不一致；为避免把笔记记到错误课程，已停止插入。');
+  }
+  const seconds = Number(bridgeMedia.positionSeconds);
+  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('PotPlayer 当前播放位置无效。');
+  return {
+    resource,
+    position: { type: 'time', seconds },
+    bridgeMedia
+  };
+}
+
+module.exports = {
+  comparableWebUrl,
+  normalizeLocalMediaPath,
+  openListMediaMatches,
+  resolveActiveMediaSession,
+  targetMatchesBridgeMedia,
+  tryUrl
+};
+
+},
 "model.cjs": (module, exports, require) => {
 'use strict';
 
@@ -6503,6 +6825,104 @@ module.exports = {
 };
 
 },
+"potplayer-bridge.cjs": (module, exports, require) => {
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+const BRIDGE_BASE_URL = 'http://127.0.0.1:33661';
+const BRIDGE_VERSION = 1;
+const BRIDGE_TOKEN_PATTERN = /^[0-9a-f]{64}$/i;
+const ROUTES = new Map([
+  ['ping', { method: 'GET', path: '/v1/ping' }],
+  ['current', { method: 'POST', path: '/v1/current' }],
+  ['capture', { method: 'POST', path: '/v1/capture' }]
+]);
+
+function bridgeTokenPath(env = process.env) {
+  const localAppData = String(env?.LOCALAPPDATA || '').trim();
+  if (!localAppData) throw new Error('找不到 Windows LOCALAPPDATA，无法读取 Go Study Bridge 配对令牌。');
+  return path.join(localAppData, 'GoStudy', 'bridge-token.txt');
+}
+
+function normalizeBridgeToken(value) {
+  const token = String(value || '').trim().toLowerCase();
+  if (!BRIDGE_TOKEN_PATTERN.test(token)) throw new Error('Go Study Bridge 配对令牌无效，请重启 Bridge 重新生成。');
+  return token;
+}
+
+function readBridgeToken(options = {}) {
+  const readFileSync = options.readFileSync || fs.readFileSync;
+  const tokenPath = options.tokenPath || bridgeTokenPath(options.env || process.env);
+  let raw;
+  try { raw = readFileSync(tokenPath, 'utf8'); }
+  catch { throw new Error('没有找到 Go Study Bridge 配对令牌，请先启动新版 markdown2potplayer Bridge。'); }
+  return normalizeBridgeToken(raw);
+}
+
+function normalizeBridgeMedia(value) {
+  const media = value && typeof value === 'object' ? value : {};
+  const mediaPath = String(media.path || '').trim();
+  if (!mediaPath) throw new Error('Go Study Bridge 没有返回当前媒体地址。');
+  const positionSeconds = Number(media.positionSeconds);
+  if (!Number.isFinite(positionSeconds) || positionSeconds < 0) throw new Error('Go Study Bridge 返回了无效播放位置。');
+  const positionMs = Number(media.positionMs);
+  return {
+    path: mediaPath,
+    title: String(media.title || ''),
+    positionSeconds,
+    positionMs: Number.isFinite(positionMs) && positionMs >= 0 ? positionMs : positionSeconds * 1000
+  };
+}
+
+async function requestPotPlayerBridge(requestUrl, route, options = {}) {
+  if (typeof requestUrl !== 'function') throw new Error('Obsidian requestUrl 不可用。');
+  const spec = ROUTES.get(String(route || ''));
+  if (!spec) throw new Error('不允许的 Go Study Bridge 操作。');
+  const token = normalizeBridgeToken(options.token || readBridgeToken(options));
+  const response = await requestUrl({
+    url: `${BRIDGE_BASE_URL}${spec.path}`,
+    method: spec.method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: 'application/json'
+    },
+    throw: false
+  });
+  const status = Number(response?.status || 0);
+  const payload = response?.json && typeof response.json === 'object' ? response.json : {};
+  if (status === 401) throw new Error('Go Study Bridge 配对失败：本机令牌不匹配，请重启 Bridge 后重试。');
+  if (status < 200 || status >= 300 || payload.ok !== true) {
+    throw new Error(`Go Study Bridge 请求失败：${String(payload.error || `HTTP ${status || '未知'}`)}`);
+  }
+
+  if (route === 'ping') {
+    if (Number(payload.version) !== BRIDGE_VERSION) throw new Error(`Go Study Bridge 版本不兼容：${String(payload.version || '未知')}。`);
+    return { ok: true, version: BRIDGE_VERSION, bridge: String(payload.bridge || ''), player: String(payload.player || '') };
+  }
+
+  const media = normalizeBridgeMedia(payload.media);
+  if (route === 'capture') {
+    if (payload.capture?.transport !== 'clipboard') throw new Error('Go Study Bridge 截图传输方式不受支持。');
+    return { ok: true, media, capture: { transport: 'clipboard', cropped: payload.capture?.cropped !== false } };
+  }
+  return { ok: true, media };
+}
+
+module.exports = {
+  BRIDGE_BASE_URL,
+  BRIDGE_TOKEN_PATTERN,
+  BRIDGE_VERSION,
+  ROUTES,
+  bridgeTokenPath,
+  normalizeBridgeMedia,
+  normalizeBridgeToken,
+  readBridgeToken,
+  requestPotPlayerBridge
+};
+
+},
 "release-hardening.cjs": (module, exports, require) => {
 'use strict';
 
@@ -6613,6 +7033,15 @@ function normalizeTimePosition(value) {
   return { type: 'time', seconds };
 }
 
+function normalizeOpenListLocator(value) {
+  const locator = objectOr(value);
+  const remotePath = normalizeOpenListPathCompat(locator.remotePath || '');
+  if (!remotePath) throw new Error('OpenList 资源路径无效。');
+  const sourceId = String(locator.sourceId || '').trim();
+  if (!sourceId) throw new Error('OpenList 资源缺少来源 ID。');
+  return { type: 'openlist', sourceId, remotePath };
+}
+
 function openListLocatorFromResource(resource) {
   const source = objectOr(resource);
   const launcher = objectOr(source.launcher);
@@ -6639,6 +7068,16 @@ function openListLocatorFromResource(resource) {
     sourceId: String(launcher.sourceId || source.sourceId || ''),
     remotePath
   };
+}
+
+function locatorKey(locator) {
+  const normalized = normalizeOpenListLocator(locator);
+  return `${normalized.sourceId}\n${normalized.remotePath.toLocaleLowerCase()}`;
+}
+
+function sameOpenListLocator(left, right) {
+  if (!left || !right) return false;
+  try { return locatorKey(left) === locatorKey(right); } catch { return false; }
 }
 
 function normalizeLocatorHistory(value) {
@@ -6753,6 +7192,157 @@ function normalizeFactoryResult(state, result) {
   return result;
 }
 
+function openListCanonicalKey(state, locator) {
+  const normalized = normalizeOpenListLocator(locator);
+  const source = objectOr(state?.sources)[normalized.sourceId];
+  const identity = String(source?.identity || source?.id || normalized.sourceId);
+  return `openlist:${identity}:${normalized.remotePath.toLocaleLowerCase()}`;
+}
+
+function findOpenListLocatorConflict(state, locator, excludedResourceIds = []) {
+  const excluded = new Set(Array.isArray(excludedResourceIds) ? excludedResourceIds : [excludedResourceIds]);
+  for (const resource of Object.values(objectOr(state?.resources))) {
+    if (!resource?.id || resource.deletedAt || excluded.has(resource.id)) continue;
+    const existing = openListLocatorFromResource(resource);
+    if (existing && sameOpenListLocator(existing, locator)) return resource;
+  }
+  return null;
+}
+
+function appendLocatorHistory(resource, locator, changedAt) {
+  if (!locator) return [];
+  const history = normalizeLocatorHistory([
+    ...(Array.isArray(resource.locatorHistory) ? resource.locatorHistory : []),
+    { ...normalizeOpenListLocator(locator), changedAt: String(changedAt || new Date().toISOString()) }
+  ]);
+  resource.locatorHistory = history;
+  return history;
+}
+
+function updateResourceLocator(state, resourceId, nextLocator, options = {}) {
+  const resources = objectOr(state?.resources);
+  const resource = resources[String(resourceId || '')];
+  if (!resource || resource.deletedAt) throw new Error('找不到需要重新关联的学习资源。');
+  const normalized = normalizeOpenListLocator(nextLocator);
+  const current = openListLocatorFromResource(resource);
+  if (current && sameOpenListLocator(current, normalized)) return { resource, changed: false, previousLocator: current };
+
+  const conflict = findOpenListLocatorConflict(state, normalized, [resource.id]);
+  if (conflict) throw new Error(`目标位置已关联到另一条资源：${conflict.title || conflict.id}`);
+
+  const changedAt = options.changedAt instanceof Date
+    ? options.changedAt.toISOString()
+    : String(options.changedAt || new Date().toISOString());
+  if (current) appendLocatorHistory(resource, current, changedAt);
+  resource.locator = normalized;
+  resource.identityHints = identityHintsForResource(resource, normalized);
+  mirrorOpenListLocator(resource, normalized);
+  resource.canonicalKey = openListCanonicalKey(state, normalized);
+  resource.updatedAt = changedAt;
+  if (options.rootPath) resource.metadata.rootPath = normalizeOpenListPathCompat(options.rootPath);
+  state.schemaVersion = RESOURCE_SCHEMA_VERSION;
+  return { resource, changed: true, previousLocator: current, locator: normalized };
+}
+
+function pathWithinPrefix(remotePath, prefix) {
+  return remotePath === prefix || remotePath.startsWith(`${prefix}/`);
+}
+
+function remapPathPrefix(remotePath, oldPrefix, newPrefix) {
+  const pathValue = normalizeOpenListPathCompat(remotePath);
+  const oldValue = normalizeOpenListPathCompat(oldPrefix);
+  const newValue = normalizeOpenListPathCompat(newPrefix);
+  if (!pathValue || !oldValue || !newValue || !pathWithinPrefix(pathValue, oldValue)) return '';
+  const suffix = pathValue.slice(oldValue.length);
+  return normalizeOpenListPathCompat(`${newValue}${suffix}`);
+}
+
+function previewOpenListPathRemap(state, input = {}) {
+  const sourceId = String(input.sourceId || '').trim();
+  if (!sourceId) throw new Error('批量迁移缺少 OpenList 来源。');
+  const oldPrefix = normalizeOpenListPathCompat(input.oldPrefix || '');
+  const newPrefix = normalizeOpenListPathCompat(input.newPrefix || '');
+  if (!oldPrefix || !newPrefix) throw new Error('批量迁移目录无效。');
+  if (oldPrefix === newPrefix) throw new Error('新旧目录不能相同。');
+
+  const resources = Object.values(objectOr(state?.resources)).filter((resource) => {
+    if (!resource?.id || resource.deletedAt) return false;
+    const locator = openListLocatorFromResource(resource);
+    return locator?.sourceId === sourceId && pathWithinPrefix(locator.remotePath, oldPrefix);
+  });
+  const candidateIds = new Set(resources.map((resource) => resource.id));
+  const targetOwners = new Map();
+  for (const resource of Object.values(objectOr(state?.resources))) {
+    if (!resource?.id || resource.deletedAt || candidateIds.has(resource.id)) continue;
+    const locator = openListLocatorFromResource(resource);
+    if (locator?.sourceId === sourceId) targetOwners.set(locatorKey(locator), resource);
+  }
+
+  const seenTargets = new Map();
+  const entries = resources.map((resource) => {
+    const from = openListLocatorFromResource(resource);
+    const remotePath = remapPathPrefix(from.remotePath, oldPrefix, newPrefix);
+    const to = { type: 'openlist', sourceId, remotePath };
+    const key = locatorKey(to);
+    const externalConflict = targetOwners.get(key);
+    const duplicateCandidate = seenTargets.get(key);
+    const conflict = externalConflict || duplicateCandidate || null;
+    if (!duplicateCandidate) seenTargets.set(key, resource);
+    return {
+      resourceId: resource.id,
+      title: String(resource.title || ''),
+      from,
+      to,
+      status: conflict ? 'conflict' : 'ready',
+      conflictResourceId: conflict?.id || '',
+      conflictTitle: String(conflict?.title || '')
+    };
+  });
+
+  return {
+    sourceId,
+    oldPrefix,
+    newPrefix,
+    entries,
+    readyCount: entries.filter((entry) => entry.status === 'ready').length,
+    conflictCount: entries.filter((entry) => entry.status === 'conflict').length
+  };
+}
+
+function applyOpenListPathRemap(state, preview, options = {}) {
+  const changedAt = options.changedAt instanceof Date
+    ? options.changedAt.toISOString()
+    : String(options.changedAt || new Date().toISOString());
+  const updated = [];
+  const skipped = [];
+  for (const entry of Array.isArray(preview?.entries) ? preview.entries : []) {
+    if (entry.status !== 'ready') {
+      skipped.push(entry);
+      continue;
+    }
+    const resource = objectOr(state?.resources)[entry.resourceId];
+    if (!resource || resource.deletedAt) {
+      skipped.push({ ...entry, status: 'missing-resource' });
+      continue;
+    }
+    const current = openListLocatorFromResource(resource);
+    if (!sameOpenListLocator(current, entry.from)) {
+      skipped.push({ ...entry, status: 'changed-since-preview' });
+      continue;
+    }
+    const oldRoot = normalizeOpenListPathCompat(resource.metadata?.rootPath || '');
+    const nextRoot = oldRoot && pathWithinPrefix(oldRoot, preview.oldPrefix)
+      ? remapPathPrefix(oldRoot, preview.oldPrefix, preview.newPrefix)
+      : '';
+    const result = updateResourceLocator(state, resource.id, entry.to, {
+      changedAt,
+      ...(nextRoot ? { rootPath: nextRoot } : {})
+    });
+    if (result.changed) updated.push(resource.id);
+  }
+  return { updatedResourceIds: updated, skipped };
+}
+
 function installModelResourceLocatorV2(model) {
   if (!model || typeof model !== 'object') throw new Error('Resource locator migration requires the model module.');
   if (installedModels.has(model)) return model;
@@ -6789,16 +7379,94 @@ function installModelResourceLocatorV2(model) {
 module.exports = {
   LOCATOR_HISTORY_LIMIT,
   RESOURCE_SCHEMA_VERSION,
+  appendLocatorHistory,
+  applyOpenListPathRemap,
+  findOpenListLocatorConflict,
   identityHintsForResource,
   installModelResourceLocatorV2,
+  locatorKey,
   mirrorOpenListLocator,
   normalizeLocatorHistory,
+  normalizeOpenListLocator,
   normalizeOpenListPathCompat,
   normalizeResourceLocatorState,
   normalizeResourceRecord,
   normalizeTimePosition,
+  openListCanonicalKey,
   openListLocatorFromResource,
-  resumeForResource
+  pathWithinPrefix,
+  previewOpenListPathRemap,
+  remapPathPrefix,
+  resumeForResource,
+  sameOpenListLocator,
+  updateResourceLocator
+};
+
+},
+"resource-note.cjs": (module, exports, require) => {
+'use strict';
+
+const { buildReferenceUri, normalizeReferencePosition } = __rhLoad("resource-reference.cjs");
+
+function formatPositionClock(position) {
+  const normalized = normalizeReferencePosition(position);
+  const total = Math.floor(normalized.seconds);
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return hours > 0
+    ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function escapeMarkdownLabel(value) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\]/g, '\\]')
+    .replace(/\[/g, '\\[')
+    .replace(/[\r\n]+/g, ' ')
+    .trim();
+}
+
+function buildPositionMarkdown(resource, position, options = {}) {
+  if (!resource?.id) throw new Error('无法为缺少 Resource ID 的资源生成回链。');
+  const normalized = normalizeReferencePosition(position);
+  const uri = buildReferenceUri({ resourceId: resource.id, position: normalized, version: 1 });
+  const time = formatPositionClock(normalized);
+  const title = escapeMarkdownLabel(options.title || resource.title || '学习资源');
+  return `[↗ ${title} · ${time}](${uri})`;
+}
+
+function buildCaptureMarkdown(resource, position, vaultImagePath) {
+  const imagePath = String(vaultImagePath || '').trim().replace(/\\/g, '/');
+  if (!imagePath || imagePath.includes('..')) throw new Error('截图 Vault 路径无效。');
+  const backlink = buildPositionMarkdown(resource, position, { title: '回到课程' });
+  return `![[${imagePath}]]\n\n${backlink}`;
+}
+
+function sanitizeCaptureBaseName(value) {
+  const cleaned = String(value || '学习资源')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim();
+  return (cleaned || '学习资源').slice(0, 80);
+}
+
+function captureFileName(resource, position, extension = 'png') {
+  const safeExtension = String(extension || 'png').toLowerCase();
+  if (!/^[a-z0-9]{2,5}$/.test(safeExtension)) throw new Error('截图扩展名无效。');
+  const clock = formatPositionClock(position).replace(/:/g, '-');
+  return `${sanitizeCaptureBaseName(resource?.title)}-${clock}.${safeExtension}`;
+}
+
+module.exports = {
+  buildCaptureMarkdown,
+  buildPositionMarkdown,
+  captureFileName,
+  escapeMarkdownLabel,
+  formatPositionClock,
+  sanitizeCaptureBaseName
 };
 
 },
@@ -6910,6 +7578,353 @@ module.exports = {
   parseReferenceUri,
   serializeReferencePosition,
   validateReferenceData
+};
+
+},
+"resource-relink-ui.cjs": (module, exports, require) => {
+'use strict';
+
+const { Modal, Notice } = require('obsidian');
+const { openListLocatorFromResource } = __rhLoad("resource-locator.cjs");
+
+function activeOpenListResources(plugin) {
+  return Object.values(plugin?.state?.resources || {})
+    .filter((resource) => !resource?.deletedAt && openListLocatorFromResource(resource))
+    .sort((left, right) => String(left.title || '').localeCompare(String(right.title || ''), 'zh-CN', { numeric: true }));
+}
+
+function activeOpenListSources(plugin) {
+  return Object.values(plugin?.state?.sources || {})
+    .filter((source) => source?.type === 'openlist' && !source.deletedAt)
+    .sort((left, right) => String(left.alias || left.baseUrl || left.id).localeCompare(String(right.alias || right.baseUrl || right.id), 'zh-CN'));
+}
+
+function createField(parent, label, value, options = {}) {
+  const wrap = parent.createDiv({ cls: 'rh-next-field' });
+  wrap.createEl('label', { text: label });
+  const input = wrap.createEl(options.select ? 'select' : 'input', { cls: 'rh-next-input' });
+  if (!options.select) {
+    input.type = 'text';
+    input.value = value || '';
+    input.placeholder = options.placeholder || '';
+  }
+  return input;
+}
+
+function createActions(parent) {
+  return parent.createDiv({ cls: 'rh-next-modal-actions' });
+}
+
+function createButton(parent, label, handler, primary = false) {
+  const button = parent.createEl('button', { cls: `rh-next-button${primary ? ' is-primary' : ''}`, text: label });
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    void handler();
+  });
+  return button;
+}
+
+class OpenListResourceRelinkModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.resourceId = '';
+    this.remotePath = '';
+  }
+
+  onOpen() { this.render(); }
+  onClose() { this.contentEl.empty(); }
+
+  render() {
+    const resources = activeOpenListResources(this.plugin);
+    if (!this.resourceId || !resources.some((resource) => resource.id === this.resourceId)) {
+      this.resourceId = resources[0]?.id || '';
+      this.remotePath = this.resourceId ? openListLocatorFromResource(this.plugin.state.resources[this.resourceId])?.remotePath || '' : '';
+    }
+
+    this.contentEl.empty();
+    this.contentEl.createEl('h2', { text: '重新关联 OpenList 资源' });
+    this.contentEl.createEl('p', {
+      cls: 'rh-next-interface-tip',
+      text: 'Resource ID 和已有笔记回链保持不变；仅更新这条资源当前指向的 OpenList 文件。'
+    });
+
+    if (!resources.length) {
+      this.contentEl.createEl('p', { text: '当前没有可重新关联的 OpenList 资源。' });
+      const actions = createActions(this.contentEl);
+      createButton(actions, '关闭', () => this.close());
+      return;
+    }
+
+    const resourceSelect = createField(this.contentEl, '资源', '', { select: true });
+    for (const resource of resources) {
+      const locator = openListLocatorFromResource(resource);
+      const option = resourceSelect.createEl('option', { text: `${resource.title || resource.id} · ${locator.remotePath}` });
+      option.value = resource.id;
+    }
+    resourceSelect.value = this.resourceId;
+    resourceSelect.addEventListener('change', () => {
+      this.resourceId = resourceSelect.value;
+      this.remotePath = openListLocatorFromResource(this.plugin.state.resources[this.resourceId])?.remotePath || '';
+      this.render();
+    });
+
+    const current = openListLocatorFromResource(this.plugin.state.resources[this.resourceId]);
+    this.contentEl.createEl('small', { text: `当前路径：${current?.remotePath || '未知'}` });
+    const pathInput = createField(this.contentEl, '新的文件路径', this.remotePath, {
+      placeholder: '/课程/新目录/17.mp4'
+    });
+    pathInput.addEventListener('input', () => { this.remotePath = pathInput.value; });
+
+    const actions = createActions(this.contentEl);
+    createButton(actions, '取消', () => this.close());
+    createButton(actions, '验证并重新关联', async () => {
+      try {
+        await this.plugin.relinkOpenListResourceToPath(this.resourceId, this.remotePath);
+        new Notice('OpenList 资源已重新关联；Resource ID 与旧笔记回链保持不变。', 5000);
+        this.close();
+      } catch (error) {
+        new Notice(`重新关联失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      }
+    }, true);
+  }
+}
+
+class OpenListFolderRemapModal extends Modal {
+  constructor(app, plugin) {
+    super(app);
+    this.plugin = plugin;
+    this.sourceId = '';
+    this.oldPrefix = '';
+    this.newPrefix = '';
+    this.preview = null;
+  }
+
+  onOpen() { this.render(); }
+  onClose() { this.contentEl.empty(); }
+
+  render() {
+    const sources = activeOpenListSources(this.plugin);
+    if (!this.sourceId || !sources.some((source) => source.id === this.sourceId)) this.sourceId = sources[0]?.id || '';
+
+    this.contentEl.empty();
+    this.contentEl.createEl('h2', { text: '迁移 OpenList 文件夹路径' });
+    this.contentEl.createEl('p', {
+      cls: 'rh-next-interface-tip',
+      text: '适用于网盘中整个课程目录被移动/改名。必须先预览；根目录、冲突和过期预览都会被拒绝。'
+    });
+
+    if (!sources.length) {
+      this.contentEl.createEl('p', { text: '当前没有可用的 OpenList 来源。' });
+      const actions = createActions(this.contentEl);
+      createButton(actions, '关闭', () => this.close());
+      return;
+    }
+
+    const sourceSelect = createField(this.contentEl, 'OpenList 来源', '', { select: true });
+    for (const source of sources) {
+      const option = sourceSelect.createEl('option', { text: source.alias || source.baseUrl || source.id });
+      option.value = source.id;
+    }
+    sourceSelect.value = this.sourceId;
+    sourceSelect.addEventListener('change', () => {
+      this.sourceId = sourceSelect.value;
+      this.preview = null;
+    });
+
+    const oldInput = createField(this.contentEl, '旧目录', this.oldPrefix, { placeholder: '/百度/课程/高数' });
+    const newInput = createField(this.contentEl, '新目录', this.newPrefix, { placeholder: '/百度/大学/数学/高数' });
+    oldInput.addEventListener('input', () => { this.oldPrefix = oldInput.value; this.preview = null; });
+    newInput.addEventListener('input', () => { this.newPrefix = newInput.value; this.preview = null; });
+
+    if (this.preview) {
+      const summary = this.contentEl.createDiv({ cls: 'rh-next-card' });
+      summary.createEl('strong', { text: `预览：可更新 ${this.preview.readyCount} 条 · 冲突 ${this.preview.conflictCount} 条` });
+      summary.createEl('small', { text: `${this.preview.oldPrefix} → ${this.preview.newPrefix}` });
+      const list = summary.createEl('ul');
+      for (const entry of this.preview.entries.slice(0, 20)) {
+        const suffix = entry.status === 'conflict' ? ` ⚠ 与 ${entry.conflictTitle || entry.conflictResourceId} 冲突` : '';
+        list.createEl('li', { text: `${entry.from.remotePath} → ${entry.to.remotePath}${suffix}` });
+      }
+      if (this.preview.entries.length > 20) summary.createEl('small', { text: `另有 ${this.preview.entries.length - 20} 条未展开。` });
+    }
+
+    const actions = createActions(this.contentEl);
+    createButton(actions, '取消', () => this.close());
+    createButton(actions, '生成预览', async () => {
+      try {
+        this.preview = await this.plugin.previewOpenListFolderRemap({
+          sourceId: this.sourceId,
+          oldPrefix: this.oldPrefix,
+          newPrefix: this.newPrefix
+        });
+        this.oldPrefix = this.preview.oldPrefix;
+        this.newPrefix = this.preview.newPrefix;
+        this.render();
+      } catch (error) {
+        this.preview = null;
+        new Notice(`无法生成迁移预览：${error instanceof Error ? error.message : String(error)}`, 6000);
+      }
+    });
+    if (this.preview) {
+      const apply = createButton(actions, '确认迁移', async () => {
+        try {
+          const result = await this.plugin.applyOpenListFolderRemap(this.preview);
+          new Notice(`已迁移 ${result.updatedResourceIds.length} 条资源路径；Resource ID 未改变。`, 6000);
+          this.close();
+        } catch (error) {
+          new Notice(`迁移失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+        }
+      }, true);
+      apply.disabled = this.preview.conflictCount > 0 || this.preview.readyCount < 1;
+    }
+  }
+}
+
+function registerResourceRelinkCommands(plugin) {
+  plugin.addCommand({
+    id: 'relink-openlist-resource',
+    name: '重新关联 OpenList 资源',
+    callback: () => new OpenListResourceRelinkModal(plugin.app, plugin).open()
+  });
+  plugin.addCommand({
+    id: 'remap-openlist-folder-paths',
+    name: '迁移 OpenList 文件夹路径',
+    callback: () => new OpenListFolderRemapModal(plugin.app, plugin).open()
+  });
+}
+
+module.exports = {
+  OpenListFolderRemapModal,
+  OpenListResourceRelinkModal,
+  activeOpenListResources,
+  activeOpenListSources,
+  registerResourceRelinkCommands
+};
+
+},
+"resource-relink.cjs": (module, exports, require) => {
+'use strict';
+
+const {
+  applyOpenListPathRemap,
+  openListLocatorFromResource,
+  previewOpenListPathRemap,
+  sameOpenListLocator,
+  updateResourceLocator
+} = __rhLoad("resource-locator.cjs");
+
+function objectOr(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function normalizeStrictOpenListPath(rawPath, options = {}) {
+  if (rawPath === null || rawPath === undefined) throw new Error('OpenList 路径不能为空。');
+  const raw = String(rawPath).trim();
+  if (!raw) throw new Error('OpenList 路径不能为空。');
+  if (/[?#]/.test(raw)) throw new Error('OpenList 路径不能包含查询参数或片段。');
+
+  let decoded = raw;
+  try { decoded = decodeURIComponent(raw); } catch { throw new Error('OpenList 路径包含无效编码。'); }
+  const slashPath = decoded.replace(/\\/g, '/');
+  const parts = slashPath.split('/').filter((part) => part && part !== '.');
+  if (parts.some((part) => part === '..')) throw new Error('OpenList 路径不能包含 ..。');
+
+  const normalized = `/${parts.join('/')}`.normalize('NFC');
+  if (normalized === '/' && options.allowRoot !== true) {
+    throw new Error('为避免误操作，重新关联和批量迁移不能使用 OpenList 根目录。');
+  }
+  return normalized;
+}
+
+function requireOpenListSource(state, sourceId) {
+  const id = String(sourceId || '').trim();
+  if (!id) throw new Error('缺少 OpenList 来源 ID。');
+  const source = objectOr(state?.sources)[id];
+  if (!source || source.deletedAt || source.type !== 'openlist') {
+    throw new Error('找不到可用的 OpenList 来源。');
+  }
+  return source;
+}
+
+function relinkOpenListResource(state, resourceId, input = {}, options = {}) {
+  const resource = objectOr(state?.resources)[String(resourceId || '')];
+  if (!resource || resource.deletedAt) throw new Error('找不到需要重新关联的学习资源。');
+  const current = openListLocatorFromResource(resource);
+  if (!current) throw new Error('当前资源不是可重新关联的 OpenList 资源。');
+
+  const sourceId = String(input.sourceId || current.sourceId || '').trim();
+  requireOpenListSource(state, sourceId);
+  if (sourceId !== current.sourceId) {
+    throw new Error('v1 重新关联只允许在同一个 OpenList 来源内移动资源。');
+  }
+  const remotePath = normalizeStrictOpenListPath(input.remotePath);
+  const result = updateResourceLocator(state, resource.id, {
+    type: 'openlist',
+    sourceId,
+    remotePath
+  }, options);
+  return result;
+}
+
+function previewSafeOpenListPathRemap(state, input = {}) {
+  const sourceId = String(input.sourceId || '').trim();
+  requireOpenListSource(state, sourceId);
+  const oldPrefix = normalizeStrictOpenListPath(input.oldPrefix);
+  const newPrefix = normalizeStrictOpenListPath(input.newPrefix);
+  if (oldPrefix === newPrefix) throw new Error('新旧目录不能相同。');
+  return previewOpenListPathRemap(state, { sourceId, oldPrefix, newPrefix });
+}
+
+function remapFingerprint(preview) {
+  return (Array.isArray(preview?.entries) ? preview.entries : [])
+    .map((entry) => [
+      String(entry.resourceId || ''),
+      String(entry.status || ''),
+      String(entry.from?.sourceId || ''),
+      String(entry.from?.remotePath || ''),
+      String(entry.to?.sourceId || ''),
+      String(entry.to?.remotePath || ''),
+      String(entry.conflictResourceId || '')
+    ].join('\u0000'))
+    .sort()
+    .join('\n');
+}
+
+function applySafeOpenListPathRemap(state, preview, options = {}) {
+  const sourceId = String(preview?.sourceId || '').trim();
+  requireOpenListSource(state, sourceId);
+  const oldPrefix = normalizeStrictOpenListPath(preview?.oldPrefix);
+  const newPrefix = normalizeStrictOpenListPath(preview?.newPrefix);
+  if (oldPrefix === newPrefix) throw new Error('新旧目录不能相同。');
+
+  const fresh = previewSafeOpenListPathRemap(state, { sourceId, oldPrefix, newPrefix });
+  if (fresh.conflictCount > 0) {
+    throw new Error(`批量迁移存在 ${fresh.conflictCount} 个路径冲突，请先处理冲突后再确认。`);
+  }
+  if (remapFingerprint(fresh) !== remapFingerprint(preview)) {
+    throw new Error('资源位置在预览后发生变化，请重新生成迁移预览。');
+  }
+
+  const result = applyOpenListPathRemap(state, fresh, options);
+  if (result.skipped.length) {
+    throw new Error('批量迁移未能完整应用，请重新生成迁移预览。');
+  }
+  return result;
+}
+
+function isCurrentRelinkTarget(resource, locator) {
+  return sameOpenListLocator(openListLocatorFromResource(resource), locator);
+}
+
+module.exports = {
+  applySafeOpenListPathRemap,
+  isCurrentRelinkTarget,
+  normalizeStrictOpenListPath,
+  previewSafeOpenListPathRemap,
+  relinkOpenListResource,
+  remapFingerprint,
+  requireOpenListSource
 };
 
 },
