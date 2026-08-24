@@ -26,19 +26,19 @@ function loadUiModule() {
   }
 }
 
-test('relink maintenance commands are registered without changing the main workbench navigation', () => {
+test('directory relink is the primary maintenance command and single-file repair is clearly advanced', () => {
   const { registerResourceRelinkCommands } = loadUiModule();
   const commands = [];
   const plugin = { app: {}, addCommand: (command) => commands.push(command) };
   registerResourceRelinkCommands(plugin);
 
   assert.deepEqual(commands.map((command) => command.id), [
-    'relink-openlist-resource',
-    'remap-openlist-folder-paths'
+    'remap-openlist-folder-paths',
+    'relink-openlist-resource'
   ]);
   assert.deepEqual(commands.map((command) => command.name), [
-    '重新关联 OpenList 资源',
-    '迁移 OpenList 文件夹路径'
+    '重新关联 OpenList 课程目录',
+    '重新关联单个 OpenList 文件（高级）'
   ]);
 });
 
@@ -72,4 +72,26 @@ test('relink UI lists only active OpenList resources and sources', () => {
 
   assert.deepEqual(activeOpenListResources(plugin).map((resource) => resource.id), ['a', 'b']);
   assert.deepEqual(activeOpenListSources(plugin).map((source) => source.id), ['source-1']);
+});
+
+test('course-directory relink suggests the stored import root instead of the selected video parent when available', () => {
+  const { suggestedCourseRoot } = loadUiModule();
+  const resource = {
+    id: 'r1',
+    locator: { type: 'openlist', sourceId: 'source-1', remotePath: '/百度/课程/高数/章节一/17.mp4' },
+    metadata: { rootPath: '/百度/课程/高数' }
+  };
+  const plugin = {
+    state: {
+      modules: {
+        m1: {
+          id: 'm1',
+          resourceIds: ['r1'],
+          resourceRoots: { r1: '/百度/课程/高数/章节一' }
+        }
+      }
+    }
+  };
+
+  assert.equal(suggestedCourseRoot(plugin, resource), '/百度/课程/高数');
 });
