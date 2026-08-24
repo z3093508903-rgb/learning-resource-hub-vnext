@@ -42,17 +42,37 @@ function localPluginFixture() {
   return { plugin, resource, inserted };
 }
 
-test('learning capture commands register as explicit Obsidian commands', () => {
+test('learning capture commands register bridge check plus official editor callbacks', () => {
   const { registerLearningCaptureCommands } = loadCaptureModule();
   const commands = [];
   registerLearningCaptureCommands({ addCommand: (command) => commands.push(command) });
   assert.deepEqual(commands.map((command) => command.id), [
+    'check-potplayer-bridge',
     'insert-current-learning-position',
     'capture-frame-and-insert-learning-position'
   ]);
+  assert.equal(typeof commands[0].callback, 'function');
+  assert.equal(typeof commands[1].editorCallback, 'function');
+  assert.equal(typeof commands[2].editorCallback, 'function');
+  assert.equal(commands[1].callback, undefined);
+  assert.equal(commands[2].callback, undefined);
 });
 
-test('insert current position writes permanent markdown through the active editor and updates resume', async () => {
+test('bridge check uses only the ping route', async () => {
+  const { checkPotPlayerBridge } = loadCaptureModule();
+  const calls = [];
+  const result = await checkPotPlayerBridge({
+    bridgeRequest: async (_requestUrl, route) => {
+      calls.push(route);
+      return { ok: true, version: 1 };
+    },
+    requestUrl: async () => {}
+  });
+  assert.deepEqual(calls, ['ping']);
+  assert.equal(result.version, 1);
+});
+
+test('insert current position writes permanent markdown through the editor and updates resume', async () => {
   const { insertCurrentLearningPosition } = loadCaptureModule();
   const { plugin, resource, inserted } = localPluginFixture();
   const bridgeRequest = async (_requestUrl, route) => {
@@ -60,7 +80,9 @@ test('insert current position writes permanent markdown through the active edito
     return { ok: true, media: { path: 'c:/course/lesson.mp4', title: 'lesson', positionSeconds: 125.5 } };
   };
 
-  const result = await insertCurrentLearningPosition(plugin, { bridgeRequest, requestUrl: async () => {} });
+  const explicitEditor = { replaceSelection: (text) => inserted.push(text) };
+  plugin.app.workspace.activeEditor = null;
+  const result = await insertCurrentLearningPosition(plugin, { bridgeRequest, requestUrl: async () => {}, editor: explicitEditor });
   assert.equal(inserted.length, 1);
   assert.equal(inserted[0], result.markdown);
   assert.match(result.markdown, /obsidian:\/\/go-study\?/);
@@ -75,7 +97,8 @@ test('insert current position refuses a different PotPlayer media before touchin
   const { plugin, inserted } = localPluginFixture();
   await assert.rejects(() => insertCurrentLearningPosition(plugin, {
     bridgeRequest: async () => ({ ok: true, media: { path: 'c:/course/another.mp4', positionSeconds: 10 } }),
-    requestUrl: async () => {}
+    requestUrl: async () => {},
+    editor: { replaceSelection: (text) => inserted.push(text) }
   }), /不一致/);
   assert.equal(inserted.length, 0);
   assert.equal(plugin.persistCalls, 0);
@@ -105,6 +128,7 @@ test('capture command saves PNG bytes into Vault then inserts image plus permane
       };
     },
     requestUrl: async () => {},
+    editor: { replaceSelection: (text) => inserted.push(text) },
     readClipboardPng: () => Buffer.from([0x89, 0x50, 0x4e, 0x47])
   });
 
@@ -115,6 +139,38 @@ test('capture command saves PNG bytes into Vault then inserts image plus permane
   assert.match(inserted[0], /^!\[\[GoStudy\/Captures\//);
   assert.match(inserted[0], /obsidian:\/\/go-study\?/);
   assert.equal(result.vaultPath, binaries[0].path);
+});
+
+test('capture validates editor before requesting a screenshot', async () => {
+  const { captureFrameAndInsertLearningPosition } = loadCaptureModule();
+  const { plugin } = localPluginFixture();
+  plugin.app.workspace.activeEditor = null;
+  let bridgeCalls = 0;
+  await assert.rejects(() => captureFrameAndInsertLearningPosition(plugin, {
+    bridgeRequest: async () => { bridgeCalls += 1; return {}; },
+    requestUrl: async () => {}
+  }), /可编辑的 Markdown/);
+  assert.equal(bridgeCalls, 0);
+});
+
+test('capture folder creation tolerates a concurrent creator after re-checking the Vault', async () => {
+  const { ensureVaultFolder } = loadCaptureModule();
+  const existing = new Set();
+  let first = true;
+  const vault = {
+    getAbstractFileByPath: (value) => existing.has(value) ? { path: value } : null,
+    createFolder: async (value) => {
+      if (first) {
+        first = false;
+        existing.add(value);
+        throw new Error('already exists');
+      }
+      existing.add(value);
+    }
+  };
+  await ensureVaultFolder(vault, 'GoStudy/Captures');
+  assert.ok(existing.has('GoStudy'));
+  assert.ok(existing.has('GoStudy/Captures'));
 });
 
 test('capture path increments instead of overwriting an existing screenshot', () => {
