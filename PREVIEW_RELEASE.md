@@ -7,3 +7,4 @@ This branch exists only to publish an isolated Windows acceptance build.
 - Permanent backlink protocol remains `obsidian://go-study`
 - Source feature work remains on `feature/resource-backlinks`
 - This preview branch is not intended to merge into the product branch.
+- Release gate: Preview Release Runner v3.
