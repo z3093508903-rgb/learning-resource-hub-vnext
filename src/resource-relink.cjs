@@ -2,8 +2,11 @@
 
 const {
   applyOpenListPathRemap,
+  normalizeOpenListPathCompat,
   openListLocatorFromResource,
+  pathWithinPrefix,
   previewOpenListPathRemap,
+  remapPathPrefix,
   sameOpenListLocator,
   updateResourceLocator
 } = require('./resource-locator.cjs');
@@ -41,6 +44,96 @@ function requireOpenListSource(state, sourceId) {
   return source;
 }
 
+function changedAtIso(options = {}) {
+  return options.changedAt instanceof Date
+    ? options.changedAt.toISOString()
+    : String(options.changedAt || new Date().toISOString());
+}
+
+function parentOpenListPath(remotePath) {
+  const normalized = normalizeOpenListPathCompat(remotePath);
+  const parts = normalized.split('/').filter(Boolean);
+  parts.pop();
+  return parts.length ? `/${parts.join('/')}` : '/';
+}
+
+function inferMovedRoot(oldRoot, oldPath, newPath) {
+  const root = normalizeOpenListPathCompat(oldRoot || '');
+  const from = normalizeOpenListPathCompat(oldPath || '');
+  const to = normalizeOpenListPathCompat(newPath || '');
+  if (root && from && to && pathWithinPrefix(from, root)) {
+    const suffix = from.slice(root.length);
+    if (suffix && to.endsWith(suffix)) {
+      const candidate = to.slice(0, -suffix.length) || '/';
+      return normalizeOpenListPathCompat(candidate);
+    }
+  }
+  return parentOpenListPath(to);
+}
+
+function syncSingleResourceAssociationRoots(state, resourceId, fromLocator, toLocator, previousMetadataRoot, options = {}) {
+  const resource = objectOr(state?.resources)[resourceId];
+  if (!resource) return { moduleRootCount: 0 };
+  const timestamp = changedAtIso(options);
+  const resourceRoot = inferMovedRoot(previousMetadataRoot, fromLocator.remotePath, toLocator.remotePath);
+  resource.metadata = { ...(resource.metadata || {}), rootPath: resourceRoot };
+
+  let moduleRootCount = 0;
+  for (const module of Object.values(objectOr(state?.modules))) {
+    if (!(module?.resourceIds || []).includes(resourceId)) continue;
+    const storedRoot = module.resourceRoots?.[resourceId];
+    if (!storedRoot) continue;
+    const nextRoot = inferMovedRoot(storedRoot, fromLocator.remotePath, toLocator.remotePath);
+    module.resourceRoots = objectOr(module.resourceRoots);
+    if (module.resourceRoots[resourceId] !== nextRoot) {
+      module.resourceRoots[resourceId] = nextRoot;
+      module.updatedAt = timestamp;
+      if (state.projects?.[module.projectId]) state.projects[module.projectId].updatedAt = timestamp;
+      moduleRootCount += 1;
+    }
+  }
+  return { moduleRootCount };
+}
+
+function syncFolderAssociationPaths(state, preview, updatedResourceIds, options = {}) {
+  const updated = new Set(updatedResourceIds || []);
+  const timestamp = changedAtIso(options);
+  let moduleRootCount = 0;
+  let groupScopeCount = 0;
+
+  for (const module of Object.values(objectOr(state?.modules))) {
+    let touched = false;
+    module.resourceRoots = objectOr(module.resourceRoots);
+    for (const resourceId of module.resourceIds || []) {
+      if (!updated.has(resourceId)) continue;
+      const storedRoot = normalizeOpenListPathCompat(module.resourceRoots[resourceId] || '');
+      if (!storedRoot || !pathWithinPrefix(storedRoot, preview.oldPrefix)) continue;
+      const nextRoot = remapPathPrefix(storedRoot, preview.oldPrefix, preview.newPrefix);
+      if (!nextRoot || nextRoot === storedRoot) continue;
+      module.resourceRoots[resourceId] = nextRoot;
+      moduleRootCount += 1;
+      touched = true;
+    }
+    if (touched) {
+      module.updatedAt = timestamp;
+      if (state.projects?.[module.projectId]) state.projects[module.projectId].updatedAt = timestamp;
+    }
+  }
+
+  for (const group of Object.values(objectOr(state?.resourceGroups))) {
+    const scopePath = normalizeOpenListPathCompat(group?.scopePath || '');
+    if (!scopePath || !pathWithinPrefix(scopePath, preview.oldPrefix)) continue;
+    if (!(group.resourceIds || []).some((resourceId) => updated.has(resourceId))) continue;
+    const nextScope = remapPathPrefix(scopePath, preview.oldPrefix, preview.newPrefix);
+    if (!nextScope || nextScope === scopePath) continue;
+    group.scopePath = nextScope;
+    group.updatedAt = timestamp;
+    groupScopeCount += 1;
+  }
+
+  return { moduleRootCount, groupScopeCount };
+}
+
 function relinkOpenListResource(state, resourceId, input = {}, options = {}) {
   const resource = objectOr(state?.resources)[String(resourceId || '')];
   if (!resource || resource.deletedAt) throw new Error('找不到需要重新关联的学习资源。');
@@ -53,11 +146,22 @@ function relinkOpenListResource(state, resourceId, input = {}, options = {}) {
     throw new Error('v1 重新关联只允许在同一个 OpenList 来源内移动资源。');
   }
   const remotePath = normalizeStrictOpenListPath(input.remotePath);
+  const previousMetadataRoot = resource.metadata?.rootPath || '';
   const result = updateResourceLocator(state, resource.id, {
     type: 'openlist',
     sourceId,
     remotePath
   }, options);
+  if (result.changed) {
+    result.associationSync = syncSingleResourceAssociationRoots(
+      state,
+      resource.id,
+      current,
+      result.locator,
+      previousMetadataRoot,
+      options
+    );
+  }
   return result;
 }
 
@@ -104,6 +208,7 @@ function applySafeOpenListPathRemap(state, preview, options = {}) {
   if (result.skipped.length) {
     throw new Error('批量迁移未能完整应用，请重新生成迁移预览。');
   }
+  result.associationSync = syncFolderAssociationPaths(state, fresh, result.updatedResourceIds, options);
   return result;
 }
 
@@ -113,10 +218,13 @@ function isCurrentRelinkTarget(resource, locator) {
 
 module.exports = {
   applySafeOpenListPathRemap,
+  inferMovedRoot,
   isCurrentRelinkTarget,
   normalizeStrictOpenListPath,
   previewSafeOpenListPathRemap,
   relinkOpenListResource,
   remapFingerprint,
-  requireOpenListSource
+  requireOpenListSource,
+  syncFolderAssociationPaths,
+  syncSingleResourceAssociationRoots
 };
