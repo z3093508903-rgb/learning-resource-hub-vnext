@@ -1,5 +1,9 @@
 'use strict';
 
+const model = require('./model.cjs');
+const { installModelResourceLocatorV2 } = require('./resource-locator.cjs');
+installModelResourceLocatorV2(model);
+
 const BaseResourceHubNextPlugin = require('./main.cjs');
 const { shell } = require('electron');
 const path = require('node:path');
