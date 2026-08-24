@@ -118,6 +118,7 @@ const { installModelResourceLocatorV2 } = __rhLoad("resource-locator.cjs");
 installModelResourceLocatorV2(model);
 
 const BaseResourceHubNextPlugin = __rhLoad("main.cjs");
+const { Notice } = require('obsidian');
 const { shell } = require('electron');
 const path = require('node:path');
 const {
@@ -133,11 +134,26 @@ const {
   pruneStateBackups,
   revealLoadedLeaf
 } = __rhLoad("release-hardening.cjs");
+const {
+  REFERENCE_ACTION,
+  parseProtocolParams
+} = __rhLoad("resource-reference.cjs");
+const {
+  resolveReferencePlayback,
+  updateResumePosition
+} = __rhLoad("resource-resolver.cjs");
 
 class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async onload() {
     this._vaultLifecycleReady = false;
+    this.activeMediaSession = null;
     await super.onload();
+
+    if (typeof this.registerObsidianProtocolHandler === 'function') {
+      this.registerObsidianProtocolHandler(REFERENCE_ACTION, (params) => {
+        void this.handleResourceReference(params);
+      });
+    }
 
     const activateVaultLifecycle = async () => {
       if (this._vaultLifecycleReady) return;
@@ -151,6 +167,64 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
       });
     } else {
       await activateVaultLifecycle();
+    }
+  }
+
+  async handleResourceReference(params) {
+    try {
+      const reference = parseProtocolParams(params);
+      return await this.openResourceReference(reference);
+    } catch (error) {
+      new Notice(`Go Study 回链无法打开：${error instanceof Error ? error.message : String(error)}`, 6000);
+      return false;
+    }
+  }
+
+  async openResourceReference(reference) {
+    const resolved = resolveReferencePlayback(this.state, reference, (resource) => this.resourceActions(resource));
+    const opened = await this.openPositionedPlayTarget(resolved.resource, resolved.playTarget, resolved.playerTime);
+    if (!opened) return false;
+
+    updateResumePosition(this.state.resources[resolved.resource.id], resolved.position);
+    this.activeMediaSession = {
+      resourceId: resolved.resource.id,
+      startedAt: new Date().toISOString(),
+      lastKnownPosition: { ...resolved.position }
+    };
+    await this.persist();
+    await this.workbenchLeaf?.view?.render?.();
+    return true;
+  }
+
+  async openPositionedPlayTarget(resource, target, playerTime) {
+    if (!resource || !target) return false;
+    try {
+      new Notice(`正在跳转：${resource.title}`);
+      if (target.type === 'openlist') {
+        const source = this.state.sources[target.sourceId]
+          || Object.values(this.state.sources).find((item) => item.type === 'openlist' && !item.deletedAt);
+        if (!source) throw new Error('请先配置 OpenList 来源连接。');
+        const token = await this.loginOpenList(source);
+        const entry = await this.getOpenList(source, target.remotePath, token);
+        const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
+        const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
+        const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
+        await shell.openExternal(this.toPotPlayerUri(`${baseUrl}/d${encoded}${sign}`, playerTime));
+      } else if (target.type === 'potplayer') {
+        await shell.openExternal(this.toPotPlayerUri(target.target, playerTime));
+      } else if (target.type === 'uri') {
+        const legacyBili = model.parseBiliVideoUrl(target.uri);
+        if (!legacyBili) throw new Error('当前回链只允许跳转到受支持的视频资源。');
+        await shell.openExternal(this.toPotPlayerUri(legacyBili.canonicalUrl, playerTime));
+      } else {
+        throw new Error('当前资源没有支持定位播放的启动方式。');
+      }
+      await this.markResourceStarted(resource);
+      new Notice(`已跳转：${resource.title} · ${playerTime}`);
+      return true;
+    } catch (error) {
+      new Notice(`跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      return false;
     }
   }
 
@@ -6725,6 +6799,182 @@ module.exports = {
   normalizeTimePosition,
   openListLocatorFromResource,
   resumeForResource
+};
+
+},
+"resource-reference.cjs": (module, exports, require) => {
+'use strict';
+
+const REFERENCE_ACTION = 'go-study';
+const REFERENCE_VERSION = 1;
+const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v']);
+const RESOURCE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
+
+function normalizeResourceId(value) {
+  const resourceId = String(value || '').trim();
+  if (!RESOURCE_ID_PATTERN.test(resourceId)) throw new Error('Go Study 回链中的资源 ID 无效。');
+  return resourceId;
+}
+
+function normalizeReferencePosition(value) {
+  if (value && typeof value === 'object' && value.type === 'time') {
+    return normalizeReferencePosition(`time:${value.seconds}`);
+  }
+  const text = String(value || '').trim();
+  const match = text.match(/^time:(.+)$/i);
+  if (!match) throw new Error('Go Study v1 仅支持 time:<seconds> 学习位置。');
+  const seconds = Number(match[1]);
+  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('Go Study 回链中的时间位置无效。');
+  return { type: 'time', seconds };
+}
+
+function serializeReferencePosition(position) {
+  const normalized = normalizeReferencePosition(position);
+  return `time:${String(normalized.seconds)}`;
+}
+
+function normalizeReferenceVersion(value) {
+  const version = Number(value);
+  if (!Number.isInteger(version) || version !== REFERENCE_VERSION) {
+    throw new Error(`不支持的 Go Study 回链版本：${String(value || '') || '缺失'}。`);
+  }
+  return version;
+}
+
+function validateReferenceData(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  return {
+    resourceId: normalizeResourceId(source.resourceId ?? source.resource),
+    position: normalizeReferencePosition(source.position),
+    version: normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION)
+  };
+}
+
+function buildReferenceUri(input) {
+  const reference = validateReferenceData(input);
+  const url = new URL(`obsidian://${REFERENCE_ACTION}`);
+  url.searchParams.set('resource', reference.resourceId);
+  url.searchParams.set('position', serializeReferencePosition(reference.position));
+  url.searchParams.set('v', String(reference.version));
+  return url.toString();
+}
+
+function parseQueryEntries(searchParams) {
+  const keys = [...searchParams.keys()];
+  for (const key of keys) {
+    if (!ALLOWED_QUERY_KEYS.has(key)) throw new Error(`Go Study 回链包含不允许的参数：${key}。`);
+    if (searchParams.getAll(key).length !== 1) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
+  }
+  return {
+    resource: searchParams.get('resource'),
+    position: searchParams.get('position'),
+    v: searchParams.get('v')
+  };
+}
+
+function parseReferenceUri(rawUri) {
+  let url;
+  try { url = new URL(String(rawUri || '').trim()); } catch { throw new Error('Go Study 回链格式无效。'); }
+  if (url.protocol !== 'obsidian:' || url.hostname !== REFERENCE_ACTION) {
+    throw new Error('这不是 Go Study 回链。');
+  }
+  if ((url.pathname && url.pathname !== '/') || url.username || url.password || url.port || url.hash) {
+    throw new Error('Go Study 回链包含不允许的地址结构。');
+  }
+  return validateReferenceData(parseQueryEntries(url.searchParams));
+}
+
+function parseProtocolParams(params) {
+  const source = params && typeof params === 'object' ? params : {};
+  const keys = Object.keys(source);
+  for (const key of keys) {
+    if (!ALLOWED_QUERY_KEYS.has(key)) throw new Error(`Go Study 回链包含不允许的参数：${key}。`);
+    if (Array.isArray(source[key])) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
+  }
+  return validateReferenceData({
+    resource: source.resource,
+    position: source.position,
+    v: source.v
+  });
+}
+
+module.exports = {
+  ALLOWED_QUERY_KEYS,
+  REFERENCE_ACTION,
+  REFERENCE_VERSION,
+  buildReferenceUri,
+  normalizeReferencePosition,
+  normalizeReferenceVersion,
+  normalizeResourceId,
+  parseProtocolParams,
+  parseReferenceUri,
+  serializeReferencePosition,
+  validateReferenceData
+};
+
+},
+"resource-resolver.cjs": (module, exports, require) => {
+'use strict';
+
+function objectOr(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function requireReferenceResource(state, resourceId) {
+  const resource = objectOr(state?.resources)[String(resourceId || '')];
+  if (!resource || resource.deletedAt) throw new Error('Go Study 找不到这条回链对应的学习资源。');
+  return resource;
+}
+
+function normalizePlaybackPosition(position) {
+  if (!position || position.type !== 'time') throw new Error('当前资源回链不包含可播放的时间位置。');
+  const seconds = Number(position.seconds);
+  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('学习位置中的播放时间无效。');
+  return { type: 'time', seconds };
+}
+
+function formatPotPlayerTime(position) {
+  const normalized = normalizePlaybackPosition(position);
+  const totalSeconds = Math.floor(normalized.seconds);
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function resolveReferencePlayback(state, reference, resolveActions) {
+  if (typeof resolveActions !== 'function') throw new Error('Go Study 资源启动器不可用。');
+  const resource = requireReferenceResource(state, reference?.resourceId);
+  const position = normalizePlaybackPosition(reference?.position);
+  const actions = resolveActions(resource) || {};
+  if (!actions.playTarget) throw new Error('这条学习资源当前没有可用的视频播放方式。');
+  return {
+    resource,
+    position,
+    playerTime: formatPotPlayerTime(position),
+    playTarget: actions.playTarget
+  };
+}
+
+function updateResumePosition(resource, position, now = new Date()) {
+  if (!resource || typeof resource !== 'object') throw new Error('无法更新不存在的学习资源。');
+  const normalized = normalizePlaybackPosition(position);
+  const updatedAt = now instanceof Date ? now.toISOString() : String(now || new Date().toISOString());
+  resource.resume = {
+    ...(resource.resume && typeof resource.resume === 'object' ? resource.resume : {}),
+    position: normalized,
+    updatedAt
+  };
+  resource.lastPosition = normalized.seconds;
+  return resource.resume;
+}
+
+module.exports = {
+  formatPotPlayerTime,
+  normalizePlaybackPosition,
+  requireReferenceResource,
+  resolveReferencePlayback,
+  updateResumePosition
 };
 
 },
