@@ -1,0 +1,39 @@
+name: Sync feature bundle
+
+on:
+  push:
+    branches:
+      - feature/resource-backlinks
+
+permissions:
+  contents: write
+
+jobs:
+  sync-main-js:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/resource-backlinks
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build bundle
+        run: npm run build
+
+      - name: Commit current main.js when needed
+        shell: bash
+        run: |
+          if git diff --quiet -- main.js; then
+            echo "main.js is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.js
+          git commit -m "build: sync feature bundle"
+          git push origin HEAD:feature/resource-backlinks
