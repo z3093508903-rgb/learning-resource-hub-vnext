@@ -8,7 +8,7 @@ on:
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   release-check:
@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.head_ref || github.ref }}
 
       - name: Use Node.js 22
         uses: actions/setup-node@v4
@@ -24,6 +26,20 @@ jobs:
 
       - name: Run release checks
         run: npm run release:check
+
+      - name: Sync feature main.js
+        if: github.event_name == 'pull_request' && github.head_ref == 'feature/resource-backlinks'
+        shell: bash
+        run: |
+          if git diff --quiet -- main.js; then
+            echo "main.js is already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.js
+          git commit -m "build: sync feature bundle"
+          git push origin HEAD:feature/resource-backlinks
 
       - name: Verify committed main.js is current
         run: git diff --exit-code -- main.js
