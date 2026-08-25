@@ -9,6 +9,7 @@ const {
 } = require('./note-target.cjs');
 const { requestNativePotPlayer } = require('./native-potplayer.cjs');
 const { requestPotPlayerBridge } = require('./potplayer-bridge.cjs');
+const { currentProductSettings, normalizeCaptureFolder } = require('./product-settings.cjs');
 const { updateResumePosition } = require('./resource-resolver.cjs');
 const {
   buildCaptureMarkdown,
@@ -100,7 +101,8 @@ async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
   if (!vault || typeof vault.getAbstractFileByPath !== 'function' || typeof vault.createFolder !== 'function') {
     throw new Error('当前 Vault 不支持创建截图目录。');
   }
-  const parts = String(folderPath || '').split('/').filter(Boolean);
+  const safeFolder = normalizeCaptureFolder(folderPath);
+  const parts = safeFolder.split('/').filter(Boolean);
   let current = '';
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
@@ -111,21 +113,22 @@ async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
       if (!vault.getAbstractFileByPath(current)) throw error;
     }
   }
-  return folderPath;
+  return safeFolder;
 }
 
-function capturePathCandidate(resource, position, index = 1) {
+function capturePathCandidate(resource, position, index = 1, folderPath = CAPTURE_FOLDER) {
+  const folder = normalizeCaptureFolder(folderPath);
   const base = captureFileName(resource, position, 'png');
-  if (index <= 1) return `${CAPTURE_FOLDER}/${base}`;
+  if (index <= 1) return `${folder}/${base}`;
   const dot = base.lastIndexOf('.');
   const stem = dot >= 0 ? base.slice(0, dot) : base;
   const ext = dot >= 0 ? base.slice(dot) : '';
-  return `${CAPTURE_FOLDER}/${stem}-${index}${ext}`;
+  return `${folder}/${stem}-${index}${ext}`;
 }
 
-function uniqueCapturePath(vault, resource, position) {
+function uniqueCapturePath(vault, resource, position, folderPath = CAPTURE_FOLDER) {
   for (let index = 1; index <= 999; index += 1) {
-    const candidate = capturePathCandidate(resource, position, index);
+    const candidate = capturePathCandidate(resource, position, index, folderPath);
     if (!vault.getAbstractFileByPath(candidate)) return candidate;
   }
   throw new Error('同一位置的截图文件过多，无法生成唯一文件名。');
@@ -142,8 +145,9 @@ function clipboardPngBuffer(clipboardImpl = clipboard) {
 
 async function saveCaptureToVault(plugin, resource, position, pngBuffer) {
   const vault = plugin?.app?.vault;
-  await ensureVaultFolder(vault);
-  const vaultPath = uniqueCapturePath(vault, resource, position);
+  const folder = currentProductSettings(plugin).captureFolder;
+  await ensureVaultFolder(vault, folder);
+  const vaultPath = uniqueCapturePath(vault, resource, position, folder);
   if (typeof vault.createBinary !== 'function') throw new Error('当前 Vault 不支持写入二进制截图。');
   const bytes = Buffer.from(pngBuffer || []);
   if (!bytes.length) throw new Error('截图数据为空。');
