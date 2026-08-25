@@ -37,7 +37,8 @@ function startFakeFileBridge(requests, responses, responder) {
     const request = JSON.parse(fs.readFileSync(path.join(requests, name), 'utf8'));
     fs.mkdirSync(responses, { recursive: true });
     const response = responder(request);
-    fs.writeFileSync(path.join(responses, `${request.id}.json`), JSON.stringify(response));
+    // Reproduce the AutoHotkey UTF-8 BOM that triggered the Windows beta.4 failure.
+    fs.writeFileSync(path.join(responses, `${request.id}.json`), `\uFEFF${JSON.stringify(response)}`, 'utf8');
   }, 5);
 }
 
@@ -56,7 +57,7 @@ test('bridge tokens must be 32-byte hex values', () => {
   assert.throws(() => readBridgeToken({ tokenPath: 'missing', readFileSync: () => { throw new Error('missing'); } }), /先启动新版/);
 });
 
-test('default bridge transport is file IPC v2 and only emits fixed actions', async () => {
+test('default bridge transport is file IPC v2, accepts BOM responses, and only emits fixed actions', async () => {
   const { root, requests, responses } = tempBridgeDirs();
   let observed = null;
   const timer = startFakeFileBridge(requests, responses, (request) => {
