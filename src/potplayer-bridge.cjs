@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const BRIDGE_BASE_URL = 'http://127.0.0.1:33661';
 const BRIDGE_VERSION = 1;
+const BRIDGE_REQUEST_TIMEOUT_MS = 5000;
 const BRIDGE_TOKEN_PATTERN = /^[0-9a-f]{64}$/i;
 const ROUTES = new Map([
   ['ping', { method: 'GET', path: '/v1/ping' }],
@@ -48,12 +49,29 @@ function normalizeBridgeMedia(value) {
   };
 }
 
+async function requestWithTimeout(requestPromise, timeoutMs) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      requestPromise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Go Study Bridge 请求超时（${Math.ceil(timeoutMs / 1000)} 秒）。端口已打开，但 Bridge 没有返回 HTTP 响应。`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
 async function requestPotPlayerBridge(requestUrl, route, options = {}) {
   if (typeof requestUrl !== 'function') throw new Error('Obsidian requestUrl 不可用。');
   const spec = ROUTES.get(String(route || ''));
   if (!spec) throw new Error('不允许的 Go Study Bridge 操作。');
   const token = normalizeBridgeToken(options.token || readBridgeToken(options));
-  const response = await requestUrl({
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
+    ? Number(options.timeoutMs)
+    : BRIDGE_REQUEST_TIMEOUT_MS;
+  const response = await requestWithTimeout(requestUrl({
     url: `${BRIDGE_BASE_URL}${spec.path}`,
     method: spec.method,
     headers: {
@@ -61,7 +79,7 @@ async function requestPotPlayerBridge(requestUrl, route, options = {}) {
       Accept: 'application/json'
     },
     throw: false
-  });
+  }), timeoutMs);
   const status = Number(response?.status || 0);
   const payload = response?.json && typeof response.json === 'object' ? response.json : {};
   if (status === 401) throw new Error('Go Study Bridge 配对失败：本机令牌不匹配，请重启 Bridge 后重试。');
@@ -84,6 +102,7 @@ async function requestPotPlayerBridge(requestUrl, route, options = {}) {
 
 module.exports = {
   BRIDGE_BASE_URL,
+  BRIDGE_REQUEST_TIMEOUT_MS,
   BRIDGE_TOKEN_PATTERN,
   BRIDGE_VERSION,
   ROUTES,
@@ -91,5 +110,6 @@ module.exports = {
   normalizeBridgeMedia,
   normalizeBridgeToken,
   readBridgeToken,
-  requestPotPlayerBridge
+  requestPotPlayerBridge,
+  requestWithTimeout
 };
