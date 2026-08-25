@@ -1,0 +1,142 @@
+name: Preview Release Runner beta.10
+
+on:
+  pull_request:
+    branches:
+      - preview-release-runner
+
+permissions:
+  contents: read
+
+jobs:
+  publish-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'preview/go-study-0.3.0-beta.10'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.10
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.10
+    steps:
+      - name: Checkout preview head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify source, build and tests
+        run: npm run check && npm run build && npm test
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Isolated Go Study preview build fixing native settings-tab registration.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error(`Expected view type not found: ${oldView}`);
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const previewBundle = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          if (!previewBundle.includes(newView) || previewBundle.includes(oldView)) throw new Error('Preview view isolation failed.');
+          for (const required of [
+            'GoStudySettingsTab',
+            '显示界面说明',
+            '进入工作台时自动收起左侧栏',
+            '启用视频笔记增强',
+            '保存笔记后继续播放',
+            '取消笔记后继续播放',
+            '截图保存目录',
+            '自动备份保留数量',
+            '当前插件版本'
+          ]) {
+            if (!previewBundle.includes(required)) throw new Error(`Native settings marker missing: ${required}`);
+          }
+          if (previewBundle.includes('findSettingsContainer')) throw new Error('Fragile settings DOM injection must not ship in beta.10.');
+          if (previewBundle.includes('registerCompanionEventPoller(this)')) throw new Error('Companion event poller must not be mounted in beta.10 runtime.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.10
+
+          Native settings-tab fix build.
+
+          ## Why beta.10 exists
+          Beta.9 bundled the new settings controls but tried to inject them into Obsidian settings by searching for a heading that the legacy one-option tab did not render. Beta.10 replaces that legacy tab directly with a real PluginSettingTab.
+
+          ## Acceptance
+          1. Keep `data.json`, install beta.10 and reload Obsidian.
+          2. Open **Settings → Go Study Preview**.
+          3. The page must show three sections: **工作台**, **视频笔记增强**, **数据与安全**.
+          4. Workbench must include **显示界面说明** and **进入工作台时自动收起左侧栏**.
+          5. Video enhancement must include the master toggle, status, Alt+1..Alt+4 inputs, resume-after-save/cancel, success feedback, capture folder, reset shortcuts and screenshot test.
+          6. Data/safety must include backup retention and current plugin version.
+          7. Turning video enhancement off must release Alt+1..Alt+4; turning it on must restore configured bindings.
+          8. No AutoHotkey / markdown2potplayer process should be required.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          NOTES='Go Study Preview beta.10 fixes the settings center by replacing the legacy one-option tab with a real native PluginSettingTab. The settings page now exposes workbench, optional video enhancement, shortcuts, playback behavior, capture folder, backup retention and version information without DOM injection.'
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md" --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "${{ github.event.pull_request.head.sha }}" \
+              --title "Go Study Preview ${PREVIEW_VERSION}" \
+              --notes "$NOTES" --prerelease \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md"
+          fi
+
+      - name: Verify published prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isPrerelease,url,assets > release.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const release = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+          if (release.tagName !== process.env.RELEASE_TAG) throw new Error('Release tag mismatch.');
+          if (!release.isPrerelease) throw new Error('Release must be prerelease.');
+          const names = new Set((release.assets || []).map((asset) => asset.name));
+          for (const required of [`go-study-preview-${process.env.PREVIEW_VERSION}.zip`, 'main.js', 'manifest.json', 'styles.css', 'TESTING.md']) {
+            if (!names.has(required)) throw new Error(`Missing asset: ${required}`);
+          }
+          NODE
