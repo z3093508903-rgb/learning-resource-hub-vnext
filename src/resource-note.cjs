@@ -31,11 +31,31 @@ function buildPositionMarkdown(resource, position, options = {}) {
   return `[↗ ${title} · ${time}](${uri})`;
 }
 
+function normalizeUserNote(value) {
+  return String(value ?? '').replace(/\r\n/g, '\n').trim();
+}
+
+function buildNotePositionMarkdown(resource, position, noteText) {
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const backlink = buildPositionMarkdown(resource, position, { title: '回到课程' });
+  return `${note}\n\n${backlink}`;
+}
+
 function buildCaptureMarkdown(resource, position, vaultImagePath) {
   const imagePath = String(vaultImagePath || '').trim().replace(/\\/g, '/');
   if (!imagePath || imagePath.includes('..')) throw new Error('截图 Vault 路径无效。');
   const backlink = buildPositionMarkdown(resource, position, { title: '回到课程' });
   return `![[${imagePath}]]\n\n${backlink}`;
+}
+
+function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText) {
+  const imagePath = String(vaultImagePath || '').trim().replace(/\\/g, '/');
+  if (!imagePath || imagePath.includes('..')) throw new Error('截图 Vault 路径无效。');
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const backlink = buildPositionMarkdown(resource, position, { title: '回到课程' });
+  return `![[${imagePath}]]\n\n${note}\n\n${backlink}`;
 }
 
 function sanitizeCaptureBaseName(value) {
@@ -56,9 +76,12 @@ function captureFileName(resource, position, extension = 'png') {
 
 module.exports = {
   buildCaptureMarkdown,
+  buildCaptureNoteMarkdown,
+  buildNotePositionMarkdown,
   buildPositionMarkdown,
   captureFileName,
   escapeMarkdownLabel,
   formatPositionClock,
+  normalizeUserNote,
   sanitizeCaptureBaseName
 };
