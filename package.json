@@ -5,7 +5,7 @@
   "description": "Clean component-first rewrite of Learning Resource Hub.",
   "main": "main.js",
   "scripts": {
-    "check": "node --check src/entry.cjs && node --check src/anki-launch.cjs && node --check src/usage-polish.cjs && node --check src/release-hardening.cjs && node --check src/main.cjs && node --check src/model.cjs && node --check scripts/check-release.mjs",
+    "check": "node --check src/runtime-entry.cjs && node --check src/entry.cjs && node --check src/ui-fixes.cjs && node --check src/anki-launch.cjs && node --check src/usage-polish.cjs && node --check src/release-hardening.cjs && node --check src/resource-locator.cjs && node --check src/resource-reference.cjs && node --check src/resource-resolver.cjs && node --check src/resource-relink.cjs && node --check src/resource-relink-ui.cjs && node --check src/potplayer-bridge.cjs && node --check src/media-session.cjs && node --check src/resource-note.cjs && node --check src/learning-capture.cjs && node --check src/main.cjs && node --check src/model.cjs && node --check scripts/check-release.mjs",
     "build": "node build.mjs",
     "test": "node --test --test-concurrency=1 tests/*.test.cjs",
     "release:validate": "node scripts/check-release.mjs",

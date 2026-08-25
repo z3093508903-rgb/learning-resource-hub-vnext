@@ -1,6 +1,14 @@
 'use strict';
 
+const model = require('./model.cjs');
+const {
+  installModelResourceLocatorV2,
+  openListLocatorFromResource
+} = require('./resource-locator.cjs');
+installModelResourceLocatorV2(model);
+
 const BaseResourceHubNextPlugin = require('./main.cjs');
+const { Notice } = require('obsidian');
 const { shell } = require('electron');
 const path = require('node:path');
 const {
@@ -16,11 +24,36 @@ const {
   pruneStateBackups,
   revealLoadedLeaf
 } = require('./release-hardening.cjs');
+const {
+  REFERENCE_ACTION,
+  parseProtocolParams
+} = require('./resource-reference.cjs');
+const {
+  resolveReferencePlayback,
+  updateResumePosition
+} = require('./resource-resolver.cjs');
+const {
+  applySafeOpenListPathRemap,
+  normalizeStrictOpenListPath,
+  previewSafeOpenListPathRemap,
+  relinkOpenListResource
+} = require('./resource-relink.cjs');
+const { registerResourceRelinkCommands } = require('./resource-relink-ui.cjs');
+const { registerLearningCaptureCommands } = require('./learning-capture.cjs');
 
 class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async onload() {
     this._vaultLifecycleReady = false;
+    this.activeMediaSession = null;
     await super.onload();
+    registerResourceRelinkCommands(this);
+    registerLearningCaptureCommands(this);
+
+    if (typeof this.registerObsidianProtocolHandler === 'function') {
+      this.registerObsidianProtocolHandler(REFERENCE_ACTION, (params) => {
+        void this.handleResourceReference(params);
+      });
+    }
 
     const activateVaultLifecycle = async () => {
       if (this._vaultLifecycleReady) return;
@@ -35,6 +68,131 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     } else {
       await activateVaultLifecycle();
     }
+  }
+
+  async handleResourceReference(params) {
+    try {
+      const reference = parseProtocolParams(params);
+      return await this.openResourceReference(reference);
+    } catch (error) {
+      new Notice(`Go Study 回链无法打开：${error instanceof Error ? error.message : String(error)}`, 6000);
+      return false;
+    }
+  }
+
+  async openResourceReference(reference) {
+    const resolved = resolveReferencePlayback(this.state, reference, (resource) => this.resourceActions(resource));
+    const opened = await this.openPositionedPlayTarget(resolved.resource, resolved.playTarget, resolved.playerTime);
+    if (!opened) return false;
+
+    updateResumePosition(this.state.resources[resolved.resource.id], resolved.position);
+    this.activeMediaSession = {
+      resourceId: resolved.resource.id,
+      startedAt: new Date().toISOString(),
+      lastKnownPosition: { ...resolved.position }
+    };
+    await this.persist();
+    await this.workbenchLeaf?.view?.render?.();
+    return true;
+  }
+
+  async openPositionedPlayTarget(resource, target, playerTime) {
+    if (!resource || !target) return false;
+    try {
+      new Notice(`正在跳转：${resource.title}`);
+      if (target.type === 'openlist') {
+        const source = this.state.sources[target.sourceId]
+          || Object.values(this.state.sources).find((item) => item.type === 'openlist' && !item.deletedAt);
+        if (!source) throw new Error('请先配置 OpenList 来源连接。');
+        const token = await this.loginOpenList(source);
+        const entry = await this.getOpenList(source, target.remotePath, token);
+        const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
+        const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
+        const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
+        await shell.openExternal(this.toPotPlayerUri(`${baseUrl}/d${encoded}${sign}`, playerTime));
+      } else if (target.type === 'potplayer') {
+        await shell.openExternal(this.toPotPlayerUri(target.target, playerTime));
+      } else if (target.type === 'uri') {
+        const legacyBili = model.parseBiliVideoUrl(target.uri);
+        if (!legacyBili) throw new Error('当前回链只允许跳转到受支持的视频资源。');
+        await shell.openExternal(this.toPotPlayerUri(legacyBili.canonicalUrl, playerTime));
+      } else {
+        throw new Error('当前资源没有支持定位播放的启动方式。');
+      }
+      await this.markResourceStarted(resource);
+      new Notice(`已跳转：${resource.title} · ${playerTime}`);
+      return true;
+    } catch (error) {
+      new Notice(`跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      return false;
+    }
+  }
+
+  async openResourceAction(resource, actionType, target, options = {}) {
+    const opened = await super.openResourceAction(resource, actionType, target, options);
+    if (opened && actionType === 'play' && resource?.id && this.state.resources?.[resource.id]) {
+      const resume = this.state.resources[resource.id].resume?.position;
+      this.activeMediaSession = {
+        resourceId: resource.id,
+        startedAt: new Date().toISOString(),
+        lastKnownPosition: resume ? { ...resume } : null
+      };
+    }
+    return opened;
+  }
+
+  async relinkOpenListResourceToPath(resourceId, remotePath) {
+    const resource = this.state.resources?.[String(resourceId || '')];
+    if (!resource || resource.deletedAt) throw new Error('找不到需要重新关联的学习资源。');
+    const current = openListLocatorFromResource(resource);
+    if (!current) throw new Error('当前资源不是 OpenList 资源。');
+    const normalizedPath = normalizeStrictOpenListPath(remotePath);
+    const source = this.state.sources?.[current.sourceId];
+    if (!source || source.deletedAt || source.type !== 'openlist') throw new Error('找不到这条资源对应的 OpenList 来源。');
+
+    const token = await this.loginOpenList(source);
+    const entry = await this.getOpenList(source, normalizedPath, token);
+    if (!entry || entry.is_dir) throw new Error('目标路径不存在，或目标不是文件。');
+
+    const result = relinkOpenListResource(this.state, resource.id, {
+      sourceId: current.sourceId,
+      remotePath: normalizedPath
+    }, { changedAt: new Date() });
+
+    const size = Number(entry.size);
+    const modified = String(entry.modified || entry.updated_at || result.resource.metadata?.modified || '');
+    result.resource.metadata = {
+      ...(result.resource.metadata || {}),
+      ...(Number.isFinite(size) && size >= 0 ? { size } : {}),
+      ...(modified ? { modified } : {})
+    };
+    result.resource.identityHints = {
+      ...(result.resource.identityHints || {}),
+      fileName: normalizedPath.split('/').filter(Boolean).pop() || result.resource.identityHints?.fileName || '',
+      ...(Number.isFinite(size) && size >= 0 ? { size } : {}),
+      ...(modified ? { modified } : {})
+    };
+
+    await this.persist();
+    await this.workbenchLeaf?.view?.render?.();
+    return result;
+  }
+
+  async previewOpenListFolderRemap(input = {}) {
+    const preview = previewSafeOpenListPathRemap(this.state, input);
+    const source = this.state.sources?.[preview.sourceId];
+    if (!source || source.deletedAt || source.type !== 'openlist') throw new Error('找不到可用的 OpenList 来源。');
+    const token = await this.loginOpenList(source);
+    const target = await this.getOpenList(source, preview.newPrefix, token);
+    if (!target?.is_dir) throw new Error('新目录不存在，或目标不是文件夹。');
+    return preview;
+  }
+
+  async applyOpenListFolderRemap(preview) {
+    const result = applySafeOpenListPathRemap(this.state, preview, { changedAt: new Date() });
+    await this.persist();
+    await this.workbenchLeaf?.view?.render?.();
+    return result;
   }
 
   async validateVaultRefs() {
