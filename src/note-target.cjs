@@ -60,7 +60,7 @@ function resolveRememberedNoteTarget(plugin) {
   const leaf = targetLeaf(workspace, target);
   if (!leaf) {
     if (plugin) plugin._goStudyNoteTarget = null;
-    throw new Error('最近的学习笔记已经关闭或不可编辑，请先在目标 Markdown 笔记中放置一次光标。');
+    throw new Error('最近的学习笔记已经关闭或不可编辑，请先打开一个可编辑的 Markdown 笔记，并把光标放到目标正文中。');
   }
   return {
     editor: target.editor,
