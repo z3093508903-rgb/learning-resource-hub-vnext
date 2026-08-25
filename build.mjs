@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 
 const projectRoot = path.dirname(fileURLToPath(import.meta.url));
 const sourceRoot = path.join(projectRoot, 'src');
-const entryPath = path.join(sourceRoot, 'entry.cjs');
+const entryPath = path.join(sourceRoot, 'runtime-entry.cjs');
 const outputPath = path.join(projectRoot, 'main.js');
 const localRequirePattern = /require\(\s*(['"])(\.{1,2}\/[^'"]+)\1\s*\)/g;
 
@@ -50,13 +50,14 @@ async function collectModule(filePath) {
 }
 
 await collectModule(entryPath);
+const entryModuleId = toModuleId(entryPath);
 
 const moduleTable = [...modules.entries()]
   .sort(([left], [right]) => left.localeCompare(right))
   .map(([id, source]) => `${JSON.stringify(id)}: (module, exports, require) => {\n${source}\n}`)
   .join(',\n');
 
-const output = `'use strict';\n\nconst __rhModules = {\n${moduleTable}\n};\nconst __rhCache = new Map();\n\nfunction __rhLoad(id) {\n  if (__rhCache.has(id)) return __rhCache.get(id).exports;\n  const factory = __rhModules[id];\n  if (!factory) throw new Error(\`Bundled module not found: \${id}\`);\n  const bundledModule = { exports: {} };\n  __rhCache.set(id, bundledModule);\n  factory(bundledModule, bundledModule.exports, require);\n  return bundledModule.exports;\n}\n\nmodule.exports = __rhLoad('entry.cjs');\n`;
+const output = `'use strict';\n\nconst __rhModules = {\n${moduleTable}\n};\nconst __rhCache = new Map();\n\nfunction __rhLoad(id) {\n  if (__rhCache.has(id)) return __rhCache.get(id).exports;\n  const factory = __rhModules[id];\n  if (!factory) throw new Error(\`Bundled module not found: \${id}\`);\n  const bundledModule = { exports: {} };\n  __rhCache.set(id, bundledModule);\n  factory(bundledModule, bundledModule.exports, require);\n  return bundledModule.exports;\n}\n\nmodule.exports = __rhLoad(${JSON.stringify(entryModuleId)});\n`;
 
 await writeFile(outputPath, output, 'utf8');
 console.log(`Built main.js from ${modules.size} source modules (${Buffer.byteLength(output)} bytes)`);
