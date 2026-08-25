@@ -67,6 +67,7 @@ function runPowerShell(script, options = {}) {
 
 function potPlayerProbeScript(options = {}) {
   const pause = options.pause ? '$true' : '$false';
+  const play = options.play ? '$true' : '$false';
   const foregroundOnly = options.foregroundOnly === false ? '$false' : '$true';
   const copyPath = options.copyPath ? '$true' : '$false';
   const capture = options.capture ? '$true' : '$false';
@@ -90,7 +91,15 @@ $foreground = [GoStudyWin32]::GetForegroundWindow()
 if (${foregroundOnly} -and $foreground -ne $hwnd) { throw 'PotPlayer 当前不是前台窗口。' }
 $positionMs = [GoStudyWin32]::SendMessage($hwnd, 1024, [IntPtr]20484, [IntPtr]0).ToInt64()
 $status = [GoStudyWin32]::SendMessage($hwnd, 1024, [IntPtr]20486, [IntPtr]0).ToInt64()
+$initialStatus = $status
+$pausedByGoStudy = $false
 if (${pause} -and $status -eq 2) {
+  [void][GoStudyWin32]::PostMessage($hwnd, 273, [IntPtr]20000, [IntPtr]0)
+  Start-Sleep -Milliseconds 45
+  $status = [GoStudyWin32]::SendMessage($hwnd, 1024, [IntPtr]20486, [IntPtr]0).ToInt64()
+  $pausedByGoStudy = $true
+}
+if (${play} -and $status -ne 2) {
   [void][GoStudyWin32]::PostMessage($hwnd, 273, [IntPtr]20000, [IntPtr]0)
   Start-Sleep -Milliseconds 45
   $status = [GoStudyWin32]::SendMessage($hwnd, 1024, [IntPtr]20486, [IntPtr]0).ToInt64()
@@ -109,6 +118,8 @@ if (${capture}) {
   title = $proc.MainWindowTitle
   positionMs = $positionMs
   status = $status
+  initialStatus = $initialStatus
+  pausedByGoStudy = $pausedByGoStudy
   foreground = ($foreground -eq $hwnd)
 } | ConvertTo-Json -Compress
 `;
@@ -137,6 +148,11 @@ async function nativeCurrent(options = {}) {
     bridge: 'go-study-native-windows',
     player: 'potplayer',
     transport: 'native-windows',
+    control: {
+      initialStatus: Number(probe.initialStatus),
+      status: Number(probe.status),
+      pausedByGoStudy: Boolean(probe.pausedByGoStudy)
+    },
     media: {
       path: mediaPath,
       positionSeconds: probe.positionSeconds,
@@ -159,6 +175,21 @@ async function nativeCapture(options = {}) {
   return { ...current, capture: { transport: 'clipboard', cropped: false } };
 }
 
+async function nativePlay(options = {}) {
+  const probe = validateNativeProbe(await (options.runPowerShell || runPowerShell)(
+    potPlayerProbeScript({ play: true, foregroundOnly: false }),
+    options
+  ));
+  return {
+    ok: true,
+    version: 3,
+    bridge: 'go-study-native-windows',
+    player: 'potplayer',
+    transport: 'native-windows',
+    status: probe.status
+  };
+}
+
 async function requestNativePotPlayer(action, options = {}) {
   if (action === 'ping') {
     const probe = validateNativeProbe(await (options.runPowerShell || runPowerShell)(
@@ -176,6 +207,7 @@ async function requestNativePotPlayer(action, options = {}) {
   }
   if (action === 'current') return nativeCurrent(options);
   if (action === 'capture') return nativeCapture(options);
+  if (action === 'play') return nativePlay(options);
   throw new Error(`不支持的原生 PotPlayer 操作：${String(action || '')}`);
 }
 
@@ -199,6 +231,7 @@ module.exports = {
   immersiveShortcuts,
   nativeCapture,
   nativeCurrent,
+  nativePlay,
   normalizeShortcut,
   potPlayerProbeScript,
   powershellExecutable,
