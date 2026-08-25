@@ -7,10 +7,13 @@ const {
   registerRememberedNoteTarget,
   resolveRememberedNoteTarget
 } = require('./note-target.cjs');
+const { requestNativePotPlayer } = require('./native-potplayer.cjs');
 const { requestPotPlayerBridge } = require('./potplayer-bridge.cjs');
 const { updateResumePosition } = require('./resource-resolver.cjs');
 const {
   buildCaptureMarkdown,
+  buildCaptureNoteMarkdown,
+  buildNotePositionMarkdown,
   buildPositionMarkdown,
   captureFileName
 } = require('./resource-note.cjs');
@@ -22,11 +25,11 @@ function activeEditor(plugin, preferredEditor = null) {
   return resolveRememberedNoteTarget(plugin).editor;
 }
 
-function resolveLearningContext(plugin, bridgeMedia) {
+function resolveLearningContext(plugin, playerMedia) {
   return resolveActiveMediaSession(
     plugin.state,
     plugin.activeMediaSession,
-    bridgeMedia,
+    playerMedia,
     (resource) => plugin.resourceActions(resource)
   );
 }
@@ -43,15 +46,54 @@ async function persistRecordedPosition(plugin, resource, position) {
   await plugin.workbenchLeaf?.view?.render?.();
 }
 
-async function insertCurrentLearningPosition(plugin, options = {}) {
+async function requestLearningPlayer(plugin, action, options = {}) {
+  if (typeof options.bridgeRequest === 'function') {
+    return options.bridgeRequest(options.requestUrl || requestUrl, action, options.bridgeOptions || {});
+  }
+
+  let nativeError = null;
+  if (options.native !== false && (process.platform === 'win32' || options.nativeOptions?.allowNonWindows)) {
+    try {
+      return await (options.nativeRequest || requestNativePotPlayer)(action, {
+        ...(options.nativeOptions || {}),
+        pause: Boolean(options.pause)
+      });
+    } catch (error) {
+      nativeError = error;
+      if (options.nativeOnly) throw error;
+    }
+  }
+
+  try {
+    return await requestPotPlayerBridge(options.requestUrl || requestUrl, action, options.bridgeOptions || {});
+  } catch (bridgeError) {
+    if (nativeError) {
+      const message = nativeError instanceof Error ? nativeError.message : String(nativeError);
+      throw new Error(`Go Study 原生视频控制失败：${message}`);
+    }
+    throw bridgeError;
+  }
+}
+
+async function prepareCurrentLearningPosition(plugin, options = {}) {
   const editor = activeEditor(plugin, options.editor);
-  const bridgeRequest = options.bridgeRequest || requestPotPlayerBridge;
-  const response = await bridgeRequest(options.requestUrl || requestUrl, 'current', options.bridgeOptions || {});
+  const response = await requestLearningPlayer(plugin, 'current', options);
   const context = resolveLearningContext(plugin, response.media);
-  const markdown = buildPositionMarkdown(context.resource, context.position);
-  editor.replaceSelection(markdown);
-  await persistRecordedPosition(plugin, context.resource, context.position);
-  return { ...context, markdown };
+  return { ...context, editor, player: response };
+}
+
+async function insertPreparedMarkdown(plugin, prepared, markdown) {
+  if (!prepared?.editor || typeof prepared.editor.replaceSelection !== 'function') {
+    throw new Error('最近的学习笔记已经关闭或不可编辑。');
+  }
+  prepared.editor.replaceSelection(markdown);
+  await persistRecordedPosition(plugin, prepared.resource, prepared.position);
+  return { ...prepared, markdown };
+}
+
+async function insertCurrentLearningPosition(plugin, options = {}) {
+  const prepared = await prepareCurrentLearningPosition(plugin, options);
+  return insertPreparedMarkdown(plugin, prepared, buildPositionMarkdown(prepared.resource, prepared.position));
 }
 
 async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
@@ -89,12 +131,12 @@ function uniqueCapturePath(vault, resource, position) {
   throw new Error('同一位置的截图文件过多，无法生成唯一文件名。');
 }
 
-function clipboardPngBuffer() {
-  if (!clipboard?.readImage) throw new Error('Electron 剪贴板图片接口不可用。');
-  const image = clipboard.readImage();
-  if (!image || image.isEmpty?.()) throw new Error('Bridge 没有把有效截图写入剪贴板。');
+function clipboardPngBuffer(clipboardImpl = clipboard) {
+  if (!clipboardImpl?.readImage) throw new Error('Electron 剪贴板图片接口不可用。');
+  const image = clipboardImpl.readImage();
+  if (!image || image.isEmpty?.()) throw new Error('播放器没有把有效截图写入剪贴板。');
   const png = image.toPNG?.();
-  if (!png || !png.length) throw new Error('无法把 Bridge 截图转换为 PNG。');
+  if (!png || !png.length) throw new Error('无法把播放器截图转换为 PNG。');
   return Buffer.from(png);
 }
 
@@ -110,22 +152,55 @@ async function saveCaptureToVault(plugin, resource, position, pngBuffer) {
   return vaultPath;
 }
 
-async function captureFrameAndInsertLearningPosition(plugin, options = {}) {
+async function prepareCaptureLearningPosition(plugin, options = {}) {
   const editor = activeEditor(plugin, options.editor);
-  const bridgeRequest = options.bridgeRequest || requestPotPlayerBridge;
-  const response = await bridgeRequest(options.requestUrl || requestUrl, 'capture', options.bridgeOptions || {});
+  const response = await requestLearningPlayer(plugin, 'capture', options);
   const context = resolveLearningContext(plugin, response.media);
-  const png = options.readClipboardPng ? options.readClipboardPng() : clipboardPngBuffer();
-  const vaultPath = await saveCaptureToVault(plugin, context.resource, context.position, png);
-  const markdown = buildCaptureMarkdown(context.resource, context.position, vaultPath);
-  editor.replaceSelection(markdown);
-  await persistRecordedPosition(plugin, context.resource, context.position);
-  return { ...context, markdown, vaultPath };
+  const png = options.readClipboardPng ? options.readClipboardPng() : clipboardPngBuffer(options.clipboard || clipboard);
+  return { ...context, editor, player: response, png };
+}
+
+async function commitPreparedCapture(plugin, prepared, markdownBuilder) {
+  const vaultPath = await saveCaptureToVault(plugin, prepared.resource, prepared.position, prepared.png);
+  const markdown = markdownBuilder(vaultPath);
+  const result = await insertPreparedMarkdown(plugin, prepared, markdown);
+  return { ...result, vaultPath };
+}
+
+async function captureFrameAndInsertLearningPosition(plugin, options = {}) {
+  const prepared = await prepareCaptureLearningPosition(plugin, options);
+  return commitPreparedCapture(
+    plugin,
+    prepared,
+    (vaultPath) => buildCaptureMarkdown(prepared.resource, prepared.position, vaultPath)
+  );
+}
+
+async function commitPreparedTypedNote(plugin, prepared, noteText) {
+  return insertPreparedMarkdown(
+    plugin,
+    prepared,
+    buildNotePositionMarkdown(prepared.resource, prepared.position, noteText)
+  );
+}
+
+async function commitPreparedCaptureTypedNote(plugin, prepared, noteText) {
+  return commitPreparedCapture(
+    plugin,
+    prepared,
+    (vaultPath) => buildCaptureNoteMarkdown(prepared.resource, prepared.position, vaultPath, noteText)
+  );
 }
 
 async function checkPotPlayerBridge(options = {}) {
-  const bridgeRequest = options.bridgeRequest || requestPotPlayerBridge;
-  return bridgeRequest(options.requestUrl || requestUrl, 'ping', options.bridgeOptions || {});
+  if (typeof options.bridgeRequest === 'function') {
+    return options.bridgeRequest(options.requestUrl || requestUrl, 'ping', options.bridgeOptions || {});
+  }
+  if (options.native !== false && (process.platform === 'win32' || options.nativeOptions?.allowNonWindows)) {
+    try { return await (options.nativeRequest || requestNativePotPlayer)('ping', options.nativeOptions || {}); }
+    catch (error) { if (options.nativeOnly) throw error; }
+  }
+  return requestPotPlayerBridge(options.requestUrl || requestUrl, 'ping', options.bridgeOptions || {});
 }
 
 function commandErrorText(prefix, error) {
@@ -137,12 +212,12 @@ function registerLearningCaptureCommands(plugin) {
 
   plugin.addCommand({
     id: 'check-potplayer-bridge',
-    name: '检查 PotPlayer Bridge',
+    name: '检查视频笔记增强状态',
     callback: () => {
-      new Notice('正在检查 PotPlayer Bridge…', 1500);
+      new Notice('正在检查视频笔记增强…', 1500);
       void checkPotPlayerBridge()
-        .then((result) => new Notice(`PotPlayer Bridge 已连接 · 协议 v${result.version}`))
-        .catch((error) => new Notice(commandErrorText('PotPlayer Bridge 不可用', error), 6000));
+        .then((result) => new Notice(`视频笔记增强已连接 · ${result.transport || `协议 v${result.version}`}`))
+        .catch((error) => new Notice(commandErrorText('视频笔记增强不可用', error), 6000));
     }
   });
   plugin.addCommand({
@@ -175,10 +250,17 @@ module.exports = {
   checkPotPlayerBridge,
   clipboardPngBuffer,
   commandErrorText,
+  commitPreparedCapture,
+  commitPreparedCaptureTypedNote,
+  commitPreparedTypedNote,
   ensureVaultFolder,
   insertCurrentLearningPosition,
+  insertPreparedMarkdown,
   persistRecordedPosition,
+  prepareCaptureLearningPosition,
+  prepareCurrentLearningPosition,
   registerLearningCaptureCommands,
+  requestLearningPlayer,
   resolveLearningContext,
   saveCaptureToVault,
   uniqueCapturePath
