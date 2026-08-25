@@ -1,13 +1,22 @@
 'use strict';
 
 const { buildReferenceUri, normalizeReferencePosition } = require('./resource-reference.cjs');
+const {
+  DEFAULT_PRODUCT_SETTINGS,
+  normalizeOutputTemplate,
+  normalizeTimeDisplayFormat
+} = require('./product-settings.cjs');
 
-function formatPositionClock(position) {
+function formatPositionClock(position, mode = 'smart') {
   const normalized = normalizeReferencePosition(position);
   const total = Math.floor(normalized.seconds);
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
+  const format = normalizeTimeDisplayFormat(mode);
+  if (format === 'hms') {
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
   return hours > 0
     ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
     : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
@@ -22,40 +31,73 @@ function escapeMarkdownLabel(value) {
     .trim();
 }
 
+function renderOutputTemplate(template, values = {}) {
+  return String(template || '').replace(/\{([A-Za-z][A-Za-z0-9_-]*)\}/g, (match, token) => {
+    if (!Object.prototype.hasOwnProperty.call(values, token)) return match;
+    return String(values[token] ?? '');
+  });
+}
+
 function buildPositionMarkdown(resource, position, options = {}) {
   if (!resource?.id) throw new Error('无法为缺少 Resource ID 的资源生成回链。');
   const normalized = normalizeReferencePosition(position);
   const uri = buildReferenceUri({ resourceId: resource.id, position: normalized, version: 1 });
-  const time = formatPositionClock(normalized);
+  const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
   const title = escapeMarkdownLabel(options.title || resource.title || '学习资源');
-  return `[↗ ${title} · ${time}](${uri})`;
+  const template = normalizeOutputTemplate(
+    'backlinkTemplate',
+    options.template ?? options.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate
+  );
+  return renderOutputTemplate(template, { title, time, uri });
 }
 
 function normalizeUserNote(value) {
   return String(value ?? '').replace(/\r\n/g, '\n').trim();
 }
 
-function buildNotePositionMarkdown(resource, position, noteText) {
+function buildNotePositionMarkdown(resource, position, noteText, options = {}) {
   const note = normalizeUserNote(noteText);
   if (!note) throw new Error('笔记内容不能为空。');
-  const backlink = buildPositionMarkdown(resource, position, { title: '回到课程' });
-  return `${note}\n\n${backlink}`;
+  const backlink = buildPositionMarkdown(resource, position, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate('noteTemplate', options.noteTemplate ?? DEFAULT_PRODUCT_SETTINGS.noteTemplate);
+  return renderOutputTemplate(template, { note, backlink });
 }
 
-function buildCaptureMarkdown(resource, position, vaultImagePath) {
+function normalizeCaptureImage(vaultImagePath) {
   const imagePath = String(vaultImagePath || '').trim().replace(/\\/g, '/');
   if (!imagePath || imagePath.includes('..')) throw new Error('截图 Vault 路径无效。');
-  const backlink = buildPositionMarkdown(resource, position, { title: '回到课程' });
-  return `![[${imagePath}]]\n\n${backlink}`;
+  return `![[${imagePath}]]`;
 }
 
-function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText) {
-  const imagePath = String(vaultImagePath || '').trim().replace(/\\/g, '/');
-  if (!imagePath || imagePath.includes('..')) throw new Error('截图 Vault 路径无效。');
+function buildCaptureMarkdown(resource, position, vaultImagePath, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const backlink = buildPositionMarkdown(resource, position, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate('captureTemplate', options.captureTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureTemplate);
+  return renderOutputTemplate(template, { image, backlink });
+}
+
+function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
   const note = normalizeUserNote(noteText);
   if (!note) throw new Error('笔记内容不能为空。');
-  const backlink = buildPositionMarkdown(resource, position, { title: '回到课程' });
-  return `![[${imagePath}]]\n\n${note}\n\n${backlink}`;
+  const backlink = buildPositionMarkdown(resource, position, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate(
+    'captureNoteTemplate',
+    options.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate
+  );
+  return renderOutputTemplate(template, { image, note, backlink });
 }
 
 function sanitizeCaptureBaseName(value) {
@@ -70,7 +112,7 @@ function sanitizeCaptureBaseName(value) {
 function captureFileName(resource, position, extension = 'png') {
   const safeExtension = String(extension || 'png').toLowerCase();
   if (!/^[a-z0-9]{2,5}$/.test(safeExtension)) throw new Error('截图扩展名无效。');
-  const clock = formatPositionClock(position).replace(/:/g, '-');
+  const clock = formatPositionClock(position, 'smart').replace(/:/g, '-');
   return `${sanitizeCaptureBaseName(resource?.title)}-${clock}.${safeExtension}`;
 }
 
@@ -82,6 +124,8 @@ module.exports = {
   captureFileName,
   escapeMarkdownLabel,
   formatPositionClock,
+  normalizeCaptureImage,
   normalizeUserNote,
+  renderOutputTemplate,
   sanitizeCaptureBaseName
 };
