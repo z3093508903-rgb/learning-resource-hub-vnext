@@ -42,7 +42,7 @@ function localPluginFixture() {
   return { plugin, resource, inserted };
 }
 
-test('learning capture commands register bridge check plus official editor callbacks', () => {
+test('learning capture commands always register ordinary callbacks so failures cannot disappear silently', () => {
   const { registerLearningCaptureCommands } = loadCaptureModule();
   const commands = [];
   registerLearningCaptureCommands({ addCommand: (command) => commands.push(command) });
@@ -52,10 +52,10 @@ test('learning capture commands register bridge check plus official editor callb
     'capture-frame-and-insert-learning-position'
   ]);
   assert.equal(typeof commands[0].callback, 'function');
-  assert.equal(typeof commands[1].editorCallback, 'function');
-  assert.equal(typeof commands[2].editorCallback, 'function');
-  assert.equal(commands[1].callback, undefined);
-  assert.equal(commands[2].callback, undefined);
+  assert.equal(typeof commands[1].callback, 'function');
+  assert.equal(typeof commands[2].callback, 'function');
+  assert.equal(commands[1].editorCallback, undefined);
+  assert.equal(commands[2].editorCallback, undefined);
 });
 
 test('bridge check uses only the ping route', async () => {
