@@ -3,6 +3,7 @@
 const { Notice, requestUrl } = require('obsidian');
 const { clipboard } = require('electron');
 const { resolveActiveMediaSession } = require('./media-session.cjs');
+const { resolveRememberedNoteTarget } = require('./note-target.cjs');
 const { requestPotPlayerBridge } = require('./potplayer-bridge.cjs');
 const { updateResumePosition } = require('./resource-resolver.cjs');
 const {
@@ -14,11 +15,8 @@ const {
 const CAPTURE_FOLDER = 'GoStudy/Captures';
 
 function activeEditor(plugin, preferredEditor = null) {
-  const editor = preferredEditor || plugin?.app?.workspace?.activeEditor?.editor;
-  if (!editor || typeof editor.replaceSelection !== 'function') {
-    throw new Error('请先打开一个可编辑的 Markdown 笔记，并把光标放到正文中。');
-  }
-  return editor;
+  if (preferredEditor && typeof preferredEditor.replaceSelection === 'function') return preferredEditor;
+  return resolveRememberedNoteTarget(plugin).editor;
 }
 
 function resolveLearningContext(plugin, bridgeMedia) {
