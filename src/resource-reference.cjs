@@ -3,6 +3,7 @@
 const REFERENCE_ACTION = 'go-study';
 const REFERENCE_VERSION = 1;
 const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v']);
+const ALLOWED_PROTOCOL_META_KEYS = new Set(['action']);
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 
 function normalizeResourceId(value) {
@@ -83,6 +84,13 @@ function parseProtocolParams(params) {
   const source = params && typeof params === 'object' ? params : {};
   const keys = Object.keys(source);
   for (const key of keys) {
+    if (ALLOWED_PROTOCOL_META_KEYS.has(key)) {
+      if (Array.isArray(source[key])) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
+      if (key === 'action' && source[key] != null && String(source[key]) !== REFERENCE_ACTION) {
+        throw new Error('Go Study 回链的协议 action 不匹配。');
+      }
+      continue;
+    }
     if (!ALLOWED_QUERY_KEYS.has(key)) throw new Error(`Go Study 回链包含不允许的参数：${key}。`);
     if (Array.isArray(source[key])) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
   }
@@ -94,6 +102,7 @@ function parseProtocolParams(params) {
 }
 
 module.exports = {
+  ALLOWED_PROTOCOL_META_KEYS,
   ALLOWED_QUERY_KEYS,
   REFERENCE_ACTION,
   REFERENCE_VERSION,
