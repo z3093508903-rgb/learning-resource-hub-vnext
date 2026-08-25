@@ -1,6 +1,10 @@
 'use strict';
 
-const { Notice, PluginSettingTab, Setting } = require('obsidian');
+const {
+  Notice,
+  PluginSettingTab = class {},
+  Setting = class {}
+} = require('obsidian');
 const {
   captureFrameAndInsertLearningPosition,
   checkPotPlayerBridge,
@@ -165,32 +169,35 @@ class GoStudySettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('保存笔记后继续播放')
       .setDesc('Alt+3 / Alt+4 按 Enter 保存后，自动让 PotPlayer 继续播放。')
-      .addToggle((toggle) => toggle
-        .setValue(settings.videoResumeAfterSave)
-        .setDisabled?.(!enabled)
-        .onChange(async (value) => {
+      .addToggle((toggle) => {
+        toggle.setValue(settings.videoResumeAfterSave);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
           await updateProductSetting(this.plugin, 'videoResumeAfterSave', value);
-        }));
+        });
+      });
 
     new Setting(containerEl)
       .setName('取消笔记后继续播放')
       .setDesc('Alt+3 / Alt+4 按 Esc 取消后，自动让 PotPlayer 继续播放。')
-      .addToggle((toggle) => toggle
-        .setValue(settings.videoResumeAfterCancel)
-        .setDisabled?.(!enabled)
-        .onChange(async (value) => {
+      .addToggle((toggle) => {
+        toggle.setValue(settings.videoResumeAfterCancel);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
           await updateProductSetting(this.plugin, 'videoResumeAfterCancel', value);
-        }));
+        });
+      });
 
     new Setting(containerEl)
       .setName('显示成功提示')
       .setDesc('成功记录后在屏幕角落短暂显示轻量提示；错误提示始终保留。')
-      .addToggle((toggle) => toggle
-        .setValue(settings.videoSuccessFeedback)
-        .setDisabled?.(!enabled)
-        .onChange(async (value) => {
+      .addToggle((toggle) => {
+        toggle.setValue(settings.videoSuccessFeedback);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
           await updateProductSetting(this.plugin, 'videoSuccessFeedback', value);
-        }));
+        });
+      });
 
     new Setting(containerEl)
       .setName('截图保存目录')
