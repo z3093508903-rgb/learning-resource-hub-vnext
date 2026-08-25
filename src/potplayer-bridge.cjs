@@ -77,6 +77,11 @@ function safeUnlink(filePath, unlinkSync = fs.unlinkSync) {
   catch {}
 }
 
+function parseBridgeJsonText(value) {
+  const text = String(value ?? '').replace(/^\uFEFF/, '');
+  return JSON.parse(text);
+}
+
 function normalizeBridgePayload(payload, route, version = BRIDGE_VERSION) {
   const body = payload && typeof payload === 'object' ? payload : {};
   if (!bridgePayloadOk(body.ok)) {
@@ -148,7 +153,7 @@ async function requestPotPlayerBridgeFile(route, options = {}) {
     while (Date.now() < deadline) {
       if (existsSync(responsePath)) {
         let payload;
-        try { payload = JSON.parse(readFileSync(responsePath, 'utf8')); }
+        try { payload = parseBridgeJsonText(readFileSync(responsePath, 'utf8')); }
         catch { throw new Error('Go Study Bridge 返回了损坏的响应文件。'); }
         if (String(payload?.id || '') !== requestId) throw new Error('Go Study Bridge 响应 ID 不匹配。');
         return normalizeBridgePayload(payload, route, BRIDGE_VERSION);
@@ -218,6 +223,7 @@ module.exports = {
   normalizeBridgeMedia,
   normalizeBridgePayload,
   normalizeBridgeToken,
+  parseBridgeJsonText,
   readBridgeToken,
   requestPotPlayerBridge,
   requestPotPlayerBridgeFile,
