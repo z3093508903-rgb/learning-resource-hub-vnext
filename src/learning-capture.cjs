@@ -16,7 +16,7 @@ const CAPTURE_FOLDER = 'GoStudy/Captures';
 function activeEditor(plugin, preferredEditor = null) {
   const editor = preferredEditor || plugin?.app?.workspace?.activeEditor?.editor;
   if (!editor || typeof editor.replaceSelection !== 'function') {
-    throw new Error('请先把光标放到一个可编辑的 Markdown 笔记中。');
+    throw new Error('请先打开一个可编辑的 Markdown 笔记，并把光标放到正文中。');
   }
   return editor;
 }
@@ -127,6 +127,10 @@ async function checkPotPlayerBridge(options = {}) {
   return bridgeRequest(options.requestUrl || requestUrl, 'ping', options.bridgeOptions || {});
 }
 
+function commandErrorText(prefix, error) {
+  return `${prefix}：${error instanceof Error ? error.message : String(error)}`;
+}
+
 function registerLearningCaptureCommands(plugin) {
   plugin.addCommand({
     id: 'check-potplayer-bridge',
@@ -134,25 +138,25 @@ function registerLearningCaptureCommands(plugin) {
     callback: () => {
       void checkPotPlayerBridge()
         .then((result) => new Notice(`PotPlayer Bridge 已连接 · 协议 v${result.version}`))
-        .catch((error) => new Notice(`PotPlayer Bridge 不可用：${error instanceof Error ? error.message : String(error)}`, 6000));
+        .catch((error) => new Notice(commandErrorText('PotPlayer Bridge 不可用', error), 6000));
     }
   });
   plugin.addCommand({
     id: 'insert-current-learning-position',
     name: '插入当前学习位置',
-    editorCallback: (editor) => {
-      void insertCurrentLearningPosition(plugin, { editor })
+    callback: () => {
+      void insertCurrentLearningPosition(plugin)
         .then((result) => new Notice(`已记录：${result.resource.title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`))
-        .catch((error) => new Notice(`记录学习位置失败：${error instanceof Error ? error.message : String(error)}`, 6000));
+        .catch((error) => new Notice(commandErrorText('记录学习位置失败', error), 6000));
     }
   });
   plugin.addCommand({
     id: 'capture-frame-and-insert-learning-position',
     name: '截图并插入当前学习位置',
-    editorCallback: (editor) => {
-      void captureFrameAndInsertLearningPosition(plugin, { editor })
+    callback: () => {
+      void captureFrameAndInsertLearningPosition(plugin)
         .then((result) => new Notice(`截图已保存：${result.vaultPath}`))
-        .catch((error) => new Notice(`截图记录失败：${error instanceof Error ? error.message : String(error)}`, 6000));
+        .catch((error) => new Notice(commandErrorText('截图记录失败', error), 6000));
     }
   });
 }
@@ -164,6 +168,7 @@ module.exports = {
   capturePathCandidate,
   checkPotPlayerBridge,
   clipboardPngBuffer,
+  commandErrorText,
   ensureVaultFolder,
   insertCurrentLearningPosition,
   persistRecordedPosition,
