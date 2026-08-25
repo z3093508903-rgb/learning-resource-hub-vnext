@@ -44,6 +44,13 @@ test('bridge client uses only fixed loopback endpoints and bearer auth', async (
   assert.equal(calls.length, 1);
 });
 
+test('bridge client fails fast when the local HTTP bridge accepts TCP but never responds', async () => {
+  await assert.rejects(
+    () => requestPotPlayerBridge(() => new Promise(() => {}), 'ping', { token: TOKEN, timeoutMs: 20 }),
+    /请求超时/
+  );
+});
+
 test('current and capture responses validate media positions and clipboard transport', async () => {
   const current = await requestPotPlayerBridge(async () => ({
     status: 200,
