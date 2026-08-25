@@ -41,7 +41,7 @@ function currentProductSettings(plugin) {
     videoResumeAfterCancel: boolOr(ui.videoResumeAfterCancel, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterCancel),
     videoSuccessFeedback: boolOr(ui.videoSuccessFeedback, DEFAULT_PRODUCT_SETTINGS.videoSuccessFeedback),
     captureFolder,
-    backupRetention: clampInteger(ui.backupRetention, 3, 50, DEFAULT_PRODUCT_SETTINGS.backupRetention)
+    backupRetention: clampInteger(ui.backupRetention, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention)
   };
 }
 
@@ -64,7 +64,7 @@ async function updateProductSetting(plugin, key, value) {
   plugin.state.uiState ||= {};
   let next = value;
   if (key === 'captureFolder') next = normalizeCaptureFolder(value);
-  else if (key === 'backupRetention') next = clampInteger(value, 3, 50, DEFAULT_PRODUCT_SETTINGS.backupRetention);
+  else if (key === 'backupRetention') next = clampInteger(value, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention);
   else if (typeof DEFAULT_PRODUCT_SETTINGS[key] === 'boolean') next = Boolean(value);
   plugin.state.uiState[key] = next;
   await plugin.persist();
