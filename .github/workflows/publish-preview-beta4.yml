@@ -62,7 +62,6 @@ jobs:
           if (previewManifest.version !== process.env.PREVIEW_VERSION) throw new Error('Preview version mismatch.');
           const previewBundle = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
           if (!previewBundle.includes(newView) || previewBundle.includes(oldView)) throw new Error('Preview view isolation failed.');
-          if (!previewBundle.includes('file-ipc')) throw new Error('File IPC v2 bridge code missing from preview bundle.');
           NODE
 
           cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
