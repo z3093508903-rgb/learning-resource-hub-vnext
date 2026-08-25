@@ -136,6 +136,7 @@ function registerLearningCaptureCommands(plugin) {
     id: 'check-potplayer-bridge',
     name: '检查 PotPlayer Bridge',
     callback: () => {
+      new Notice('正在检查 PotPlayer Bridge…', 1500);
       void checkPotPlayerBridge()
         .then((result) => new Notice(`PotPlayer Bridge 已连接 · 协议 v${result.version}`))
         .catch((error) => new Notice(commandErrorText('PotPlayer Bridge 不可用', error), 6000));
@@ -145,6 +146,7 @@ function registerLearningCaptureCommands(plugin) {
     id: 'insert-current-learning-position',
     name: '插入当前学习位置',
     callback: () => {
+      new Notice('正在读取 PotPlayer 当前学习位置…', 1500);
       void insertCurrentLearningPosition(plugin)
         .then((result) => new Notice(`已记录：${result.resource.title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`))
         .catch((error) => new Notice(commandErrorText('记录学习位置失败', error), 6000));
@@ -154,6 +156,7 @@ function registerLearningCaptureCommands(plugin) {
     id: 'capture-frame-and-insert-learning-position',
     name: '截图并插入当前学习位置',
     callback: () => {
+      new Notice('正在读取 PotPlayer 当前帧…', 1500);
       void captureFrameAndInsertLearningPosition(plugin)
         .then((result) => new Notice(`截图已保存：${result.vaultPath}`))
         .catch((error) => new Notice(commandErrorText('截图记录失败', error), 6000));
