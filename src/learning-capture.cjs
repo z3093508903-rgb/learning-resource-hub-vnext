@@ -35,6 +35,17 @@ function resolveLearningContext(plugin, playerMedia) {
   );
 }
 
+function noteOutputOptions(plugin) {
+  const settings = currentProductSettings(plugin);
+  return {
+    timeFormat: settings.timeDisplayFormat,
+    backlinkTemplate: settings.backlinkTemplate,
+    noteTemplate: settings.noteTemplate,
+    captureTemplate: settings.captureTemplate,
+    captureNoteTemplate: settings.captureNoteTemplate
+  };
+}
+
 async function persistRecordedPosition(plugin, resource, position) {
   updateResumePosition(plugin.state.resources[resource.id], position);
   plugin.activeMediaSession = {
@@ -94,7 +105,11 @@ async function insertPreparedMarkdown(plugin, prepared, markdown) {
 
 async function insertCurrentLearningPosition(plugin, options = {}) {
   const prepared = await prepareCurrentLearningPosition(plugin, options);
-  return insertPreparedMarkdown(plugin, prepared, buildPositionMarkdown(prepared.resource, prepared.position));
+  return insertPreparedMarkdown(
+    plugin,
+    prepared,
+    buildPositionMarkdown(prepared.resource, prepared.position, noteOutputOptions(plugin))
+  );
 }
 
 async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
@@ -176,7 +191,7 @@ async function captureFrameAndInsertLearningPosition(plugin, options = {}) {
   return commitPreparedCapture(
     plugin,
     prepared,
-    (vaultPath) => buildCaptureMarkdown(prepared.resource, prepared.position, vaultPath)
+    (vaultPath) => buildCaptureMarkdown(prepared.resource, prepared.position, vaultPath, noteOutputOptions(plugin))
   );
 }
 
@@ -184,7 +199,7 @@ async function commitPreparedTypedNote(plugin, prepared, noteText) {
   return insertPreparedMarkdown(
     plugin,
     prepared,
-    buildNotePositionMarkdown(prepared.resource, prepared.position, noteText)
+    buildNotePositionMarkdown(prepared.resource, prepared.position, noteText, noteOutputOptions(plugin))
   );
 }
 
@@ -192,7 +207,13 @@ async function commitPreparedCaptureTypedNote(plugin, prepared, noteText) {
   return commitPreparedCapture(
     plugin,
     prepared,
-    (vaultPath) => buildCaptureNoteMarkdown(prepared.resource, prepared.position, vaultPath, noteText)
+    (vaultPath) => buildCaptureNoteMarkdown(
+      prepared.resource,
+      prepared.position,
+      vaultPath,
+      noteText,
+      noteOutputOptions(plugin)
+    )
   );
 }
 
@@ -260,6 +281,7 @@ module.exports = {
   ensureVaultFolder,
   insertCurrentLearningPosition,
   insertPreparedMarkdown,
+  noteOutputOptions,
   persistRecordedPosition,
   prepareCaptureLearningPosition,
   prepareCurrentLearningPosition,

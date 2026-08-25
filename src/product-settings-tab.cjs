@@ -19,9 +19,17 @@ const {
 } = require('./immersive-hotkeys.cjs');
 const { immersiveShortcuts } = require('./native-potplayer.cjs');
 const {
+  DEFAULT_PRODUCT_SETTINGS,
   currentProductSettings,
+  resetOutputTemplates,
   updateProductSetting
 } = require('./product-settings.cjs');
+const {
+  buildCaptureMarkdown,
+  buildCaptureNoteMarkdown,
+  buildNotePositionMarkdown,
+  buildPositionMarkdown
+} = require('./resource-note.cjs');
 
 function section(containerEl, title, description = '') {
   const heading = containerEl.createEl('h3', { text: title });
@@ -44,10 +52,33 @@ async function setInterfaceTips(plugin, value) {
   await plugin.workbenchLeaf?.view?.render?.();
 }
 
+function noteOutputOptions(settings) {
+  return {
+    timeFormat: settings.timeDisplayFormat,
+    backlinkTemplate: settings.backlinkTemplate,
+    noteTemplate: settings.noteTemplate,
+    captureTemplate: settings.captureTemplate,
+    captureNoteTemplate: settings.captureNoteTemplate
+  };
+}
+
+function noteOutputPreview(settings) {
+  const resource = { id: 'preview-resource', title: '高等数学' };
+  const position = { type: 'time', seconds: 754 };
+  const options = noteOutputOptions(settings);
+  return [
+    `Alt+1 · 仅回链\n${buildPositionMarkdown(resource, position, options)}`,
+    `Alt+2 · 截图回链\n${buildCaptureMarkdown(resource, position, 'GoStudy/Captures/example.png', options)}`,
+    `Alt+3 · 快速笔记\n${buildNotePositionMarkdown(resource, position, '这里老师讲的是极限存在的必要条件。', options)}`,
+    `Alt+4 · 截图笔记\n${buildCaptureNoteMarkdown(resource, position, 'GoStudy/Captures/example.png', '这一帧的公式需要重新推导一次。', options)}`
+  ].join('\n\n');
+}
+
 class GoStudySettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
+    this.outputPreviewEl = null;
   }
 
   display() {
@@ -55,13 +86,26 @@ class GoStudySettingsTab extends PluginSettingTab {
     containerEl.empty();
     containerEl.createEl('h2', { text: 'Go Study' });
     containerEl.createEl('p', {
-      text: '资源管理保持轻量；视频笔记增强按需开启。后续时间戳、回链和笔记模板会继续收纳在这里。',
+      text: '资源管理保持轻量；视频笔记增强和笔记输出格式都可以按需定制。',
       cls: 'setting-item-description'
     });
 
     this.renderWorkbenchSettings(containerEl);
     this.renderVideoSettings(containerEl);
+    this.renderNoteOutputSettings(containerEl);
     this.renderDataSettings(containerEl);
+  }
+
+  refreshOutputPreview() {
+    if (!this.outputPreviewEl) return;
+    try {
+      this.outputPreviewEl.setText?.(noteOutputPreview(currentProductSettings(this.plugin)));
+      if (!this.outputPreviewEl.setText) this.outputPreviewEl.textContent = noteOutputPreview(currentProductSettings(this.plugin));
+    } catch (error) {
+      const message = commandErrorText('模板预览失败', error);
+      this.outputPreviewEl.setText?.(message);
+      if (!this.outputPreviewEl.setText) this.outputPreviewEl.textContent = message;
+    }
   }
 
   renderWorkbenchSettings(containerEl) {
@@ -201,7 +245,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('截图保存目录')
-      .setDesc('Vault 内的相对路径，例如 GoStudy/Captures 或 Notes/Video Captures。')
+      .setDesc('Vault 内的相对路径，例如 GoStudy/Captures 或 Notes/Video Captures。使用独立附件管理插件的用户也可以继续交给自己的附件工作流管理。')
       .addText((text) => {
         text.setValue(settings.captureFolder);
         text.setPlaceholder('GoStudy/Captures');
@@ -238,6 +282,91 @@ class GoStudySettingsTab extends PluginSettingTab {
         }));
   }
 
+  renderNoteOutputSettings(containerEl) {
+    const settings = currentProductSettings(this.plugin);
+    section(containerEl, '笔记输出格式', '只改变写进 Markdown 的显示形式；永久 Resource ID 回链本身不会被改成临时路径。');
+
+    new Setting(containerEl)
+      .setName('时间显示格式')
+      .setDesc('“自动”在不足 1 小时时显示 MM:SS；“固定”始终显示 HH:MM:SS。')
+      .addDropdown((dropdown) => dropdown
+        .addOption('smart', '自动 · 12:34 / 01:12:34')
+        .addOption('hms', '固定 · 00:12:34')
+        .setValue(settings.timeDisplayFormat)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'timeDisplayFormat', value);
+          this.refreshOutputPreview();
+        }));
+
+    this.addTemplateSetting(
+      containerEl,
+      'backlinkTemplate',
+      '回链模板',
+      '可用变量：{title}、{time}、{uri}。必须保留 {uri}，否则会失去回到课程的能力。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'noteTemplate',
+      'Alt+3 快速笔记模板',
+      '可用变量：{note}、{backlink}。两者都必须保留。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'captureTemplate',
+      'Alt+2 截图模板',
+      '可用变量：{image}、{backlink}。两者都必须保留。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'captureNoteTemplate',
+      'Alt+4 截图笔记模板',
+      '可用变量：{image}、{note}、{backlink}。三者都必须保留。'
+    );
+
+    new Setting(containerEl)
+      .setName('恢复默认输出格式')
+      .setDesc('恢复 Go Study 默认的时间显示和四种 Markdown 输出模板。')
+      .addButton((button) => button
+        .setButtonText('恢复默认')
+        .onClick(async () => {
+          await resetOutputTemplates(this.plugin);
+          new Notice('已恢复默认笔记输出格式。');
+          this.display();
+        }));
+
+    containerEl.createEl('h4', { text: '实时示例' });
+    containerEl.createEl('p', {
+      text: '下面只展示最终 Markdown 文本。真实回链中的 Resource ID 与位置仍由 Go Study 自动生成。',
+      cls: 'setting-item-description'
+    });
+    this.outputPreviewEl = containerEl.createEl('pre', { cls: 'go-study-note-output-preview' });
+    this.refreshOutputPreview();
+  }
+
+  addTemplateSetting(containerEl, key, name, description) {
+    const settings = currentProductSettings(this.plugin);
+    new Setting(containerEl)
+      .setName(name)
+      .setDesc(description)
+      .addTextArea((text) => {
+        text.setValue(settings[key]);
+        text.setPlaceholder(DEFAULT_PRODUCT_SETTINGS[key]);
+        if (text.inputEl) text.inputEl.rows = Math.min(7, Math.max(2, settings[key].split('\n').length + 1));
+        const commit = async () => {
+          try {
+            const next = await updateProductSetting(this.plugin, key, text.getValue());
+            text.setValue(next[key]);
+            this.refreshOutputPreview();
+            new Notice(`${name}已更新。`);
+          } catch (error) {
+            text.setValue(currentProductSettings(this.plugin)[key]);
+            new Notice(commandErrorText(`${name}无效`, error), 6000);
+          }
+        };
+        text.inputEl?.addEventListener('change', () => void commit());
+      });
+  }
+
   renderDataSettings(containerEl) {
     const settings = currentProductSettings(this.plugin);
     section(containerEl, '数据与安全', '只影响 Go Study 自己的状态备份，不会删除 Vault、OpenList、B站或 Anki 原始资料。');
@@ -261,6 +390,8 @@ class GoStudySettingsTab extends PluginSettingTab {
 
 module.exports = {
   GoStudySettingsTab,
+  noteOutputOptions,
+  noteOutputPreview,
   section,
   setInterfaceTips,
   videoStatusText

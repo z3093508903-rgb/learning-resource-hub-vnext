@@ -44,9 +44,44 @@ test('capture note markdown keeps screenshot, typed note and backlink together',
   assert.ok(markdown.startsWith('![[GoStudy/Captures/高数-01-30.png]]\n\n这一帧是关键公式\n\n[↗ 回到课程 · 01:30](obsidian://go-study?'));
 });
 
-test('capture filenames are Windows-safe and position-stable', () => {
+test('time display supports smart and fixed HH:MM:SS modes', () => {
   assert.equal(formatPositionClock({ type: 'time', seconds: 5 }), '00:05');
+  assert.equal(formatPositionClock({ type: 'time', seconds: 5 }, 'hms'), '00:00:05');
   assert.equal(formatPositionClock({ type: 'time', seconds: 3661 }), '01:01:01');
+  assert.equal(formatPositionClock({ type: 'time', seconds: 3661 }, 'hms'), '01:01:01');
+});
+
+test('custom backlink template changes presentation without changing permanent URI data', () => {
+  const resource = { id: 'resource-123', title: '高数' };
+  const markdown = buildPositionMarkdown(resource, { type: 'time', seconds: 65 }, {
+    timeFormat: 'hms',
+    backlinkTemplate: '🎬 [{time}]({uri}) · {title}'
+  });
+  assert.ok(markdown.startsWith('🎬 [00:01:05](obsidian://go-study?'));
+  assert.ok(markdown.endsWith(' · 高数'));
+  const uri = markdown.match(/\((obsidian:\/\/go-study\?[^)]+)\)/)?.[1];
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.resourceId, 'resource-123');
+  assert.equal(parsed.position.seconds, 65);
+});
+
+test('custom note and capture-note templates can reorder visible blocks safely', () => {
+  const resource = { id: 'resource-123', title: '高数' };
+  const note = buildNotePositionMarkdown(resource, { type: 'time', seconds: 90 }, '关键结论', {
+    backlinkTemplate: '[{time}]({uri})',
+    noteTemplate: '> {note}\n> {backlink}'
+  });
+  assert.ok(note.startsWith('> 关键结论\n> [01:30](obsidian://go-study?'));
+
+  const captureNote = buildCaptureNoteMarkdown(resource, { type: 'time', seconds: 90 }, 'Shots/a.png', '公式', {
+    backlinkTemplate: '[{time}]({uri})',
+    captureNoteTemplate: '{note}\n\n{backlink}\n\n{image}'
+  });
+  assert.ok(captureNote.startsWith('公式\n\n[01:30](obsidian://go-study?'));
+  assert.ok(captureNote.endsWith('![[Shots/a.png]]'));
+});
+
+test('capture filenames are Windows-safe and position-stable', () => {
   assert.equal(sanitizeCaptureBaseName('课程: 01 / 入门?*'), '课程- 01 - 入门--');
   assert.equal(captureFileName({ title: '课程: 01' }, { type: 'time', seconds: 3661 }), '课程- 01-01-01-01.png');
 });
