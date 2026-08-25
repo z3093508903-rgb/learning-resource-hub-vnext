@@ -7,6 +7,7 @@ const path = require('node:path');
 
 const uiSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'learning-controls-ui.cjs'), 'utf8');
 const runtimeSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'runtime-entry.cjs'), 'utf8');
+const settingsSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'product-settings-tab.cjs'), 'utf8');
 
 test('immersive UI stays lightweight and does not restore the wide control strip', () => {
   assert.doesNotMatch(uiSource, /rh-next-learning-controls\s*\{/);
@@ -23,21 +24,31 @@ test('course relink actions live in project-page right-click management', () => 
   assert.match(uiSource, /OpenListResourceRelinkModal/);
 });
 
-test('settings center exposes workbench, optional video enhancement and data controls', () => {
+test('settings use a real PluginSettingTab and no longer scrape Obsidian settings DOM', () => {
+  assert.match(settingsSource, /class GoStudySettingsTab extends PluginSettingTab/);
+  assert.match(runtimeSource, /addSettingTab\(tab\)/);
+  assert.match(runtimeSource, /new GoStudySettingsTab\(this\.app, this\)/);
+  assert.doesNotMatch(uiSource, /findSettingsContainer|renderSettingsCenter|querySelectorAll\?\.\('h2'\)/);
+});
+
+test('native settings tab exposes workbench, optional video enhancement and data controls', () => {
   for (const label of [
-    '进入工作台时自动收起 Obsidian 侧栏',
+    '显示界面说明',
+    '进入工作台时自动收起左侧栏',
     '启用视频笔记增强',
+    '当前状态',
     '保存笔记后继续播放',
     '取消笔记后继续播放',
-    '显示轻量成功提示',
+    '显示成功提示',
     '截图保存目录',
     '截图记录测试',
     '恢复默认快捷键',
-    '自动备份保留数量'
-  ]) assert.match(uiSource, new RegExp(label));
-  assert.match(uiSource, /updateProductSetting/);
-  assert.match(uiSource, /updateImmersiveShortcut/);
-  assert.match(uiSource, /captureFrameAndInsertLearningPosition/);
+    '自动备份保留数量',
+    '当前插件版本'
+  ]) assert.match(settingsSource, new RegExp(label));
+  assert.match(settingsSource, /updateProductSetting/);
+  assert.match(settingsSource, /updateImmersiveShortcut/);
+  assert.match(settingsSource, /captureFrameAndInsertLearningPosition/);
 });
 
 test('disabled video enhancement removes the workbench status dot', () => {
