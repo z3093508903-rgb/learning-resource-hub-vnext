@@ -1,4 +1,4 @@
-name: Preview Release Runner v3
+name: Preview Release Runner beta.3
 
 on:
   pull_request:
@@ -10,15 +10,15 @@ permissions:
 
 jobs:
   publish-preview:
-    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'preview/go-study-0.3.0-beta.2'
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'preview/go-study-0.3.0-beta.3'
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      PREVIEW_VERSION: 0.3.0-beta.2
+      PREVIEW_VERSION: 0.3.0-beta.3
       PREVIEW_ID: go-study-preview
       PREVIEW_NAME: Go Study Preview
-      RELEASE_TAG: go-study-preview-v0.3.0-beta.2
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.3
     steps:
       - name: Checkout preview head
         uses: actions/checkout@v4
@@ -63,40 +63,34 @@ jobs:
           if (previewManifest.version !== process.env.PREVIEW_VERSION) throw new Error('Preview version mismatch.');
           const previewBundle = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
           if (!previewBundle.includes(newView) || previewBundle.includes(oldView)) throw new Error('Preview view isolation failed.');
+          if (!previewBundle.includes('insert-current-learning-position')) throw new Error('Learning position command missing from preview bundle.');
           NODE
 
           cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
-          # Go Study Preview 0.3.0-beta.2
+          # Go Study Preview 0.3.0-beta.3
 
-          Isolated Windows acceptance build.
+          Isolated Windows acceptance build for Resource ↔ Position ↔ Note testing.
 
           - Plugin ID: `go-study-preview`
           - Workbench view: `go-study-preview-workbench`
           - Separate plugin data from `learning-resource-hub-next`
           - Permanent backlinks intentionally remain `obsidian://go-study?...`
 
-          ## Beta.2 focus
-          This build fixes OpenList relink semantics found during beta.1 acceptance:
-          - **重新关联 OpenList 课程目录** is now the primary recovery flow.
-          - Choose any resource in the moved course, confirm the inferred old course root, enter the new course directory, preview, then migrate once.
-          - Every matching Resource keeps its existing ID; Go Study updates all matching locators in one batch.
-          - Module display roots and path-scoped resource groups move with the directory so the UI does not create a second virtual folder tree.
-          - Single-file relink remains available as **重新关联单个 OpenList 文件（高级）**.
+          ## Beta.3 focus
+          This build fixes a real-device acceptance issue where `插入当前学习位置` / `截图并插入当前学习位置` could appear to do nothing when Obsidian did not invoke an editor-only callback. Both commands now always run through ordinary callbacks, resolve the current Markdown editor themselves, and always show a success or failure Notice.
 
           ## Install / upgrade
-          Replace the files inside `.obsidian/plugins/go-study-preview/` with this build, reload Obsidian, and keep **Go Study Preview** enabled.
+          Replace the files inside `.obsidian/plugins/go-study-preview/` with this build, keep `data.json`, reload Obsidian, and keep **Go Study Preview** enabled.
 
           ## Acceptance
-          1. Use disposable Preview data.
-          2. Move/rename an OpenList course directory containing multiple imported videos.
-          3. Run **重新关联 OpenList 课程目录**.
-          4. Pick any video from that course; verify the old directory is inferred correctly.
-          5. Enter the new course directory and generate the preview.
-          6. Verify the preview count matches all Go Study resources under the old directory, not just the selected video.
-          7. Confirm the migration.
-          8. Verify the existing module keeps one folder tree, all migrated videos open from the new path, and no duplicate Resources are created.
+          1. Start the Go Study Bridge helper and run **检查 PotPlayer Bridge**.
+          2. Launch a video from Go Study Preview so an active Resource session is established.
+          3. Open an editable Markdown note and place the cursor in the body.
+          4. Run **插入当前学习位置**. The command must either insert a permanent `obsidian://go-study?...` backlink and show success, or show an explicit error Notice; silent no-op is a failure.
+          5. Close PotPlayer and click the inserted backlink. Verify the same Resource opens near the recorded timestamp.
+          6. Run **截图并插入当前学习位置** and verify a PNG is written under `GoStudy/Captures/`, Markdown embeds it, and the adjacent backlink returns to the same Resource/time.
 
-          Do not use important production data for this beta.
+          Do not delete `data.json` when upgrading from beta.2; preserving it is part of this acceptance cycle.
           EOF
 
           cd dist-preview
@@ -108,7 +102,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
-          NOTES='Go Study Preview beta.2 fixes OpenList course-directory relink: batch locator migration plus module display-root/group path synchronization. Plugin ID remains go-study-preview and data stays isolated from learning-resource-hub-next.'
+          NOTES='Go Study Preview beta.3 fixes silent learning-position/capture commands on real Obsidian installs. Commands now always execute, resolve the active Markdown editor themselves, and report explicit success/failure. Plugin ID remains go-study-preview and Preview data remains isolated.'
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
             gh release upload "$RELEASE_TAG" \
               "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
