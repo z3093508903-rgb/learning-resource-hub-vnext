@@ -1,0 +1,156 @@
+name: Preview Release Runner beta.11
+
+on:
+  pull_request:
+    branches:
+      - preview-release-runner
+
+permissions:
+  contents: read
+
+jobs:
+  publish-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'preview/go-study-0.3.0-beta.11'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.11
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.11
+    steps:
+      - name: Checkout preview head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify source, build and tests
+        run: npm run check && npm run build && npm test
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Isolated Go Study preview build for note-output template acceptance.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error(`Expected view type not found: ${oldView}`);
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const previewBundle = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          if (!previewBundle.includes(newView) || previewBundle.includes(oldView)) throw new Error('Preview view isolation failed.');
+          for (const required of [
+            '笔记输出格式',
+            '时间显示格式',
+            '回链模板',
+            'Alt+3 快速笔记模板',
+            'Alt+2 截图模板',
+            'Alt+4 截图笔记模板',
+            '恢复默认输出格式',
+            'backlinkTemplate',
+            'captureNoteTemplate',
+            'normalizeOutputTemplate'
+          ]) {
+            if (!previewBundle.includes(required)) throw new Error(`Output template marker missing: ${required}`);
+          }
+          if (previewBundle.includes('registerCompanionEventPoller(this)')) throw new Error('Companion event poller must remain absent from normal runtime.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.11
+
+          Note-output formatting acceptance build.
+
+          ## Important
+          Keep your existing `data.json`. No AutoHotkey / markdown2potplayer helper is required.
+
+          ## What changed
+          Settings now include a fourth section: **笔记输出格式**.
+
+          Available variables:
+          - backlink: `{title}` `{time}` `{uri}`
+          - Alt+3 note: `{note}` `{backlink}`
+          - Alt+2 capture: `{image}` `{backlink}`
+          - Alt+4 capture note: `{image}` `{note}` `{backlink}`
+
+          Required variables cannot be removed, so formatting cannot silently destroy the permanent Go Study backlink or captured content.
+
+          ## Acceptance
+          1. Open **Settings → Go Study Preview → 笔记输出格式**.
+          2. Confirm the live example shows Alt+1 through Alt+4 Markdown output.
+          3. Change time display from **自动** to **固定 HH:MM:SS**. A position under one hour should change from `12:34` to `00:12:34` in the preview and real output.
+          4. Change backlink template to `🎬 [{time}]({uri}) · {title}` and test Alt+1. The note should use the new visible format while clicking it still returns to the same Resource/time.
+          5. Change Alt+3 template to `> {note}\n> {backlink}` and verify a real Alt+3 note uses blockquote formatting.
+          6. Reorder Alt+4 as `{note}\n\n{backlink}\n\n{image}` and verify the screenshot still saves and the backlink still works.
+          7. Try removing `{uri}` from the backlink template or `{image}` from the Alt+4 template. Go Study should reject the invalid template and keep the previous valid value.
+          8. Click **恢复默认输出格式** and confirm all four templates plus time display return to defaults.
+          9. Restart Obsidian once and confirm the chosen valid templates persist.
+
+          Screenshot storage behavior is intentionally unchanged in beta.11.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          NOTES='Go Study Preview beta.11 adds safe customizable timestamp, backlink, quick-note, screenshot and screenshot-note Markdown templates with required-variable validation, live settings preview and one-click reset. Resource ID and permanent backlink semantics remain unchanged.'
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md" --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "${{ github.event.pull_request.head.sha }}" \
+              --title "Go Study Preview ${PREVIEW_VERSION}" \
+              --notes "$NOTES" --prerelease \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md"
+          fi
+
+      - name: Verify published prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isPrerelease,url,assets > release.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const release = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+          if (release.tagName !== process.env.RELEASE_TAG) throw new Error('Release tag mismatch.');
+          if (!release.isPrerelease) throw new Error('Release must be prerelease.');
+          const names = new Set((release.assets || []).map((asset) => asset.name));
+          for (const required of [`go-study-preview-${process.env.PREVIEW_VERSION}.zip`, 'main.js', 'manifest.json', 'styles.css', 'TESTING.md']) {
+            if (!names.has(required)) throw new Error(`Missing asset: ${required}`);
+          }
+          NODE
