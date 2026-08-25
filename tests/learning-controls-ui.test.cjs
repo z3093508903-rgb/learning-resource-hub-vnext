@@ -31,7 +31,7 @@ test('settings use a real PluginSettingTab and no longer scrape Obsidian setting
   assert.doesNotMatch(uiSource, /findSettingsContainer|renderSettingsCenter|querySelectorAll\?\.\('h2'\)/);
 });
 
-test('native settings tab exposes workbench, optional video enhancement and data controls', () => {
+test('native settings tab exposes workbench, optional video enhancement, output formatting and data controls', () => {
   for (const label of [
     '显示界面说明',
     '进入工作台时自动收起左侧栏',
@@ -43,10 +43,19 @@ test('native settings tab exposes workbench, optional video enhancement and data
     '截图保存目录',
     '截图记录测试',
     '恢复默认快捷键',
+    '笔记输出格式',
+    '时间显示格式',
+    '回链模板',
+    'Alt+3 快速笔记模板',
+    'Alt+2 截图模板',
+    'Alt+4 截图笔记模板',
+    '恢复默认输出格式',
+    '实时示例',
     '自动备份保留数量',
     '当前插件版本'
-  ]) assert.match(settingsSource, new RegExp(label));
+  ]) assert.match(settingsSource, new RegExp(label.replace(/[+]/g, '\\+')));
   assert.match(settingsSource, /updateProductSetting/);
+  assert.match(settingsSource, /resetOutputTemplates/);
   assert.match(settingsSource, /updateImmersiveShortcut/);
   assert.match(settingsSource, /captureFrameAndInsertLearningPosition/);
 });
