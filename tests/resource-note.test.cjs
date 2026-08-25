@@ -6,6 +6,8 @@ const assert = require('node:assert/strict');
 const { parseReferenceUri } = require('../src/resource-reference.cjs');
 const {
   buildCaptureMarkdown,
+  buildCaptureNoteMarkdown,
+  buildNotePositionMarkdown,
   buildPositionMarkdown,
   captureFileName,
   formatPositionClock,
@@ -27,6 +29,19 @@ test('capture markdown combines a Vault image embed with the same permanent reso
   const markdown = buildCaptureMarkdown(resource, { type: 'time', seconds: 65 }, 'GoStudy/Captures/高数-01-05.png');
   assert.ok(markdown.startsWith('![[GoStudy/Captures/高数-01-05.png]]\n\n[↗ 回到课程 · 01:05](obsidian://go-study?'));
   assert.throws(() => buildCaptureMarkdown(resource, { type: 'time', seconds: 65 }, '../outside.png'), /Vault 路径/);
+});
+
+test('typed note markdown places user text immediately before the permanent backlink', () => {
+  const resource = { id: 'resource-123', title: '高数' };
+  const markdown = buildNotePositionMarkdown(resource, { type: 'time', seconds: 88 }, '这里老师解释了导数的几何意义');
+  assert.ok(markdown.startsWith('这里老师解释了导数的几何意义\n\n[↗ 回到课程 · 01:28](obsidian://go-study?'));
+  assert.throws(() => buildNotePositionMarkdown(resource, { type: 'time', seconds: 88 }, '   '), /不能为空/);
+});
+
+test('capture note markdown keeps screenshot, typed note and backlink together', () => {
+  const resource = { id: 'resource-123', title: '高数' };
+  const markdown = buildCaptureNoteMarkdown(resource, { type: 'time', seconds: 90 }, 'GoStudy/Captures/高数-01-30.png', '这一帧是关键公式');
+  assert.ok(markdown.startsWith('![[GoStudy/Captures/高数-01-30.png]]\n\n这一帧是关键公式\n\n[↗ 回到课程 · 01:30](obsidian://go-study?'));
 });
 
 test('capture filenames are Windows-safe and position-stable', () => {
