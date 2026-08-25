@@ -3,7 +3,10 @@
 const { Notice, requestUrl } = require('obsidian');
 const { clipboard } = require('electron');
 const { resolveActiveMediaSession } = require('./media-session.cjs');
-const { resolveRememberedNoteTarget } = require('./note-target.cjs');
+const {
+  registerRememberedNoteTarget,
+  resolveRememberedNoteTarget
+} = require('./note-target.cjs');
 const { requestPotPlayerBridge } = require('./potplayer-bridge.cjs');
 const { updateResumePosition } = require('./resource-resolver.cjs');
 const {
@@ -130,6 +133,8 @@ function commandErrorText(prefix, error) {
 }
 
 function registerLearningCaptureCommands(plugin) {
+  registerRememberedNoteTarget(plugin);
+
   plugin.addCommand({
     id: 'check-potplayer-bridge',
     name: '检查 PotPlayer Bridge',
