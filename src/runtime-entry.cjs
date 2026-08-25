@@ -6,10 +6,22 @@ const { installScopedUiFixes } = require('./ui-fixes.cjs');
 const { registerRememberedNoteTarget } = require('./note-target.cjs');
 const { registerImmersiveHotkeys } = require('./immersive-hotkeys.cjs');
 const { installLearningControls } = require('./learning-controls-ui.cjs');
+const { GoStudySettingsTab } = require('./product-settings-tab.cjs');
 const { currentProductSettings, ensureProductSettings } = require('./product-settings.cjs');
 const { pruneStateBackups } = require('./release-hardening.cjs');
 
 class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
+  addSettingTab(tab) {
+    // main.cjs still creates the original one-option setting tab. Intercept that
+    // registration and replace it with the real product settings tab instead of
+    // trying to inject DOM into Obsidian's settings page after the fact.
+    if (!this._goStudySettingsTabRegistered) {
+      this._goStudySettingsTabRegistered = true;
+      return super.addSettingTab(new GoStudySettingsTab(this.app, this));
+    }
+    return super.addSettingTab(tab);
+  }
+
   async onload() {
     await super.onload();
     const normalized = ensureProductSettings(this);
