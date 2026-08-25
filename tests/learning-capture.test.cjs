@@ -29,7 +29,7 @@ function localPluginFixture() {
     deletedAt: ''
   };
   const plugin = {
-    state: { resources: { [resource.id]: resource }, sources: {} },
+    state: { resources: { [resource.id]: resource }, sources: {}, uiState: {} },
     activeMediaSession: { resourceId: resource.id, startedAt: '2026-08-24T12:00:00Z', lastKnownPosition: null },
     resourceActions: () => ({ playTarget: { type: 'potplayer', target: 'C:\\Course\\lesson.mp4' } }),
     app: {
@@ -139,6 +139,27 @@ test('capture command saves PNG bytes into Vault then inserts image plus permane
   assert.match(inserted[0], /^!\[\[GoStudy\/Captures\//);
   assert.match(inserted[0], /obsidian:\/\/go-study\?/);
   assert.equal(result.vaultPath, binaries[0].path);
+});
+
+test('capture honors the configurable Vault screenshot folder', async () => {
+  const { captureFrameAndInsertLearningPosition } = loadCaptureModule();
+  const { plugin, inserted } = localPluginFixture();
+  plugin.state.uiState.captureFolder = 'Notes/Video Shots';
+  const existing = new Set();
+  const binaries = [];
+  plugin.app.vault = {
+    getAbstractFileByPath: (value) => existing.has(value) ? { path: value } : null,
+    createFolder: async (value) => { existing.add(value); },
+    createBinary: async (value, bytes) => { existing.add(value); binaries.push({ path: value, bytes: Buffer.from(bytes) }); }
+  };
+  const result = await captureFrameAndInsertLearningPosition(plugin, {
+    bridgeRequest: async () => ({ ok: true, media: { path: 'C:\\Course\\lesson.mp4', positionSeconds: 70 } }),
+    requestUrl: async () => {},
+    editor: { replaceSelection: (text) => inserted.push(text) },
+    readClipboardPng: () => Buffer.from([1, 2, 3])
+  });
+  assert.ok(result.vaultPath.startsWith('Notes/Video Shots/'));
+  assert.ok(inserted[0].startsWith('![[Notes/Video Shots/'));
 });
 
 test('capture validates editor before requesting a screenshot', async () => {
