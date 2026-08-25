@@ -72,6 +72,13 @@ test('arbitrary execution parameters are rejected', () => {
   }
 });
 
+test('raw backlink query cannot smuggle action metadata', () => {
+  assert.throws(
+    () => parseReferenceUri('obsidian://go-study?resource=resource-1&position=time%3A10&v=1&action=go-study'),
+    /不允许的参数/
+  );
+});
+
 test('duplicate parameters are rejected', () => {
   assert.throws(
     () => parseReferenceUri('obsidian://go-study?resource=resource-1&resource=resource-2&position=time%3A10&v=1'),
@@ -94,17 +101,28 @@ test('non-Go-Study Obsidian URIs and unexpected path/hash structures are rejecte
   );
 });
 
-test('Obsidian protocol-handler params use the same strict validation', () => {
+test('Obsidian protocol-handler params accept only the registered action metadata', () => {
+  const expected = {
+    resourceId: 'resource-1',
+    position: { type: 'time', seconds: 12.5 },
+    version: 1
+  };
   assert.deepEqual(parseProtocolParams({
     resource: 'resource-1',
     position: 'time:12.5',
     v: '1'
-  }), {
-    resourceId: 'resource-1',
-    position: { type: 'time', seconds: 12.5 },
-    version: 1
-  });
+  }), expected);
+  assert.deepEqual(parseProtocolParams({
+    action: 'go-study',
+    resource: 'resource-1',
+    position: 'time:12.5',
+    v: '1'
+  }), expected);
 
+  assert.throws(
+    () => parseProtocolParams({ action: 'other', resource: 'resource-1', position: 'time:12', v: '1' }),
+    /action 不匹配/
+  );
   assert.throws(
     () => parseProtocolParams({ resource: 'resource-1', position: 'time:12', v: '1', path: 'C:\\evil.exe' }),
     /不允许的参数/
