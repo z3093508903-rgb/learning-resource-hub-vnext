@@ -1,96 +1,81 @@
 # Go Study Immersive Controls v1
 
-## Product split
+## Product boundary
 
-Go Study must remain useful as a standalone desktop learning-resource manager. The optional Windows companion adds immersive video-note controls, but core resource browsing, projects, OpenList, Bilibili, Anki, Resume, backlinks, relink and folder migration must continue to work without the companion.
+Go Study remains fully useful as a standalone resource manager and learning launcher. The Windows/PotPlayer video-note layer is an **optional enhancement** for users who want immersive capture and note workflows.
 
-## v1 user experience
+Normal resource-management functions must not depend on PotPlayer, AutoHotkey, markdown2potplayer, or any external helper.
 
-### Standalone mode
-- visible Go Study controls for record position, capture+record, course-folder relink, single-file repair and Bridge status
-- command palette entries remain as fallback only
-- no companion required for normal resource management
+## Windows immersive controls
 
-### Enhanced video-note mode
-- PotPlayer can remain foreground
-- Alt+1 records the current learning position into the remembered Markdown note/cursor
-- Alt+2 captures the current video frame and inserts image + permanent backlink
-- Obsidian must not be foregrounded and no Ctrl+V automation is used
-- success feedback should be brief and non-blocking; failure must be explicit
+When video-note enhancement is enabled:
 
-## Architecture
+- `Alt+1` — insert current permanent resource backlink
+- `Alt+2` — capture current PotPlayer frame + permanent backlink
+- `Alt+3` — pause, open lightweight note input, Enter inserts note + backlink
+- `Alt+4` — pause/capture, open lightweight note input, Enter inserts image + note + backlink
 
-Go Study owns:
-- Resource ID / locator / resume position
-- backlink format
-- note formatting and Vault writes
-- remembered Markdown target
-- visible controls and status UI
-- companion event validation
+`Shift+Enter` adds a newline. `Esc` cancels.
 
-Go Study Companion owns only:
-- Windows global hotkeys
-- PotPlayer current media / time
-- PotPlayer frame capture
-- fixed action events to Go Study
+The hotkeys are configurable and can be disabled individually with an empty binding. Duplicate bindings are rejected.
 
-The companion must not send arbitrary commands, executable paths, arbitrary Markdown, or arbitrary filesystem writes.
+## Native implementation
 
-## IPC
+The normal runtime uses the plugin-owned Windows adapter:
 
-Keep authenticated File IPC v2 for Go Study -> Companion requests.
-Add a reverse event queue for Companion -> Go Study actions.
-Allowed event actions in v1:
-- insert-position
-- capture-position
+```text
+Go Study
+  ↓
+Electron global shortcut
+  ↓
+fixed PowerShell/User32 PotPlayer window messages
+  ↓
+PotPlayer state / position / clipboard frame
+  ↓
+Go Study resource identity guard
+  ↓
+remembered Markdown editor cursor
+```
 
-Events use the existing local pairing token and unique IDs. Go Study acknowledges processed events so hotkey feedback can distinguish success/failure.
+The runtime no longer starts the old Companion reverse-event poller. The Companion/File IPC implementation remains in repository history and tests for compatibility/reference while this feature branch is being finalized, but it is not a normal runtime dependency.
 
-## Remembered note target
+## Settings
 
-Go Study remembers the most recently focused editable Markdown editor and cursor/selection while Obsidian is active. When Obsidian goes to background, immersive actions target that remembered editor.
+### Workbench
 
-Fail closed when:
-- the target note is closed or no longer editable
-- the remembered editor belongs to a different Vault/session
-- the target cannot be resolved safely
+- show interface tips
+- auto-collapse Obsidian sidebars on workbench entry
 
-Never silently redirect an immersive action into another note.
+### Video-note enhancement
 
-## Visible controls
+- master enable/disable toggle (opt-in)
+- configurable Alt+1..Alt+4
+- resume after note save
+- resume after note cancel
+- lightweight success-feedback toggle
+- configurable Vault screenshot folder
+- native status check
+- screenshot acceptance action
+- restore default shortcuts
 
-A compact Learning Controls area should expose:
-- Bridge status
-- Record position
-- Capture + record
-- Relink course folder
-- Single-file repair (Advanced)
-- Shortcut settings
+When the master toggle is off, Go Study releases registered immersive hotkeys and hides the workbench status dot.
 
-Ctrl+P commands remain available but are no longer the primary UX.
+### Data and safety
 
-## Default Windows shortcuts
+- automatic state-backup retention: 3..10 copies
 
-- Alt+1: Record position
-- Alt+2: Capture + record
+## Note target safety
 
-They are configurable and limited to PotPlayer foreground by default.
+Go Study remembers the last valid Markdown editor/cursor. It does **not** silently redirect an immersive action into a different note if the remembered note is closed or invalid.
 
-## Delivery stages
+## Media identity safety
 
-1. Remembered Markdown editor/cursor target
-2. Reverse File IPC event contract + acknowledgement
-3. Companion Alt+1 / Alt+2 actions
-4. Background note insertion without focus stealing
-5. Visible Learning Controls UI
-6. Shortcut configuration and Bridge state
-7. Non-blocking success/failure feedback
-8. Windows acceptance tests and isolated Preview build
+The current PotPlayer media must match the active Go Study Resource. Resource ID, locator and learning position remain separate concepts. A mismatch fails closed before modifying the Markdown editor.
 
-## Non-goals for v1
+## UI rule
 
-- no AI summaries
-- no full player inside Obsidian
-- no macOS/Linux global-hotkey implementation yet
-- no auto-downloading/installing a companion binary
-- no removal of legacy markdown2potplayer behavior until the new companion path is proven stable
+Do not restore the beta.7 full-width Learning Controls strip. The main workbench keeps its original layout. Video enhancement appears only as a lightweight status dot when enabled; OpenList relink actions live in the project-page context menu; video diagnostics and configuration live in plugin settings.
+
+## Deferred product polish
+
+Timestamp/backlink templates, note-format templates and related Markdown-format customization are intentionally deferred until this runtime/settings closeout is accepted.
