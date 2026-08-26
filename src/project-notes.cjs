@@ -38,15 +38,17 @@ function ensureProjectNotesState(state) {
       const key = `${item.projectId}\u0000${path.toLowerCase()}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      normalized[id] = {
-        ...item,
-        id,
-        projectId: String(item.projectId),
-        path,
-        missingAt: String(item.missingAt || ''),
-        createdAt: String(item.createdAt || ''),
-        updatedAt: String(item.updatedAt || '')
-      };
+      // Normalize the existing object in place. Runtime code may still hold a
+      // reference to the selected project note while Vault lifecycle events
+      // update its path, so replacing every object during normalization would
+      // leave that reference stale even though state.projectNotes was correct.
+      item.id = id;
+      item.projectId = String(item.projectId);
+      item.path = path;
+      item.missingAt = String(item.missingAt || '');
+      item.createdAt = String(item.createdAt || '');
+      item.updatedAt = String(item.updatedAt || '');
+      normalized[id] = item;
     } catch {}
   }
   state.projectNotes = normalized;
