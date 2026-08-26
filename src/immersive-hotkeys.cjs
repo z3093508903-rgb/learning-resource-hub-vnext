@@ -3,6 +3,7 @@
 const {
   captureFrameAndInsertLearningPosition,
   commitPreparedCaptureTypedNote,
+  commitPreparedPlainNote,
   commitPreparedTypedNote,
   insertCurrentLearningPosition,
   prepareCaptureLearningPosition,
@@ -13,7 +14,8 @@ const {
   immersiveShortcuts,
   normalizeShortcut,
   requestNativePotPlayer,
-  resolveElectronGlobalShortcut
+  resolveElectronGlobalShortcut,
+  startPotPlayerForegroundWatcher
 } = require('./native-potplayer.cjs');
 const { currentProductSettings } = require('./product-settings.cjs');
 const { formatPositionClock } = require('./resource-note.cjs');
@@ -23,7 +25,8 @@ const HOTKEY_ACTIONS = Object.freeze({
   position: '记录当前位置',
   capture: '截图并记录',
   note: '输入笔记并记录',
-  captureNote: '截图、输入笔记并记录'
+  captureNote: '截图、输入笔记并记录',
+  plainNote: '纯笔记（不记录时间戳）'
 });
 
 function immersiveStatus(plugin) {
@@ -148,6 +151,29 @@ async function runImmersiveAction(plugin, key, options = {}) {
       return result;
     }
 
+    if (key === 'plainNote') {
+      const prepared = await prepareCurrentLearningPosition(plugin, {
+        nativeOnly: true,
+        pause: true,
+        ...options.captureOptions
+      });
+      const note = await (options.showQuickNoteInput || showQuickNoteInput)(plugin, {
+        title: '纯笔记',
+        subtitle: '视频已暂停 · 不写入时间戳或回链 · Enter 保存 · Shift+Enter 换行 · Esc 取消',
+        placeholder: '写下笔记…',
+        ...(options.promptOptions || {})
+      });
+      if (!note) {
+        await resumePreparedPlayback(plugin, prepared, 'cancel', options);
+        await successFeedback(plugin, '已取消笔记', options);
+        return null;
+      }
+      const result = await commitPreparedPlainNote(plugin, prepared, note);
+      await resumePreparedPlayback(plugin, prepared, 'save', options);
+      await successFeedback(plugin, '✓ 笔记已记录', options);
+      return result;
+    }
+
     throw new Error(`未知沉浸式操作：${String(key || '')}`);
   } catch (error) {
     const message = compactError(error);
@@ -167,36 +193,13 @@ function unregisterImmersiveHotkeys(plugin, globalShortcut = null) {
   if (plugin) plugin._goStudyRegisteredAccelerators = [];
 }
 
-function registerImmersiveHotkeys(plugin, options = {}) {
-  const api = resolveElectronGlobalShortcut(options);
+function stopImmersiveForegroundWatcher(plugin) {
+  try { plugin?._goStudyForegroundWatcher?.stop?.(); } catch {}
+  if (plugin) plugin._goStudyForegroundWatcher = null;
+}
+
+function registerShortcutBindings(plugin, api, shortcuts, options = {}) {
   unregisterImmersiveHotkeys(plugin, api);
-  plugin._goStudyGlobalShortcut = api;
-  const shortcuts = immersiveShortcuts(plugin);
-  const enabled = currentProductSettings(plugin).videoEnhancementEnabled;
-
-  if (!enabled) {
-    return setImmersiveStatus(plugin, {
-      mode: 'disabled', registered: false, shortcuts, registeredAccelerators: [], error: ''
-    });
-  }
-  const conflict = shortcutConflict(shortcuts);
-  if (conflict) {
-    return setImmersiveStatus(plugin, {
-      mode: 'unavailable', registered: false, shortcuts, registeredAccelerators: [],
-      error: `${HOTKEY_ACTIONS[conflict[0]]} 与 ${HOTKEY_ACTIONS[conflict[1]]} 使用了同一个快捷键：${conflict[2]}`
-    });
-  }
-  if (process.platform !== 'win32' && !options.allowNonWindows) {
-    return setImmersiveStatus(plugin, {
-      mode: 'unavailable', registered: false, shortcuts, error: '原生沉浸式快捷键目前只支持 Windows。'
-    });
-  }
-  if (!api?.register) {
-    return setImmersiveStatus(plugin, {
-      mode: 'unavailable', registered: false, shortcuts, error: 'Electron 全局快捷键接口不可用。'
-    });
-  }
-
   const registered = [];
   const failures = [];
   for (const key of Object.keys(HOTKEY_ACTIONS)) {
@@ -215,17 +218,102 @@ function registerImmersiveHotkeys(plugin, options = {}) {
     }
   }
   plugin._goStudyRegisteredAccelerators = registered;
+  return { registered, failures };
+}
+
+function registerImmersiveHotkeys(plugin, options = {}) {
+  const api = resolveElectronGlobalShortcut(options);
+  plugin._goStudyHotkeyGeneration = Number(plugin._goStudyHotkeyGeneration || 0) + 1;
+  const generation = plugin._goStudyHotkeyGeneration;
+  stopImmersiveForegroundWatcher(plugin);
+  unregisterImmersiveHotkeys(plugin, api);
+  plugin._goStudyGlobalShortcut = api;
+  const shortcuts = immersiveShortcuts(plugin);
+  const settings = currentProductSettings(plugin);
+  const enabled = settings.videoEnhancementEnabled;
+
+  if (!enabled) {
+    return setImmersiveStatus(plugin, {
+      mode: 'disabled', registered: false, shortcuts, registeredAccelerators: [], foregroundActive: false, error: ''
+    });
+  }
+  const conflict = shortcutConflict(shortcuts);
+  if (conflict) {
+    return setImmersiveStatus(plugin, {
+      mode: 'unavailable', registered: false, shortcuts, registeredAccelerators: [], foregroundActive: false,
+      error: `${HOTKEY_ACTIONS[conflict[0]]} 与 ${HOTKEY_ACTIONS[conflict[1]]} 使用了同一个快捷键：${conflict[2]}`
+    });
+  }
+  if (process.platform !== 'win32' && !options.allowNonWindows) {
+    return setImmersiveStatus(plugin, {
+      mode: 'unavailable', registered: false, shortcuts, registeredAccelerators: [], foregroundActive: false,
+      error: '原生沉浸式快捷键目前只支持 Windows。'
+    });
+  }
+  if (!api?.register) {
+    return setImmersiveStatus(plugin, {
+      mode: 'unavailable', registered: false, shortcuts, registeredAccelerators: [], foregroundActive: false,
+      error: 'Electron 全局快捷键接口不可用。'
+    });
+  }
+
   if (!plugin._goStudyHotkeyUnloadRegistered) {
     plugin._goStudyHotkeyUnloadRegistered = true;
-    plugin.register?.(() => unregisterImmersiveHotkeys(plugin, api));
+    plugin.register?.(() => {
+      stopImmersiveForegroundWatcher(plugin);
+      unregisterImmersiveHotkeys(plugin);
+    });
   }
-  return setImmersiveStatus(plugin, {
-    mode: registered.length ? 'native-windows' : 'unavailable',
-    registered: registered.length > 0,
-    shortcuts,
-    registeredAccelerators: registered,
-    error: failures.join('；')
+
+  if (settings.videoShortcutScope === 'global') {
+    const result = registerShortcutBindings(plugin, api, shortcuts, options);
+    return setImmersiveStatus(plugin, {
+      mode: result.registered.length ? 'native-windows-global' : 'unavailable',
+      registered: result.registered.length > 0,
+      shortcuts,
+      registeredAccelerators: result.registered,
+      foregroundActive: false,
+      error: result.failures.join('；')
+    });
+  }
+
+  setImmersiveStatus(plugin, {
+    mode: 'foreground-watch', registered: false, shortcuts, registeredAccelerators: [], foregroundActive: false, error: ''
   });
+  try {
+    const watcherFactory = options.startForegroundWatcher || startPotPlayerForegroundWatcher;
+    plugin._goStudyForegroundWatcher = watcherFactory((active) => {
+      if (generation !== plugin._goStudyHotkeyGeneration) return;
+      const liveSettings = currentProductSettings(plugin);
+      if (!liveSettings.videoEnhancementEnabled || liveSettings.videoShortcutScope !== 'potplayer') return;
+      if (!active) {
+        unregisterImmersiveHotkeys(plugin, api);
+        setImmersiveStatus(plugin, {
+          mode: 'foreground-watch', registered: false, shortcuts,
+          registeredAccelerators: [], foregroundActive: false, error: ''
+        });
+        return;
+      }
+      const result = registerShortcutBindings(plugin, api, shortcuts, options);
+      setImmersiveStatus(plugin, {
+        mode: result.registered.length ? 'native-windows-foreground' : 'unavailable',
+        registered: result.registered.length > 0,
+        shortcuts,
+        registeredAccelerators: result.registered,
+        foregroundActive: true,
+        error: result.failures.join('；')
+      });
+    }, {
+      ...(options.foregroundWatcherOptions || {}),
+      allowNonWindows: Boolean(options.allowNonWindows)
+    });
+  } catch (error) {
+    return setImmersiveStatus(plugin, {
+      mode: 'unavailable', registered: false, shortcuts, registeredAccelerators: [], foregroundActive: false,
+      error: `无法监听 PotPlayer 前台状态：${compactError(error)}`
+    });
+  }
+  return immersiveStatus(plugin);
 }
 
 async function updateImmersiveShortcut(plugin, key, value, options = {}) {
@@ -254,11 +342,13 @@ module.exports = {
   feedback,
   immersiveStatus,
   registerImmersiveHotkeys,
+  registerShortcutBindings,
   resetImmersiveShortcuts,
   resumePreparedPlayback,
   runImmersiveAction,
   setImmersiveStatus,
   shortcutConflict,
+  stopImmersiveForegroundWatcher,
   successFeedback,
   unregisterImmersiveHotkeys,
   updateImmersiveShortcut

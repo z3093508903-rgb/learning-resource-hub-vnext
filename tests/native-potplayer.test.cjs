@@ -17,13 +17,14 @@ function loadNativeModule() {
   finally { Module._load = originalLoad; }
 }
 
-test('native Windows defaults expose Alt+1 through Alt+4', () => {
+test('native Windows defaults expose Alt+1 through Alt+4 and leave plain note unassigned', () => {
   const { DEFAULT_IMMERSIVE_SHORTCUTS } = loadNativeModule();
   assert.deepEqual(DEFAULT_IMMERSIVE_SHORTCUTS, {
     position: 'Alt+1',
     capture: 'Alt+2',
     note: 'Alt+3',
-    captureNote: 'Alt+4'
+    captureNote: 'Alt+4',
+    plainNote: ''
   });
 });
 
@@ -31,6 +32,15 @@ test('PowerShell probe uses fixed PotPlayer window messages and foreground guard
   const { potPlayerProbeScript } = loadNativeModule();
   const script = potPlayerProbeScript({ pause: true, copyPath: true, capture: true, play: true });
   for (const value of ['20484', '20486', '10928', '10223', '20000', 'GetForegroundWindow', 'pausedByGoStudy']) {
+    assert.match(script, new RegExp(value));
+  }
+  assert.doesNotMatch(script, /Invoke-Expression|Start-Process|cmd\.exe/i);
+});
+
+test('foreground watcher is one persistent lightweight process instead of repeated PowerShell spawns', () => {
+  const { potPlayerForegroundWatchScript } = loadNativeModule();
+  const script = potPlayerForegroundWatchScript({ intervalMs: 400 });
+  for (const value of ['GetForegroundWindow', 'GetWindowThreadProcessId', 'PotPlayerMini64', 'PotPlayerMini', 'Start-Sleep -Milliseconds 400']) {
     assert.match(script, new RegExp(value));
   }
   assert.doesNotMatch(script, /Invoke-Expression|Start-Process|cmd\.exe/i);
