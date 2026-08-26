@@ -1,0 +1,154 @@
+name: Preview Release Runner beta.13
+
+on:
+  pull_request:
+    branches:
+      - preview-release-runner
+
+permissions:
+  contents: read
+
+jobs:
+  publish-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'preview/go-study-0.3.0-beta.13'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.13
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.13
+    steps:
+      - name: Checkout preview head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify source, build and tests
+        run: npm run check && npm run build && npm test
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Isolated Go Study preview build for Project Note Box and Continue Learning acceptance.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error(`Expected view type not found: ${oldView}`);
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const previewBundle = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          if (!previewBundle.includes(newView) || previewBundle.includes(oldView)) throw new Error('Preview view isolation failed.');
+          for (const required of [
+            'ProjectNoteBoxModal',
+            'StudyNotePickerModal',
+            '选择这次学习要带上的笔记',
+            '不会建立永久的资源绑定',
+            '项目笔记盒',
+            '搜索 Vault',
+            '这次不使用笔记',
+            '继续学习',
+            'recentStudyByProject',
+            'updateProjectNotePathsOnRename',
+            'go-study-picker-shell',
+            'scrollbar-gutter: stable'
+          ]) {
+            if (!previewBundle.includes(required)) throw new Error(`Project Note Box marker missing: ${required}`);
+          }
+          if (previewBundle.includes('startPotPlayerForegroundWatcher')) throw new Error('beta.13 clean note-box build must not include later shortcut-ownership experiments.');
+          if (previewBundle.includes('commitPreparedPlainNote')) throw new Error('beta.13 clean note-box build must not include later plain-note shortcut experiments.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.13
+
+          Project Note Box + lightweight Continue Learning acceptance build.
+
+          ## Product rule
+          Project notes are a lightweight Markdown collection. Choosing a note for a video means **本次学习使用这篇笔记**, not a permanent Resource ↔ Note binding.
+
+          ## Acceptance
+          1. Keep your existing `data.json`, install beta.13 and reload Obsidian.
+          2. Open a project. A compact **笔记** entry should appear near the project actions.
+          3. Open the note box and search the Vault for an existing Markdown note. Selecting it should add the association and open the note without moving, copying or deleting the file.
+          4. Create one new project note and confirm it is created in Obsidian's normal new-note location and appears in the project note box.
+          5. Start a stored project video. Go Study should show **开始学习** with **最近使用**, **项目笔记盒**, Vault search and **这次不使用笔记**.
+          6. Choose a note. The note should open first, then the video should launch. Returning to the project should show **继续学习**.
+          7. Record or otherwise establish a Resume position, then click **继续学习**. Go Study should reopen the recent note and return the video to the saved Resume position without asking for the note again.
+          8. Start the video again and choose a different note. The new note becomes the project's recent study note; this does not permanently bind the resource.
+          9. Move/rename the chosen Markdown inside Obsidian. The project note association should follow the new path. Delete it temporarily to confirm the note is shown as missing rather than silently redirected.
+          10. Remove a note from the project note box and confirm the Markdown file remains in the Vault.
+          11. Test **这次不使用笔记** once; the video should still launch and the recent study combination may be resource-only.
+
+          ## Not in beta.13
+          - Study Workspace / second Obsidian window
+          - permanent per-resource note binding
+          - Markdown heading/anchor ownership
+          - new immersive shortcut experiments
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          NOTES='Go Study Preview beta.13 adds a lightweight Project Note Box and remembers the note actually used with the project. Starting a stored project video can choose a temporary study note; Continue Learning restores the recent note plus the Resource Resume position. Notes remain normal Vault Markdown files and are not permanently bound to resources.'
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md" --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "${{ github.event.pull_request.head.sha }}" \
+              --title "Go Study Preview ${PREVIEW_VERSION}" \
+              --notes "$NOTES" --prerelease \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md"
+          fi
+
+      - name: Verify published prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isPrerelease,url,assets > release.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const release = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+          if (release.tagName !== process.env.RELEASE_TAG) throw new Error('Release tag mismatch.');
+          if (!release.isPrerelease) throw new Error('Release must be prerelease.');
+          const names = new Set((release.assets || []).map((asset) => asset.name));
+          for (const required of [`go-study-preview-${process.env.PREVIEW_VERSION}.zip`, 'main.js', 'manifest.json', 'styles.css', 'TESTING.md']) {
+            if (!names.has(required)) throw new Error(`Missing asset: ${required}`);
+          }
+          NODE
