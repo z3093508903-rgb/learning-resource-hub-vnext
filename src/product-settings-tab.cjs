@@ -39,10 +39,17 @@ function section(containerEl, title, description = '') {
 
 function videoStatusText(plugin) {
   const settings = currentProductSettings(plugin);
-  if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会注册 Alt+1～Alt+4，也不会显示视频增强状态点。';
+  if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会占用视频增强快捷键，也不会显示视频增强状态点。';
   const status = immersiveStatus(plugin);
-  if (status.registered) return `已就绪 · ${status.registeredAccelerators?.length || 0} 个全局快捷键已注册。`;
-  return status.error || '已开启，但当前没有成功注册全局快捷键。';
+  if (status.error) return status.error;
+  if (settings.videoShortcutScope === 'potplayer') {
+    if (status.registered && status.foregroundActive) {
+      return `PotPlayer 前台 · ${status.registeredAccelerators?.length || 0} 个快捷键临时生效；切走播放器后会自动释放。`;
+    }
+    return '监听中 · 只有 PotPlayer 位于前台时才临时注册快捷键，切到其他软件后会自动释放。';
+  }
+  if (status.registered) return `全局模式 · ${status.registeredAccelerators?.length || 0} 个快捷键持续注册。`;
+  return '已开启，但当前没有成功注册快捷键。';
 }
 
 async function setInterfaceTips(plugin, value) {
@@ -70,7 +77,8 @@ function noteOutputPreview(settings) {
     `Alt+1 · 仅回链\n${buildPositionMarkdown(resource, position, options)}`,
     `Alt+2 · 截图回链\n${buildCaptureMarkdown(resource, position, 'GoStudy/Captures/example.png', options)}`,
     `Alt+3 · 快速笔记\n${buildNotePositionMarkdown(resource, position, '这里老师讲的是极限存在的必要条件。', options)}`,
-    `Alt+4 · 截图笔记\n${buildCaptureNoteMarkdown(resource, position, 'GoStudy/Captures/example.png', '这一帧的公式需要重新推导一次。', options)}`
+    `Alt+4 · 截图笔记\n${buildCaptureNoteMarkdown(resource, position, 'GoStudy/Captures/example.png', '这一帧的公式需要重新推导一次。', options)}`,
+    '纯笔记 · 不含时间戳 / 回链\n这里只记录正文，不增加可见时间点。'
   ].join('\n\n');
 }
 
@@ -141,7 +149,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('启用视频笔记增强')
-      .setDesc('开启后注册全局快捷键，并启用 PotPlayer 时间点、截图和快速笔记能力。无需 markdown2potplayer / AutoHotkey。')
+      .setDesc('开启后启用 PotPlayer 时间点、截图和快速笔记能力。默认只在 PotPlayer 前台时临时占用快捷键。无需 markdown2potplayer / AutoHotkey。')
       .addToggle((toggle) => toggle
         .setValue(enabled)
         .onChange(async (value) => {
@@ -149,6 +157,22 @@ class GoStudySettingsTab extends PluginSettingTab {
           registerImmersiveHotkeys(this.plugin);
           this.display();
         }));
+
+    new Setting(containerEl)
+      .setName('快捷键作用范围')
+      .setDesc('“仅 PotPlayer 前台”会在切走播放器后自动释放快捷键；“始终全局”保持旧版行为。')
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption('potplayer', '仅 PotPlayer 前台时生效（推荐）')
+          .addOption('global', '始终作为全局快捷键')
+          .setValue(settings.videoShortcutScope)
+          .setDisabled?.(!enabled);
+        dropdown.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'videoShortcutScope', value);
+          registerImmersiveHotkeys(this.plugin);
+          this.display();
+        });
+      });
 
     const status = new Setting(containerEl)
       .setName('当前状态')
@@ -169,14 +193,17 @@ class GoStudySettingsTab extends PluginSettingTab {
         }
       }));
 
-    const shortcutKeys = ['position', 'capture', 'note', 'captureNote'];
+    const shortcutKeys = ['position', 'capture', 'note', 'captureNote', 'plainNote'];
     for (const key of shortcutKeys) {
+      const plain = key === 'plainNote';
       new Setting(containerEl)
         .setName(HOTKEY_ACTIONS[key])
-        .setDesc('留空可禁用这一动作；重复快捷键会被拒绝。')
+        .setDesc(plain
+          ? '只写入笔记正文，不显示时间戳或回链。默认留空，不额外占用系统快捷键。'
+          : '留空可禁用这一动作；重复快捷键会被拒绝。')
         .addText((text) => {
           text.setValue(shortcuts[key] || '');
-          text.setPlaceholder('例如 Alt+1');
+          text.setPlaceholder(plain ? '默认不分配，例如 Alt+Shift+3' : '例如 Alt+1');
           text.setDisabled?.(!enabled);
           const commit = async () => {
             try {
@@ -200,7 +227,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('恢复默认快捷键')
-      .setDesc('恢复为 Alt+1、Alt+2、Alt+3、Alt+4。')
+      .setDesc('恢复 Alt+1、Alt+2、Alt+3、Alt+4；“纯笔记”保持未分配。')
       .addButton((button) => button
         .setButtonText('恢复默认')
         .setDisabled(!enabled)
@@ -212,7 +239,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('保存笔记后继续播放')
-      .setDesc('Alt+3 / Alt+4 按 Enter 保存后，自动让 PotPlayer 继续播放。')
+      .setDesc('快速笔记 / 截图笔记 / 纯笔记按 Enter 保存后，自动让 PotPlayer 继续播放。')
       .addToggle((toggle) => {
         toggle.setValue(settings.videoResumeAfterSave);
         toggle.setDisabled?.(!enabled);
@@ -223,7 +250,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('取消笔记后继续播放')
-      .setDesc('Alt+3 / Alt+4 按 Esc 取消后，自动让 PotPlayer 继续播放。')
+      .setDesc('快速笔记 / 截图笔记 / 纯笔记按 Esc 取消后，自动让 PotPlayer 继续播放。')
       .addToggle((toggle) => {
         toggle.setValue(settings.videoResumeAfterCancel);
         toggle.setDisabled?.(!enabled);
@@ -298,30 +325,10 @@ class GoStudySettingsTab extends PluginSettingTab {
           this.refreshOutputPreview();
         }));
 
-    this.addTemplateSetting(
-      containerEl,
-      'backlinkTemplate',
-      '回链模板',
-      '可用变量：{title}、{time}、{uri}。必须保留 {uri}，否则会失去回到课程的能力。'
-    );
-    this.addTemplateSetting(
-      containerEl,
-      'noteTemplate',
-      'Alt+3 快速笔记模板',
-      '可用变量：{note}、{backlink}。两者都必须保留。'
-    );
-    this.addTemplateSetting(
-      containerEl,
-      'captureTemplate',
-      'Alt+2 截图模板',
-      '可用变量：{image}、{backlink}。两者都必须保留。'
-    );
-    this.addTemplateSetting(
-      containerEl,
-      'captureNoteTemplate',
-      'Alt+4 截图笔记模板',
-      '可用变量：{image}、{note}、{backlink}。三者都必须保留。'
-    );
+    this.addTemplateSetting(containerEl, 'backlinkTemplate', '回链模板', '可用变量：{title}、{time}、{uri}。必须保留 {uri}，否则会失去回到课程的能力。');
+    this.addTemplateSetting(containerEl, 'noteTemplate', 'Alt+3 快速笔记模板', '可用变量：{note}、{backlink}。两者都必须保留。');
+    this.addTemplateSetting(containerEl, 'captureTemplate', 'Alt+2 截图模板', '可用变量：{image}、{backlink}。两者都必须保留。');
+    this.addTemplateSetting(containerEl, 'captureNoteTemplate', 'Alt+4 截图笔记模板', '可用变量：{image}、{note}、{backlink}。三者都必须保留。');
 
     new Setting(containerEl)
       .setName('恢复默认输出格式')
