@@ -16,7 +16,8 @@ const {
   buildCaptureNoteMarkdown,
   buildNotePositionMarkdown,
   buildPositionMarkdown,
-  captureFileName
+  captureFileName,
+  normalizeUserNote
 } = require('./resource-note.cjs');
 
 const CAPTURE_FOLDER = 'GoStudy/Captures';
@@ -203,6 +204,12 @@ async function commitPreparedTypedNote(plugin, prepared, noteText) {
   );
 }
 
+async function commitPreparedPlainNote(plugin, prepared, noteText) {
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  return insertPreparedMarkdown(plugin, prepared, note);
+}
+
 async function commitPreparedCaptureTypedNote(plugin, prepared, noteText) {
   return commitPreparedCapture(
     plugin,
@@ -277,6 +284,7 @@ module.exports = {
   commandErrorText,
   commitPreparedCapture,
   commitPreparedCaptureTypedNote,
+  commitPreparedPlainNote,
   commitPreparedTypedNote,
   ensureVaultFolder,
   insertCurrentLearningPosition,

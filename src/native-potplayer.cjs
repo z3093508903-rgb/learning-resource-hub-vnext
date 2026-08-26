@@ -1,13 +1,14 @@
 'use strict';
 
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
 const { clipboard } = require('electron');
 
 const DEFAULT_IMMERSIVE_SHORTCUTS = Object.freeze({
   position: 'Alt+1',
   capture: 'Alt+2',
   note: 'Alt+3',
-  captureNote: 'Alt+4'
+  captureNote: 'Alt+4',
+  plainNote: ''
 });
 
 const POTPLAYER_PROCESS_NAMES = ['PotPlayerMini64', 'PotPlayerMini'];
@@ -41,11 +42,7 @@ function runPowerShell(script, options = {}) {
   const executable = options.executable || powershellExecutable(options.env || process.env);
   return new Promise((resolve, reject) => {
     exec(executable, [
-      '-NoLogo',
-      '-NoProfile',
-      '-NonInteractive',
-      '-ExecutionPolicy', 'Bypass',
-      '-Command', script
+      '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', script
     ], {
       windowsHide: true,
       timeout: Number(options.timeoutMs || 4000),
@@ -125,6 +122,84 @@ if (${capture}) {
 `;
 }
 
+function potPlayerForegroundWatchScript(options = {}) {
+  const intervalMs = Math.min(2000, Math.max(200, Number(options.intervalMs || 400)));
+  const names = POTPLAYER_PROCESS_NAMES.map((name) => `'${name.replace(/'/g, "''")}'`).join(',');
+  return `
+$ErrorActionPreference = 'Stop'
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class GoStudyForegroundWin32 {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern UInt32 GetWindowThreadProcessId(IntPtr hWnd, out UInt32 processId);
+}
+'@
+$names = @(${names})
+$last = $null
+while ($true) {
+  $active = $false
+  try {
+    $foreground = [GoStudyForegroundWin32]::GetForegroundWindow()
+    if ($foreground -ne [IntPtr]::Zero) {
+      [UInt32]$processId = 0
+      [void][GoStudyForegroundWin32]::GetWindowThreadProcessId($foreground, [ref]$processId)
+      if ($processId -gt 0) {
+        $proc = Get-Process -Id $processId -ErrorAction Stop
+        $active = $names -contains $proc.ProcessName
+      }
+    }
+  } catch {
+    $active = $false
+  }
+  if ($last -eq $null -or $active -ne $last) {
+    if ($active) { [Console]::Out.WriteLine('1') } else { [Console]::Out.WriteLine('0') }
+    [Console]::Out.Flush()
+    $last = $active
+  }
+  Start-Sleep -Milliseconds ${Math.round(intervalMs)}
+}
+`;
+}
+
+function startPotPlayerForegroundWatcher(onChange, options = {}) {
+  if (process.platform !== 'win32' && !options.allowNonWindows) throw new Error('PotPlayer 前台监听目前只支持 Windows。');
+  if (typeof onChange !== 'function') throw new Error('前台监听回调无效。');
+  const spawnImpl = options.spawn || spawn;
+  const executable = options.executable || powershellExecutable(options.env || process.env);
+  const child = spawnImpl(executable, [
+    '-NoLogo', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', potPlayerForegroundWatchScript(options)
+  ], { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stopped = false;
+  let buffer = '';
+  let last = null;
+  const emit = (value) => {
+    const active = String(value || '').trim() === '1';
+    if (last === active) return;
+    last = active;
+    try { onChange(active); } catch {}
+  };
+  child.stdout?.on?.('data', (chunk) => {
+    buffer += String(chunk || '');
+    const lines = buffer.split(/\r?\n/);
+    buffer = lines.pop() || '';
+    for (const line of lines) {
+      const value = line.trim();
+      if (value === '0' || value === '1') emit(value);
+    }
+  });
+  child.on?.('error', () => { if (!stopped) emit('0'); });
+  child.on?.('exit', () => { if (!stopped) emit('0'); });
+  return {
+    process: child,
+    stop() {
+      if (stopped) return;
+      stopped = true;
+      try { child.kill?.(); } catch {}
+    }
+  };
+}
+
 function validateNativeProbe(probe) {
   if (!probe?.ok) throw new Error('PotPlayer 原生控制不可用。');
   const ms = Number(probe.positionMs);
@@ -136,8 +211,7 @@ async function nativeCurrent(options = {}) {
   if (process.platform !== 'win32' && !options.allowNonWindows) throw new Error('原生 PotPlayer 控制目前只支持 Windows。');
   const clip = options.clipboard || clipboard;
   const probe = validateNativeProbe(await (options.runPowerShell || runPowerShell)(
-    potPlayerProbeScript({ pause: options.pause, copyPath: true, foregroundOnly: options.foregroundOnly !== false }),
-    options
+    potPlayerProbeScript({ pause: options.pause, copyPath: true, foregroundOnly: options.foregroundOnly !== false }), options
   ));
   await (options.sleep || sleep)(Number(options.clipboardDelayMs || 40));
   const mediaPath = String(clip?.readText?.() || '').trim();
@@ -166,8 +240,7 @@ async function nativeCapture(options = {}) {
   const current = await nativeCurrent(options);
   const clip = options.clipboard || clipboard;
   await (options.runPowerShell || runPowerShell)(
-    potPlayerProbeScript({ capture: true, foregroundOnly: options.foregroundOnly !== false }),
-    options
+    potPlayerProbeScript({ capture: true, foregroundOnly: options.foregroundOnly !== false }), options
   );
   await (options.sleep || sleep)(Number(options.captureDelayMs || 50));
   const image = clip?.readImage?.();
@@ -177,8 +250,7 @@ async function nativeCapture(options = {}) {
 
 async function nativePlay(options = {}) {
   const probe = validateNativeProbe(await (options.runPowerShell || runPowerShell)(
-    potPlayerProbeScript({ play: true, foregroundOnly: false }),
-    options
+    potPlayerProbeScript({ play: true, foregroundOnly: false }), options
   ));
   return {
     ok: true,
@@ -193,8 +265,7 @@ async function nativePlay(options = {}) {
 async function requestNativePotPlayer(action, options = {}) {
   if (action === 'ping') {
     const probe = validateNativeProbe(await (options.runPowerShell || runPowerShell)(
-      potPlayerProbeScript({ foregroundOnly: false }),
-      options
+      potPlayerProbeScript({ foregroundOnly: false }), options
     ));
     return {
       ok: true,
@@ -233,11 +304,13 @@ module.exports = {
   nativeCurrent,
   nativePlay,
   normalizeShortcut,
+  potPlayerForegroundWatchScript,
   potPlayerProbeScript,
   powershellExecutable,
   requestNativePotPlayer,
   resolveElectronGlobalShortcut,
   runPowerShell,
   sleep,
+  startPotPlayerForegroundWatcher,
   validateNativeProbe
 };
