@@ -115,12 +115,107 @@ function rowButton(container, file, secondary, onClick) {
   return row;
 }
 
+function pickerHeading(container, title, description) {
+  const heading = container.createDiv({ cls: 'rh-next-modal-heading go-study-picker-heading' });
+  const copy = heading.createDiv();
+  copy.createEl('h2', { text: title });
+  if (description) copy.createEl('p', { text: description });
+  return heading;
+}
+
+function createPickerShell(contentEl, options = {}) {
+  const shell = contentEl.createDiv({ cls: 'go-study-picker-shell' });
+  pickerHeading(shell, options.title || '选择', options.description || '');
+  const searchWrap = shell.createDiv({ cls: 'go-study-picker-search' });
+  if (options.searchLabel) searchWrap.createEl('span', { text: options.searchLabel, cls: 'go-study-picker-label' });
+  const search = searchWrap.createEl('input', {
+    cls: 'rh-next-input',
+    attr: { type: 'search', placeholder: options.placeholder || '搜索…' }
+  });
+  const body = shell.createDiv({ cls: 'go-study-picker-body' });
+  const footer = shell.createDiv({ cls: 'go-study-picker-footer' });
+  return { shell, search, body, footer };
+}
+
+function installPickerUxStyles(plugin, doc = globalThis.document) {
+  if (!doc?.createElement) return null;
+  const styleId = `go-study-picker-ux-${String(plugin?.manifest?.id || 'plugin')}`;
+  const existing = doc.getElementById?.(styleId);
+  if (existing) return existing;
+  const style = doc.createElement('style');
+  style.id = styleId;
+  style.textContent = `
+.modal.go-study-project-note-box-modal,
+.modal.go-study-study-note-picker-modal,
+.modal.rh-next-vault-picker-modal {
+  width: min(760px, 92vw);
+  height: min(680px, 84vh);
+}
+.modal.go-study-project-note-box-modal .modal-content,
+.modal.go-study-study-note-picker-modal .modal-content,
+.modal.rh-next-vault-picker-modal .modal-content {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.go-study-picker-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+.go-study-picker-heading { min-width: 0; }
+.go-study-picker-search { display: grid; gap: 6px; }
+.go-study-picker-label { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.go-study-picker-body {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+}
+.go-study-picker-section + .go-study-picker-section { border-top: 1px solid var(--background-modifier-border); }
+.go-study-picker-section-title { display: block; padding: 10px 12px 4px; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.go-study-picker-body .rh-next-picker-list {
+  min-height: 0;
+  max-height: none;
+  margin-top: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+}
+.go-study-picker-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 38px; }
+.go-study-picker-footer .go-study-note-create-row { display: flex; min-width: 0; flex: 1; gap: 8px; }
+.go-study-picker-footer .go-study-note-create-row .rh-next-input { min-width: 0; flex: 1; }
+.rh-next-vault-picker-modal .rh-next-picker-list {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.rh-next-vault-picker-modal .rh-next-vault-path-quick { max-height: 86px; overflow: auto; scrollbar-gutter: stable; }
+@media (max-width: 620px) {
+  .modal.go-study-project-note-box-modal,
+  .modal.go-study-study-note-picker-modal,
+  .modal.rh-next-vault-picker-modal { width: 96vw; height: min(720px, 90vh); }
+  .go-study-picker-footer { align-items: stretch; flex-direction: column; }
+  .go-study-picker-footer > .rh-next-button { width: 100%; }
+}
+`;
+  doc.head?.appendChild?.(style);
+  plugin?.register?.(() => style.remove?.());
+  return style;
+}
+
 class ProjectNoteBoxModal extends Modal {
   constructor(app, plugin, projectId) {
     super(app);
     this.plugin = plugin;
     this.projectId = projectId;
     this.query = '';
+    this.bodyEl = null;
   }
 
   onOpen() {
@@ -131,60 +226,21 @@ class ProjectNoteBoxModal extends Modal {
   render() {
     const project = this.plugin.state.projects?.[this.projectId];
     this.contentEl.empty();
-    const heading = this.contentEl.createDiv({ cls: 'rh-next-modal-heading' });
-    const copy = heading.createDiv();
-    copy.createEl('h2', { text: `${project?.title || '项目'} · 笔记` });
-    copy.createEl('p', { text: '这里只保存项目与 Markdown 的关联，不会移动或复制原文件。' });
+    const ui = createPickerShell(this.contentEl, {
+      title: `${project?.title || '项目'} · 笔记`,
+      description: '这里只保存项目与 Markdown 的关联，不会移动或复制原文件。',
+      searchLabel: '关联已有笔记',
+      placeholder: '搜索整个 Vault 的 Markdown…'
+    });
+    this.bodyEl = ui.body;
+    ui.search.value = this.query;
+    ui.search.addEventListener('input', () => {
+      this.query = ui.search.value;
+      this.renderBody();
+    });
 
-    const recent = recentProjectNote(this.plugin.state, this.projectId);
-    const notes = projectNotes(this.plugin.state, this.projectId);
-    const section = this.contentEl.createDiv({ cls: 'go-study-note-box-section' });
-    const title = section.createDiv({ cls: 'rh-next-section-heading' });
-    title.createEl('strong', { text: `项目笔记 · ${notes.length}` });
-
-    if (!notes.length) {
-      section.createEl('p', { cls: 'rh-next-empty-inline', text: '还没有项目笔记。可以搜索 Vault 中已有的 Markdown，或在下面新建。' });
-    } else {
-      const list = section.createDiv({ cls: 'rh-next-picker-list' });
-      for (const note of notes) {
-        const file = resolveNoteFile(this.plugin, note);
-        const row = list.createDiv({ cls: `rh-next-picker-row go-study-note-management-row ${note.missingAt || !file ? 'is-missing' : ''}`.trim() });
-        setIcon(row.createSpan(), file ? 'file-text' : 'file-warning');
-        const body = row.createDiv();
-        const name = body.createEl('strong', { text: noteDisplayName(file || note) });
-        if (recent?.id === note.id) name.appendText?.(' · 最近使用');
-        body.createEl('small', { text: file ? note.path : `${note.path} · 已丢失` });
-        const actions = row.createDiv({ cls: 'rh-next-resource-actions' });
-        if (file) {
-          const open = actions.createEl('button', { cls: 'rh-next-icon-button', attr: { 'aria-label': '打开笔记', title: '打开笔记' } });
-          setIcon(open, 'external-link');
-          open.addEventListener('click', (event) => { event.stopPropagation(); void openProjectNote(this.plugin, note).then(() => this.close()); });
-        }
-        const remove = actions.createEl('button', { cls: 'rh-next-icon-button', attr: { 'aria-label': '从项目移除', title: '从项目移除；不会删除文件' } });
-        setIcon(remove, 'unlink');
-        remove.addEventListener('click', async (event) => {
-          event.stopPropagation();
-          unlinkProjectNote(this.plugin.state, this.projectId, note.id);
-          await this.plugin.persist();
-          await this.plugin.workbenchLeaf?.view?.render?.();
-          this.render();
-        });
-        if (file) row.addEventListener('click', () => void openProjectNote(this.plugin, note).then(() => this.close()));
-      }
-    }
-
-    const searchSection = this.contentEl.createDiv({ cls: 'go-study-note-box-section' });
-    searchSection.createEl('strong', { text: '关联已有笔记' });
-    const search = searchSection.createEl('input', { cls: 'rh-next-input', attr: { type: 'search', placeholder: '搜索整个 Vault 的 Markdown…' } });
-    search.value = this.query;
-    search.addEventListener('input', () => { this.query = search.value; this.renderSearchResults(results); });
-    const results = searchSection.createDiv({ cls: 'rh-next-picker-list go-study-note-search-results' });
-    this.renderSearchResults(results);
-
-    const createSection = this.contentEl.createDiv({ cls: 'go-study-note-box-section' });
-    createSection.createEl('strong', { text: '新建项目笔记' });
-    const createRow = createSection.createDiv({ cls: 'go-study-note-create-row' });
-    const name = createRow.createEl('input', { cls: 'rh-next-input', attr: { placeholder: '例如：高等数学课堂笔记' } });
+    const createRow = ui.footer.createDiv({ cls: 'go-study-note-create-row' });
+    const name = createRow.createEl('input', { cls: 'rh-next-input', attr: { placeholder: '新建项目笔记，例如：高等数学课堂笔记' } });
     const create = createRow.createEl('button', { cls: 'rh-next-button is-primary' });
     create.textContent = '新建并打开';
     const submit = async () => {
@@ -199,27 +255,67 @@ class ProjectNoteBoxModal extends Modal {
     };
     create.addEventListener('click', () => void submit());
     name.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void submit(); } });
+    this.renderBody();
   }
 
-  renderSearchResults(container) {
+  renderBody() {
+    const container = this.bodyEl;
     if (!container) return;
     container.empty();
     const query = String(this.query || '').trim().toLocaleLowerCase('zh-CN');
-    if (!query) {
-      container.createEl('p', { cls: 'rh-next-empty-inline', text: '输入名称或路径开始搜索。' });
+    if (query) return this.renderSearchResults(container, query);
+
+    const recent = recentProjectNote(this.plugin.state, this.projectId);
+    const notes = projectNotes(this.plugin.state, this.projectId);
+    const section = container.createDiv({ cls: 'go-study-picker-section' });
+    section.createEl('strong', { cls: 'go-study-picker-section-title', text: `项目笔记 · ${notes.length}` });
+    const list = section.createDiv({ cls: 'rh-next-picker-list' });
+    if (!notes.length) {
+      list.createEl('p', { cls: 'rh-next-empty-inline', text: '还没有项目笔记。直接在上方搜索 Vault，或在下方新建项目笔记。' });
       return;
     }
+    for (const note of notes) {
+      const file = resolveNoteFile(this.plugin, note);
+      const row = list.createDiv({ cls: `rh-next-picker-row go-study-note-management-row ${note.missingAt || !file ? 'is-missing' : ''}`.trim() });
+      setIcon(row.createSpan(), file ? 'file-text' : 'file-warning');
+      const body = row.createDiv();
+      const name = body.createEl('strong', { text: noteDisplayName(file || note) });
+      if (recent?.id === note.id) name.appendText?.(' · 最近使用');
+      body.createEl('small', { text: file ? note.path : `${note.path} · 已丢失` });
+      const actions = row.createDiv({ cls: 'rh-next-resource-actions' });
+      if (file) {
+        const open = actions.createEl('button', { cls: 'rh-next-icon-button', attr: { 'aria-label': '打开笔记', title: '打开笔记' } });
+        setIcon(open, 'external-link');
+        open.addEventListener('click', (event) => { event.stopPropagation(); void openProjectNote(this.plugin, note).then(() => this.close()); });
+      }
+      const remove = actions.createEl('button', { cls: 'rh-next-icon-button', attr: { 'aria-label': '从项目移除', title: '从项目移除；不会删除文件' } });
+      setIcon(remove, 'unlink');
+      remove.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        unlinkProjectNote(this.plugin.state, this.projectId, note.id);
+        await this.plugin.persist();
+        await this.plugin.workbenchLeaf?.view?.render?.();
+        this.renderBody();
+      });
+      if (file) row.addEventListener('click', () => void openProjectNote(this.plugin, note).then(() => this.close()));
+    }
+  }
+
+  renderSearchResults(container, query = String(this.query || '').trim().toLocaleLowerCase('zh-CN')) {
+    const section = container.createDiv({ cls: 'go-study-picker-section' });
+    section.createEl('strong', { cls: 'go-study-picker-section-title', text: '搜索 Vault' });
+    const list = section.createDiv({ cls: 'rh-next-picker-list go-study-note-search-results' });
     const linked = new Set(projectNotes(this.plugin.state, this.projectId).map((note) => note.path.toLowerCase()));
     const matches = markdownFiles(this.plugin)
       .filter((file) => `${file.basename || ''}\n${file.path}`.toLocaleLowerCase('zh-CN').includes(query))
-      .slice(0, 50);
+      .slice(0, 80);
     if (!matches.length) {
-      container.createEl('p', { cls: 'rh-next-empty-inline', text: '没有找到匹配的 Markdown。' });
+      list.createEl('p', { cls: 'rh-next-empty-inline', text: '没有找到匹配的 Markdown。' });
       return;
     }
     for (const file of matches) {
       const already = linked.has(file.path.toLowerCase());
-      rowButton(container, file, already ? `${file.path} · 已在笔记盒` : file.path, async () => {
+      rowButton(list, file, already ? `${file.path} · 已在笔记盒` : `${file.path} · 点击关联`, async () => {
         const result = linkProjectNote(this.plugin.state, this.projectId, file.path);
         setRecentProjectNote(this.plugin.state, this.projectId, result.note.id);
         await this.plugin.persist();
@@ -242,6 +338,7 @@ class StudyNotePickerModal extends Modal {
     this.resolveChoice = resolve;
     this.query = '';
     this.settled = false;
+    this.bodyEl = null;
   }
 
   onOpen() {
@@ -272,57 +369,72 @@ class StudyNotePickerModal extends Modal {
 
   render() {
     const project = this.plugin.state.projects?.[this.projectId];
+    this.contentEl.empty();
+    const ui = createPickerShell(this.contentEl, {
+      title: '开始学习',
+      description: `${project?.title || '项目'} · ${this.resource?.title || '学习资源'} · 选择这次学习要带上的笔记，不会建立永久的资源绑定。`,
+      searchLabel: '搜索 Vault',
+      placeholder: '搜索 Markdown…'
+    });
+    this.bodyEl = ui.body;
+    ui.search.value = this.query;
+    ui.search.addEventListener('input', () => {
+      this.query = ui.search.value;
+      this.renderBody();
+    });
+
+    const manage = ui.footer.createEl('button', { cls: 'rh-next-button' }); manage.textContent = '管理笔记盒';
+    manage.addEventListener('click', () => { new ProjectNoteBoxModal(this.app, this.plugin, this.projectId).open(); });
+    const none = ui.footer.createEl('button', { cls: 'rh-next-button' }); none.textContent = '这次不使用笔记';
+    none.addEventListener('click', () => this.finish({ cancelled: false, note: null }));
+    const cancel = ui.footer.createEl('button', { cls: 'rh-next-button' }); cancel.textContent = '取消';
+    cancel.addEventListener('click', () => this.finish({ cancelled: true, note: null }));
+    this.renderBody();
+  }
+
+  renderBody() {
+    const container = this.bodyEl;
+    if (!container) return;
+    container.empty();
+    const query = String(this.query || '').trim().toLocaleLowerCase('zh-CN');
+    if (query) return this.renderSearchResults(container, query);
+
     const recent = recentProjectNote(this.plugin.state, this.projectId);
     const notes = projectNotes(this.plugin.state, this.projectId).filter((note) => !note.missingAt && resolveNoteFile(this.plugin, note));
-    this.contentEl.empty();
-    const head = this.contentEl.createDiv({ cls: 'rh-next-modal-heading' });
-    const copy = head.createDiv();
-    copy.createEl('h2', { text: '开始学习' });
-    copy.createEl('p', { text: `${project?.title || '项目'} · ${this.resource?.title || '学习资源'}` });
-    this.contentEl.createEl('p', { cls: 'setting-item-description', text: '选择这次学习要带上的笔记。它只是“本次使用”，不会建立永久的资源绑定。' });
-
     if (recent && !recent.missingAt) {
-      const recentSection = this.contentEl.createDiv({ cls: 'go-study-note-box-section' });
-      recentSection.createEl('strong', { text: '最近使用' });
+      const recentSection = container.createDiv({ cls: 'go-study-picker-section' });
+      recentSection.createEl('strong', { cls: 'go-study-picker-section-title', text: '最近使用' });
+      const list = recentSection.createDiv({ cls: 'rh-next-picker-list' });
       const file = resolveNoteFile(this.plugin, recent);
-      if (file) rowButton(recentSection, file, `${recent.path} · 上次使用`, () => this.chooseNote(recent));
+      if (file) rowButton(list, file, `${recent.path} · 上次使用`, () => this.chooseNote(recent));
     }
 
-    const projectSection = this.contentEl.createDiv({ cls: 'go-study-note-box-section' });
-    projectSection.createEl('strong', { text: '项目笔记盒' });
+    const projectSection = container.createDiv({ cls: 'go-study-picker-section' });
+    projectSection.createEl('strong', { cls: 'go-study-picker-section-title', text: '项目笔记盒' });
     const list = projectSection.createDiv({ cls: 'rh-next-picker-list' });
     const visible = notes.filter((note) => note.id !== recent?.id);
-    if (!visible.length) list.createEl('p', { cls: 'rh-next-empty-inline', text: recent ? '其他项目笔记会显示在这里。' : '笔记盒还是空的，可以搜索 Vault。' });
+    if (!visible.length) list.createEl('p', { cls: 'rh-next-empty-inline', text: recent ? '没有其他项目笔记。输入上方搜索框可从整个 Vault 选择。' : '笔记盒还是空的。输入上方搜索框可从整个 Vault 选择。' });
     for (const note of visible) {
       const file = resolveNoteFile(this.plugin, note);
       if (file) rowButton(list, file, note.path, () => this.chooseNote(note));
     }
+  }
 
-    const searchSection = this.contentEl.createDiv({ cls: 'go-study-note-box-section' });
-    searchSection.createEl('strong', { text: '搜索 Vault' });
-    const search = searchSection.createEl('input', { cls: 'rh-next-input', attr: { type: 'search', placeholder: '搜索 Markdown…' } });
-    const results = searchSection.createDiv({ cls: 'rh-next-picker-list' });
-    const renderSearch = () => {
-      results.empty();
-      const query = String(search.value || '').trim().toLocaleLowerCase('zh-CN');
-      if (!query) return results.createEl('p', { cls: 'rh-next-empty-inline', text: '输入名称或路径。' });
-      const matches = markdownFiles(this.plugin).filter((file) => `${file.basename || ''}\n${file.path}`.toLocaleLowerCase('zh-CN').includes(query)).slice(0, 40);
-      if (!matches.length) return results.createEl('p', { cls: 'rh-next-empty-inline', text: '没有找到匹配笔记。' });
-      for (const file of matches) {
-        const linked = findProjectNoteByPath(this.plugin.state, this.projectId, file.path);
-        rowButton(results, file, linked ? `${file.path} · 已在笔记盒` : `${file.path} · 选择后加入笔记盒`, () => this.chooseNote(linked, file));
-      }
-    };
-    search.addEventListener('input', renderSearch);
-    renderSearch();
-
-    const footer = this.contentEl.createDiv({ cls: 'rh-next-modal-actions' });
-    const manage = footer.createEl('button', { cls: 'rh-next-button' }); manage.textContent = '管理笔记盒';
-    manage.addEventListener('click', () => { new ProjectNoteBoxModal(this.app, this.plugin, this.projectId).open(); });
-    const none = footer.createEl('button', { cls: 'rh-next-button' }); none.textContent = '这次不使用笔记';
-    none.addEventListener('click', () => this.finish({ cancelled: false, note: null }));
-    const cancel = footer.createEl('button', { cls: 'rh-next-button' }); cancel.textContent = '取消';
-    cancel.addEventListener('click', () => this.finish({ cancelled: true, note: null }));
+  renderSearchResults(container, query) {
+    const section = container.createDiv({ cls: 'go-study-picker-section' });
+    section.createEl('strong', { cls: 'go-study-picker-section-title', text: '搜索 Vault' });
+    const results = section.createDiv({ cls: 'rh-next-picker-list' });
+    const matches = markdownFiles(this.plugin)
+      .filter((file) => `${file.basename || ''}\n${file.path}`.toLocaleLowerCase('zh-CN').includes(query))
+      .slice(0, 80);
+    if (!matches.length) {
+      results.createEl('p', { cls: 'rh-next-empty-inline', text: '没有找到匹配笔记。' });
+      return;
+    }
+    for (const file of matches) {
+      const linked = findProjectNoteByPath(this.plugin.state, this.projectId, file.path);
+      rowButton(results, file, linked ? `${file.path} · 已在笔记盒` : `${file.path} · 选择后加入笔记盒`, () => this.chooseNote(linked, file));
+    }
   }
 
   onClose() {
@@ -340,6 +452,7 @@ function chooseStudyNote(plugin, projectId, resource) {
 
 function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
   if (!doc?.querySelectorAll || !plugin?.manifest?.id) return null;
+  installPickerUxStyles(plugin, doc);
   const selector = `.workspace-leaf-content[data-type="${plugin.manifest.id}-workbench"]`;
   const inject = () => {
     const projectId = String(plugin.state?.uiState?.currentProjectId || '');
@@ -374,7 +487,9 @@ module.exports = {
   ProjectNoteBoxModal,
   StudyNotePickerModal,
   chooseStudyNote,
+  createPickerShell,
   createProjectNote,
+  installPickerUxStyles,
   installProjectNoteEntryPoints,
   markdownFiles,
   newNoteParentPath,
