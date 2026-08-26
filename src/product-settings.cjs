@@ -3,6 +3,7 @@
 const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   autoCollapseSidebar: true,
   videoEnhancementEnabled: false,
+  videoShortcutScope: 'potplayer',
   videoResumeAfterSave: true,
   videoResumeAfterCancel: true,
   videoSuccessFeedback: true,
@@ -54,6 +55,12 @@ function normalizeCaptureFolder(value) {
   return parts.join('/');
 }
 
+function normalizeVideoShortcutScope(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'potplayer' || normalized === 'global') return normalized;
+  return DEFAULT_PRODUCT_SETTINGS.videoShortcutScope;
+}
+
 function normalizeTimeDisplayFormat(value) {
   const normalized = String(value || '').trim().toLowerCase();
   if (normalized === 'smart' || normalized === 'hms') return normalized;
@@ -90,6 +97,7 @@ function currentProductSettings(plugin) {
   return {
     autoCollapseSidebar: boolOr(ui.autoCollapseSidebar, DEFAULT_PRODUCT_SETTINGS.autoCollapseSidebar),
     videoEnhancementEnabled: boolOr(ui.videoEnhancementEnabled, DEFAULT_PRODUCT_SETTINGS.videoEnhancementEnabled),
+    videoShortcutScope: normalizeVideoShortcutScope(ui.videoShortcutScope),
     videoResumeAfterSave: boolOr(ui.videoResumeAfterSave, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterSave),
     videoResumeAfterCancel: boolOr(ui.videoResumeAfterCancel, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterCancel),
     videoSuccessFeedback: boolOr(ui.videoSuccessFeedback, DEFAULT_PRODUCT_SETTINGS.videoSuccessFeedback),
@@ -122,6 +130,7 @@ async function updateProductSetting(plugin, key, value) {
   plugin.state.uiState ||= {};
   let next = value;
   if (key === 'captureFolder') next = normalizeCaptureFolder(value);
+  else if (key === 'videoShortcutScope') next = normalizeVideoShortcutScope(value);
   else if (key === 'backupRetention') next = clampInteger(value, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention);
   else if (key === 'timeDisplayFormat') next = normalizeTimeDisplayFormat(value);
   else if (TEMPLATE_RULES[key]) next = normalizeOutputTemplate(key, value);
@@ -149,6 +158,7 @@ module.exports = {
   normalizeCaptureFolder,
   normalizeOutputTemplate,
   normalizeTimeDisplayFormat,
+  normalizeVideoShortcutScope,
   outputTemplateTokens,
   resetOutputTemplates,
   updateProductSetting
