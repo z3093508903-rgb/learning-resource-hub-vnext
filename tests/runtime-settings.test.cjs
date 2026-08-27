@@ -27,3 +27,9 @@ test('custom backup retention only tightens the existing ten-backup cap', () => 
 test('Companion reverse-event poller is no longer mounted in normal runtime', () => {
   assert.doesNotMatch(runtimeSource, /registerCompanionEventPoller/);
 });
+
+
+test('runtime registers companion note commands after project state normalization', () => {
+  assert.match(runtimeSource, /registerCompanionNoteCommands/);
+  assert.ok(runtimeSource.indexOf('ensureProjectNotesState(this.state)') < runtimeSource.indexOf('registerCompanionNoteCommands(this)'));
+});
