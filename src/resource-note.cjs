@@ -1,6 +1,6 @@
 'use strict';
 
-const { buildReferenceUri, normalizeReferencePosition } = require('./resource-reference.cjs');
+const { buildFreeformReferenceUri, buildReferenceUri, normalizeReferencePosition } = require('./resource-reference.cjs');
 const {
   DEFAULT_PRODUCT_SETTINGS,
   normalizeOutputTemplate,
@@ -51,6 +51,53 @@ function buildPositionMarkdown(resource, position, options = {}) {
   return renderOutputTemplate(template, { title, time, uri });
 }
 
+function freeformMediaTitle(media = {}) {
+  const explicit = String(media.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '').trim();
+  if (explicit && explicit.toLowerCase() !== 'potplayer') return explicit;
+  const raw = String(media.path || '').trim();
+  try {
+    const url = new URL(raw);
+    const tail = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || url.hostname || '临时视频');
+    return tail || url.hostname || '临时视频';
+  } catch {}
+  const parts = raw.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.pop() || '临时视频';
+}
+
+function freeformWebLocator(media = {}) {
+  const raw = String(media.web || media.path || '').trim();
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch { return ''; }
+}
+
+function buildFreeformPositionMarkdown(media, position, options = {}) {
+  const normalized = normalizeReferencePosition(position);
+  const path = String(media?.path || '').trim();
+  if (!path) throw new Error('无法为缺少媒体地址的视频生成自由回链。');
+  const uri = buildFreeformReferenceUri({
+    path,
+    web: freeformWebLocator(media),
+    position: normalized,
+    version: 1
+  });
+  const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
+  const title = escapeMarkdownLabel(options.title || freeformMediaTitle(media));
+  const template = normalizeOutputTemplate(
+    'backlinkTemplate',
+    options.template ?? options.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate
+  );
+  return renderOutputTemplate(template, { title, time, uri });
+}
+
+function buildContextPositionMarkdown(context, options = {}) {
+  if (context?.mode === 'freeform') {
+    return buildFreeformPositionMarkdown(context.bridgeMedia || context.freeform || {}, context.position, options);
+  }
+  return buildPositionMarkdown(context?.resource, context?.position, options);
+}
+
 function normalizeUserNote(value) {
   return String(value ?? '').replace(/\r\n/g, '\n').trim();
 }
@@ -99,6 +146,45 @@ function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText, 
   );
   return renderOutputTemplate(template, { image, note, backlink });
 }
+function buildContextNoteMarkdown(context, noteText, options = {}) {
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const backlink = buildContextPositionMarkdown(context, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate('noteTemplate', options.noteTemplate ?? DEFAULT_PRODUCT_SETTINGS.noteTemplate);
+  return renderOutputTemplate(template, { note, backlink });
+}
+
+function buildContextCaptureMarkdown(context, vaultImagePath, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const backlink = buildContextPositionMarkdown(context, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate('captureTemplate', options.captureTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureTemplate);
+  return renderOutputTemplate(template, { image, backlink });
+}
+
+function buildContextCaptureNoteMarkdown(context, vaultImagePath, noteText, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const backlink = buildContextPositionMarkdown(context, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate(
+    'captureNoteTemplate',
+    options.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate
+  );
+  return renderOutputTemplate(template, { image, note, backlink });
+}
+
 
 function sanitizeCaptureBaseName(value) {
   const cleaned = String(value || '学习资源')
@@ -118,10 +204,17 @@ function captureFileName(resource, position, extension = 'png') {
 
 module.exports = {
   buildCaptureMarkdown,
+  buildContextCaptureMarkdown,
+  buildContextCaptureNoteMarkdown,
+  buildContextNoteMarkdown,
+  buildContextPositionMarkdown,
   buildCaptureNoteMarkdown,
   buildNotePositionMarkdown,
   buildPositionMarkdown,
+  buildFreeformPositionMarkdown,
   captureFileName,
+  freeformMediaTitle,
+  freeformWebLocator,
   escapeMarkdownLabel,
   formatPositionClock,
   normalizeCaptureImage,
