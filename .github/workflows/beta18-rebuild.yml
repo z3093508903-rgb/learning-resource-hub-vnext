@@ -1,0 +1,32 @@
+name: Beta18 Rebuild
+
+on:
+  push:
+    branches:
+      - work/companion-note-beta18
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Rebuild and validate
+        run: npm run release:check
+      - name: Remove one-shot workflow
+        run: rm .github/workflows/beta18-rebuild.yml
+      - name: Commit generated bundle
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.js .github/workflows/beta18-rebuild.yml
+          git commit -m "build: refresh main.js for beta.18"
+          git push origin HEAD:${GITHUB_REF_NAME}
