@@ -328,7 +328,10 @@ function registerLearningCaptureCommands(plugin) {
     callback: () => {
       new Notice('正在读取 PotPlayer 当前学习位置…', 1500);
       void insertCurrentLearningPosition(plugin)
-        .then((result) => new Notice(`已记录：${result.resource.title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`))
+        .then((result) => {
+          const title = result.resource?.title || freeformMediaTitle(result.bridgeMedia || result.freeform || {});
+          new Notice(`已记录：${title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`);
+        })
         .catch((error) => new Notice(commandErrorText('记录学习位置失败', error), 6000));
     }
   });
