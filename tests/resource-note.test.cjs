@@ -7,6 +7,7 @@ const { parseReferenceUri } = require('../src/resource-reference.cjs');
 const {
   buildCaptureMarkdown,
   buildCaptureNoteMarkdown,
+  buildFreeformPlaybackUri,
   buildFreeformPositionMarkdown,
   buildNotePositionMarkdown,
   buildPlainCaptureNoteMarkdown,
@@ -90,18 +91,25 @@ test('capture filenames are Windows-safe and position-stable', () => {
 });
 
 
-test('freeform position markdown keeps the same visible template while using a locator-based Go Study URI', () => {
+test('freeform position markdown uses the original jv PotPlayer protocol directly', () => {
   const markdown = buildFreeformPositionMarkdown(
     { path: 'D:\\Loose\\tutorial.mp4', title: 'tutorial - PotPlayer' },
     { type: 'time', seconds: 754 },
     { backlinkTemplate: '[🎬 {title} · {time}]({uri})' }
   );
-  assert.match(markdown, /^\[🎬 tutorial · 12:34\]\(obsidian:\/\/go-study\?/);
-  const uri = markdown.match(/\((obsidian:\/\/go-study\?[^)]+)\)/)?.[1];
-  const parsed = parseReferenceUri(uri);
-  assert.equal(parsed.mode, 'freeform');
-  assert.equal(parsed.path, 'D:\\Loose\\tutorial.mp4');
-  assert.equal(parsed.position.seconds, 754);
+  assert.match(markdown, /^\[🎬 tutorial · 12:34\]\(jv:\/\/open\?/);
+  const uri = markdown.match(/\((jv:\/\/open\?[^)]+)\)/)?.[1];
+  const parsed = new URL(uri);
+  assert.equal(parsed.protocol, 'jv:');
+  assert.equal(parsed.hostname, 'open');
+  assert.equal(parsed.searchParams.get('path'), 'D:\\Loose\\tutorial.mp4');
+  assert.equal(parsed.searchParams.get('time'), '00:12:34');
+  assert.doesNotMatch(markdown, /mode=freeform/);
+
+  assert.equal(
+    buildFreeformPlaybackUri({ path: 'D:\\Loose\\lesson 01.mp4' }, { type: 'time', seconds: 5 }),
+    'jv://open?path=D%3A%5CLoose%5Clesson%2001.mp4&time=00%3A00%3A05'
+  );
 });
 
 test('no-timestamp templates can emit pure notes or image notes without backlinks', () => {

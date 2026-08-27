@@ -105,8 +105,10 @@ test('a self-opened unmatched PotPlayer video falls back to a freeform backlink 
   });
   assert.equal(result.mode, 'freeform');
   assert.equal(result.resource, null);
-  assert.match(inserted[0], /mode=freeform/);
-  assert.match(inserted[0], /position=time%3A10/);
+  assert.match(inserted[0], /jv:\/\/open\?/);
+  assert.match(inserted[0], /path=D%3A%5CLoose%5Canother\.mp4/);
+  assert.match(inserted[0], /time=00%3A00%3A10/);
+  assert.doesNotMatch(inserted[0], /mode=freeform/);
   assert.equal(resource.resume, undefined);
   assert.equal(plugin.persistCalls, 0);
 });
