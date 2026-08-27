@@ -119,7 +119,7 @@ jobs:
 
           ## Important beta.15 boundary
           Freeform link capture/generation is native to Go Study, but opening an unmatched Freeform link still uses the existing jv:// compatibility jump path in this preview. This is intentional for A/B validation against the old AHK experience; it is not yet the final one-product launch implementation.
-          EOFF
+          EOF
 
           cd dist-preview
           zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
