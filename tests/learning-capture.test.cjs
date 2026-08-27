@@ -95,14 +95,31 @@ test('insert current position writes permanent markdown through the editor and u
   assert.equal(plugin.persistCalls, 1);
 });
 
-test('insert current position refuses a different PotPlayer media before touching the editor', async () => {
+test('a self-opened unmatched PotPlayer video falls back to a freeform backlink without corrupting managed Resume', async () => {
   const { insertCurrentLearningPosition } = loadCaptureModule();
-  const { plugin, inserted } = localPluginFixture();
-  await assert.rejects(() => insertCurrentLearningPosition(plugin, {
-    bridgeRequest: async () => ({ ok: true, media: { path: 'c:/course/another.mp4', positionSeconds: 10 } }),
+  const { plugin, resource, inserted } = localPluginFixture();
+  const result = await insertCurrentLearningPosition(plugin, {
+    bridgeRequest: async () => ({ ok: true, media: { path: 'D:\\Loose\\another.mp4', title: 'another - PotPlayer', positionSeconds: 10 } }),
     requestUrl: async () => {},
     editor: { replaceSelection: (text) => inserted.push(text) }
-  }), /不一致/);
+  });
+  assert.equal(result.mode, 'freeform');
+  assert.equal(result.resource, null);
+  assert.match(inserted[0], /mode=freeform/);
+  assert.match(inserted[0], /position=time%3A10/);
+  assert.equal(resource.resume, undefined);
+  assert.equal(plugin.persistCalls, 0);
+});
+
+test('freeform fallback can be disabled for users who only want managed Go Study resources', async () => {
+  const { insertCurrentLearningPosition } = loadCaptureModule();
+  const { plugin, inserted } = localPluginFixture();
+  plugin.state.uiState.freeformVideoNotesEnabled = false;
+  await assert.rejects(() => insertCurrentLearningPosition(plugin, {
+    bridgeRequest: async () => ({ ok: true, media: { path: 'D:\\Loose\\another.mp4', positionSeconds: 10 } }),
+    requestUrl: async () => {},
+    editor: { replaceSelection: (text) => inserted.push(text) }
+  }), /没有匹配到 Go Study 资源/);
   assert.equal(inserted.length, 0);
   assert.equal(plugin.persistCalls, 0);
 });
