@@ -50,7 +50,7 @@ Release 已发布且包含 Preview ZIP、`main.js`、`manifest.json`、`styles.c
 - Windows 的 `jv://` 仅作为内部执行兼容层
 - macOS/Linux 支持 POSIX 本地路径解析与系统播放器打开；精确 seek 仍需要平台 Player Adapter
 - 自动化：**293 项测试全部通过，release:check 与 committed main.js consistency 全绿**
-- 状态：**等待 Windows/macOS 真人验收**
+- 状态：**Windows 核心链路真人验收通过；macOS / 跨设备路径仍延期验证**
 
 ### beta.16 Freeform 修复候选
 
@@ -130,7 +130,12 @@ beta.15 的 local-only 尝试已被新的远程可恢复候选取代：
 
 已确认：
 
-- Freeform reopen 当前失败，可复现 `Vault not found`。
+- beta.17 新 Freeform `locator=` / `v=2` 链路在 Windows 实机可用；
+- 未收录视频点击可正常回到播放器 / 时间位置；
+- 视频后来被收录后，历史 Freeform 链接可由 Go Study 动态升级到 Managed 解析；
+- beta.16 旧 `jv://` 链接与 beta.15 旧 Freeform 链接兼容测试通过；
+- 已收录 Resource 仍生成 Resource-ID Managed 回链；
+- 当前遗留：Freeform 可见标题仍可能受 PotPlayer / Bridge 标题乱码影响，属于显示层问题，不影响回跳逻辑。
 
 仍需验收：
 
@@ -157,17 +162,36 @@ Freeform 永久回链最终协议仍是 `PROPOSED`，但 beta.16 已选择方案
 
 ## 下一步
 
-1. Windows 安装 beta.17，验证新 Freeform 链接显示为“↗ 回到课程 · 时间”，且目标使用 `locator=` / `v=2`；
-2. 点击新 Freeform 链接，验证 Windows 内部 fallback 仍能打开并 seek；
-3. 将同一视频后来收录到 Go Study，再点击历史 Freeform 链接，验证是否自动升级到 Managed；
-4. 回归 beta.16 老 `jv://` 与 beta.15 老 `path=` 链接；
-5. macOS 真机验证 POSIX 路径和网页 Freeform；精确 seek 暂不视为已完成；
-6. 若跨设备本地路径仍是主要需求，下一步设计 Path Mapping / Device Locator Map，而不是把绝对路径伪装成跨平台。
+### beta.17 收尾小优化
 
+1. HUD：同一方向键快速连按两次，等价于“方向 + Enter”执行当前动作；
+   - 目标：`Alt+S → ↑ → Enter` 缩短为 `Alt+S → ↑↑`；
+   - 保留原单击方向 + Enter 交互。
+2. 笔记弹窗 UI：
+   - 弱化明显突兀的滚动条 / 滑块视觉；
+   - 默认位置下移到更自然区域；
+   - 支持拖动位置并记忆最后位置；
+   - 后续如支持尺寸调整，同样记忆 geometry。
+3. 设置页模板区域：
+   - 模板编辑器与实时示例相邻；
+   - 输入模板时示例实时更新；
+   - 示例直接展示最终 Markdown / 可见效果。
+4. 设置页信息层级：
+   - HUD 映射、模板编辑、实例预览重新分组；
+   - 减少长页面卡片堆叠与无效空白。
+5. 修复 Freeform 可见标题乱码，优先稳定显示“回到课程 · 时间”。
 
-1. 安装隔离 Preview `Go Study 0.3.0-beta.16`，保留现有 `data.json`；
-2. 验收新未收录本地视频生成的 `jv://` 回链能否直接打开 PotPlayer 并 seek；
-3. 验收旧 beta.15 `obsidian://go-study?mode=freeform&path=...` 链接能否被兼容拦截；
-4. 回归 Managed Resource 回链，确认仍是 Resource ID + Resolver；
-5. 若三项真人验收通过，再把 Freeform 直达 `jv://` 从 PROPOSED 升级为 CONFIRMED，并更新 ADR；
-6. 未经真人验收，不 Merge PR #24，不合入 beta.15/主线。
+### 延期：跨平台本地路径
+
+beta.17 已完成“协议跨平台”，但 macOS / Windows 本地绝对路径映射不在本轮继续开发。
+后续单独评估 Device Path Mapping、Resource multi-locator、content fingerprint / media identity。
+
+### beta.18 候选
+
+优先评估“Go Study 笔记小窗 / Companion Note Window”：
+- 不依赖 Windows 系统分屏；
+- 与 PotPlayer 边看边记；
+- 使用真实 Markdown Note，不创建第二套私有笔记格式；
+- Capture 稳定写入被锁定的小窗笔记；
+- 位置 / 尺寸 / 最近笔记可恢复；
+- 与完整 Study Workspace 分离，先做最小可用小窗。
