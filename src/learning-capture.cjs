@@ -117,6 +117,7 @@ async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
     throw new Error('当前 Vault 不支持创建截图目录。');
   }
   const safeFolder = normalizeCaptureFolder(folderPath);
+  if (!safeFolder) return '';
   const parts = safeFolder.split('/').filter(Boolean);
   let current = '';
   for (const part of parts) {
@@ -134,11 +135,12 @@ async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
 function capturePathCandidate(resource, position, index = 1, folderPath = CAPTURE_FOLDER) {
   const folder = normalizeCaptureFolder(folderPath);
   const base = captureFileName(resource, position, 'png');
-  if (index <= 1) return `${folder}/${base}`;
+  const join = (name) => folder ? `${folder}/${name}` : name;
+  if (index <= 1) return join(base);
   const dot = base.lastIndexOf('.');
   const stem = dot >= 0 ? base.slice(0, dot) : base;
   const ext = dot >= 0 ? base.slice(dot) : '';
-  return `${folder}/${stem}-${index}${ext}`;
+  return join(`${stem}-${index}${ext}`);
 }
 
 function uniqueCapturePath(vault, resource, position, folderPath = CAPTURE_FOLDER) {
@@ -158,11 +160,39 @@ function clipboardPngBuffer(clipboardImpl = clipboard) {
   return Buffer.from(png);
 }
 
+function learningNoteSourcePath(plugin) {
+  try { return String(resolveRememberedNoteTarget(plugin).filePath || ''); }
+  catch { return String(plugin?.app?.workspace?.getActiveFile?.()?.path || ''); }
+}
+
+async function systemAttachmentCapturePath(plugin, resource, position) {
+  const vault = plugin?.app?.vault;
+  const fileManager = plugin?.app?.fileManager;
+  const filename = captureFileName(resource, position, 'png');
+  const sourcePath = learningNoteSourcePath(plugin);
+  if (typeof fileManager?.getAvailablePathForAttachment === 'function') {
+    const resolved = String(await fileManager.getAvailablePathForAttachment(filename, sourcePath) || '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '');
+    if (resolved) {
+      const parent = resolved.includes('/') ? resolved.slice(0, resolved.lastIndexOf('/')) : '';
+      if (parent) await ensureVaultFolder(vault, parent);
+      return resolved;
+    }
+  }
+  return uniqueCapturePath(vault, resource, position, '');
+}
+
 async function saveCaptureToVault(plugin, resource, position, pngBuffer) {
   const vault = plugin?.app?.vault;
   const folder = currentProductSettings(plugin).captureFolder;
-  await ensureVaultFolder(vault, folder);
-  const vaultPath = uniqueCapturePath(vault, resource, position, folder);
+  let vaultPath;
+  if (folder) {
+    await ensureVaultFolder(vault, folder);
+    vaultPath = uniqueCapturePath(vault, resource, position, folder);
+  } else {
+    vaultPath = await systemAttachmentCapturePath(plugin, resource, position);
+  }
   if (typeof vault.createBinary !== 'function') throw new Error('当前 Vault 不支持写入二进制截图。');
   const bytes = Buffer.from(pngBuffer || []);
   if (!bytes.length) throw new Error('截图数据为空。');
@@ -289,5 +319,6 @@ module.exports = {
   requestLearningPlayer,
   resolveLearningContext,
   saveCaptureToVault,
+  systemAttachmentCapturePath,
   uniqueCapturePath
 };
