@@ -106,7 +106,7 @@ function buildNotePositionMarkdown(resource, position, noteText, options = {}) {
   const note = normalizeUserNote(noteText);
   if (!note) throw new Error('笔记内容不能为空。');
   const backlink = buildPositionMarkdown(resource, position, {
-    title: options.backlinkTitle || '回到课程',
+    title: contextBacklinkTitle(context, options),
     timeFormat: options.timeFormat,
     backlinkTemplate: options.backlinkTemplate
   });
@@ -147,7 +147,7 @@ function buildPlainCaptureNoteMarkdown(vaultImagePath, noteText, options = {}) {
 function buildCaptureMarkdown(resource, position, vaultImagePath, options = {}) {
   const image = normalizeCaptureImage(vaultImagePath);
   const backlink = buildPositionMarkdown(resource, position, {
-    title: options.backlinkTitle || '回到课程',
+    title: contextBacklinkTitle(context, options),
     timeFormat: options.timeFormat,
     backlinkTemplate: options.backlinkTemplate
   });
@@ -160,7 +160,7 @@ function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText, 
   const note = normalizeUserNote(noteText);
   if (!note) throw new Error('笔记内容不能为空。');
   const backlink = buildPositionMarkdown(resource, position, {
-    title: options.backlinkTitle || '回到课程',
+    title: contextBacklinkTitle(context, options),
     timeFormat: options.timeFormat,
     backlinkTemplate: options.backlinkTemplate
   });
@@ -170,11 +170,18 @@ function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText, 
   );
   return renderOutputTemplate(template, { image, note, backlink });
 }
+function contextBacklinkTitle(context, options = {}) {
+  if (options.backlinkTitle) return options.backlinkTitle;
+  return context?.mode === 'freeform'
+    ? freeformMediaTitle(context.bridgeMedia || context.freeform || {})
+    : '回到课程';
+}
+
 function buildContextNoteMarkdown(context, noteText, options = {}) {
   const note = normalizeUserNote(noteText);
   if (!note) throw new Error('笔记内容不能为空。');
   const backlink = buildContextPositionMarkdown(context, {
-    title: options.backlinkTitle || '回到课程',
+    title: contextBacklinkTitle(context, options),
     timeFormat: options.timeFormat,
     backlinkTemplate: options.backlinkTemplate
   });
@@ -185,7 +192,7 @@ function buildContextNoteMarkdown(context, noteText, options = {}) {
 function buildContextCaptureMarkdown(context, vaultImagePath, options = {}) {
   const image = normalizeCaptureImage(vaultImagePath);
   const backlink = buildContextPositionMarkdown(context, {
-    title: options.backlinkTitle || '回到课程',
+    title: contextBacklinkTitle(context, options),
     timeFormat: options.timeFormat,
     backlinkTemplate: options.backlinkTemplate
   });
@@ -198,7 +205,7 @@ function buildContextCaptureNoteMarkdown(context, vaultImagePath, noteText, opti
   const note = normalizeUserNote(noteText);
   if (!note) throw new Error('笔记内容不能为空。');
   const backlink = buildContextPositionMarkdown(context, {
-    title: options.backlinkTitle || '回到课程',
+    title: contextBacklinkTitle(context, options),
     timeFormat: options.timeFormat,
     backlinkTemplate: options.backlinkTemplate
   });
@@ -240,6 +247,7 @@ module.exports = {
   buildPlainCaptureNoteMarkdown,
   buildPlainNoteMarkdown,
   captureFileName,
+  contextBacklinkTitle,
   freeformMediaTitle,
   freeformWebLocator,
   escapeMarkdownLabel,
