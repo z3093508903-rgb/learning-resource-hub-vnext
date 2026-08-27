@@ -118,7 +118,7 @@ function parseQueryEntries(searchParams) {
     });
   }
   if (searchParams.has('mode') || searchParams.has('path') || searchParams.has('web')) {
-    throw new Error('Go Study 管理型回链包含不允许的自由回链参数。');
+    throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
   }
   return validateReferenceData({
     resource: searchParams.get('resource'),
@@ -158,7 +158,7 @@ function parseProtocolParams(params) {
     return validateFreeformReferenceData(source);
   }
   if (source.mode != null || source.path != null || source.web != null) {
-    throw new Error('Go Study 管理型回链包含不允许的自由回链参数。');
+    throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
   }
   return validateReferenceData({
     resource: source.resource,
