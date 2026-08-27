@@ -26,5 +26,5 @@ test('legacy actions and HUD actions share one capture-action executor', () => {
   assert.match(hotkeySource, /LEGACY_ACTION_MAP/);
   assert.match(hotkeySource, /runCaptureAction/);
   assert.match(hotkeySource, /timeImage/);
-  assert.match(hotkeySource, /imageNote/);
+  assert.match(hotkeySource, /commitPreparedPlainCaptureTypedNote/);
 });
