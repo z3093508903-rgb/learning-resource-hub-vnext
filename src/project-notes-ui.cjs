@@ -8,12 +8,17 @@ const {
 const {
   findProjectNoteByPath,
   linkProjectNote,
+  normalizeNoteFolder,
+  projectNoteFolder,
   projectNotes,
   recentProjectNote,
   recentStudy,
+  setProjectNoteFolder,
   setRecentProjectNote,
   unlinkProjectNote
 } = require('./project-notes.cjs');
+const { currentProductSettings } = require('./product-settings.cjs');
+const { rememberNoteTarget } = require('./note-target.cjs');
 
 function markdownFiles(plugin) {
   const vault = plugin?.app?.vault;
@@ -35,6 +40,24 @@ function resolveNoteFile(plugin, note) {
   return file;
 }
 
+function markdownLeafForFile(plugin, file) {
+  const leaves = plugin?.app?.workspace?.getLeavesOfType?.('markdown') || [];
+  return leaves.find((leaf) => String(leaf?.view?.file?.path || '') === String(file?.path || '')) || null;
+}
+
+async function focusProjectNoteAtEnd(plugin, file) {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const leaf = markdownLeafForFile(plugin, file);
+  const editor = leaf?.view?.editor;
+  if (!editor || typeof editor.setCursor !== 'function') return false;
+  const lastLine = Math.max(0, Number(typeof editor.lastLine === 'function' ? editor.lastLine() : 0));
+  const lineText = typeof editor.getLine === 'function' ? String(editor.getLine(lastLine) || '') : '';
+  editor.setCursor({ line: lastLine, ch: lineText.length });
+  rememberNoteTarget(plugin, editor, file);
+  editor.focus?.();
+  return true;
+}
+
 async function openProjectNote(plugin, note, options = {}) {
   const file = resolveNoteFile(plugin, note);
   if (!file) {
@@ -47,6 +70,9 @@ async function openProjectNote(plugin, note, options = {}) {
   setRecentProjectNote(plugin.state, note.projectId, note.id);
   await plugin.persist?.();
   await plugin.openVaultEntry(file, { newLeaf: Boolean(options.newLeaf) });
+  if (options.prepareForStudy && currentProductSettings(plugin).focusStudyNoteAtEnd) {
+    await focusProjectNoteAtEnd(plugin, file);
+  }
   return true;
 }
 
@@ -66,8 +92,8 @@ function newNoteParentPath(plugin) {
   }
 }
 
-function uniqueNewNotePath(plugin, title) {
-  const parent = newNoteParentPath(plugin);
+function uniqueNewNotePath(plugin, title, folderOverride = undefined) {
+  const parent = folderOverride === undefined ? newNoteParentPath(plugin) : normalizeNoteFolder(folderOverride);
   const stem = safeNewNoteTitle(title);
   for (let index = 1; index <= 999; index += 1) {
     const name = index === 1 ? `${stem}.md` : `${stem} ${index}.md`;
@@ -77,8 +103,10 @@ function uniqueNewNotePath(plugin, title) {
   throw new Error('同名笔记过多，无法创建新笔记。');
 }
 
-async function createProjectNote(plugin, projectId, title) {
-  const path = uniqueNewNotePath(plugin, title);
+async function createProjectNote(plugin, projectId, title, options = {}) {
+  const projectFolder = projectNoteFolder(plugin.state, projectId);
+  const folder = Object.prototype.hasOwnProperty.call(options, 'folder') ? options.folder : (projectFolder || undefined);
+  const path = uniqueNewNotePath(plugin, title, folder);
   const heading = safeNewNoteTitle(title);
   const file = await plugin.app.vault.create(path, `# ${heading}\n\n`);
   const result = linkProjectNote(plugin.state, projectId, file.path);
@@ -87,6 +115,95 @@ async function createProjectNote(plugin, projectId, title) {
   await plugin.openVaultEntry(file);
   await plugin.workbenchLeaf?.view?.render?.();
   return result.note;
+}
+
+function vaultFolders(plugin) {
+  const root = plugin?.app?.vault?.getRoot?.();
+  const result = [];
+  const visit = (folder) => {
+    for (const child of Array.isArray(folder?.children) ? folder.children : []) {
+      if (!Array.isArray(child?.children)) continue;
+      const path = String(child.path || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+      if (path) result.push({ path, name: String(child.name || path.split('/').pop() || path) });
+      visit(child);
+    }
+  };
+  visit(root);
+  return result.sort((a, b) => a.path.localeCompare(b.path, 'zh-CN', { numeric: true }));
+}
+
+class ProjectNoteFolderPickerModal extends Modal {
+  constructor(app, plugin, options = {}) {
+    super(app);
+    this.plugin = plugin;
+    this.options = options;
+    this.settled = false;
+  }
+
+  onOpen() {
+    this.modalEl.addClass?.('rh-next-modal', 'go-study-project-note-folder-modal');
+    this.render();
+  }
+
+  choose(path) {
+    if (this.settled) return;
+    this.settled = true;
+    this.options.onChoose?.(path);
+    this.close();
+  }
+
+  render() {
+    this.contentEl.empty();
+    const ui = createPickerShell(this.contentEl, {
+      title: this.options.title || '选择笔记文件夹',
+      description: this.options.description || '只决定新建笔记保存位置，不会自动收录整个文件夹。',
+      searchLabel: '搜索 Vault 文件夹',
+      placeholder: '搜索文件夹…'
+    });
+    const paint = () => {
+      ui.body.empty();
+      const query = String(ui.search.value || '').trim().toLocaleLowerCase('zh-CN');
+      const section = ui.body.createDiv({ cls: 'go-study-picker-section' });
+      const list = section.createDiv({ cls: 'rh-next-picker-list' });
+      const system = list.createEl('button', { cls: 'rh-next-picker-row go-study-folder-row' });
+      setIcon(system.createSpan(), 'folder-cog');
+      const systemCopy = system.createDiv();
+      systemCopy.createEl('strong', { text: '跟随 Obsidian 默认位置' });
+      systemCopy.createEl('small', { text: '不设置项目固定文件夹' });
+      system.addEventListener('click', () => this.choose(''));
+      for (const folder of vaultFolders(this.plugin)
+        .filter((item) => !query || item.path.toLocaleLowerCase('zh-CN').includes(query))
+        .slice(0, 160)) {
+        const row = list.createEl('button', { cls: 'rh-next-picker-row go-study-folder-row' });
+        setIcon(row.createSpan(), 'folder');
+        const copy = row.createDiv();
+        copy.createEl('strong', { text: folder.name });
+        copy.createEl('small', { text: folder.path });
+        row.addEventListener('click', () => this.choose(folder.path));
+      }
+    };
+    ui.search.addEventListener('input', paint);
+    const cancel = ui.footer.createEl('button', { cls: 'rh-next-button' });
+    cancel.textContent = '取消';
+    cancel.addEventListener('click', () => this.close());
+    paint();
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    if (!this.settled) {
+      this.settled = true;
+      this.options.onCancel?.();
+    }
+  }
+}
+
+function chooseProjectNoteFolder(plugin, options = {}) {
+  return new Promise((resolve) => new ProjectNoteFolderPickerModal(plugin.app, plugin, {
+    ...options,
+    onChoose: (path) => resolve({ cancelled: false, path }),
+    onCancel: () => resolve({ cancelled: true, path: '' })
+  }).open());
 }
 
 function createActionButton(doc, label, icon, className = '') {
@@ -147,12 +264,14 @@ function installPickerUxStyles(plugin, doc = globalThis.document) {
   style.textContent = `
 .modal.go-study-project-note-box-modal,
 .modal.go-study-study-note-picker-modal,
+.modal.go-study-project-note-folder-modal,
 .modal.rh-next-vault-picker-modal {
   width: min(760px, 92vw);
   height: min(680px, 84vh);
 }
 .modal.go-study-project-note-box-modal .modal-content,
 .modal.go-study-study-note-picker-modal .modal-content,
+.modal.go-study-project-note-folder-modal .modal-content,
 .modal.rh-next-vault-picker-modal .modal-content {
   height: 100%;
   min-height: 0;
@@ -186,8 +305,21 @@ function installPickerUxStyles(plugin, doc = globalThis.document) {
   border-radius: 0;
 }
 .go-study-picker-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 38px; }
+.go-study-picker-footer.is-note-box-footer { display: grid; grid-template-columns: 1fr; align-items: stretch; }
+.go-study-note-folder-default { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.go-study-note-folder-default > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .go-study-picker-footer .go-study-note-create-row { display: flex; min-width: 0; flex: 1; gap: 8px; }
 .go-study-picker-footer .go-study-note-create-row .rh-next-input { min-width: 0; flex: 1; }
+.go-study-note-create-location { flex: 0 1 220px; min-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.go-study-picker-body .rh-next-picker-row { width: 100%; box-sizing: border-box; }
+.go-study-note-management-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 0; border: 0; border-bottom: 1px solid var(--background-modifier-border); background: transparent; }
+.go-study-note-management-row:last-child { border-bottom: 0; }
+.go-study-note-management-row:hover { background: var(--background-modifier-hover); }
+.go-study-note-management-row > div:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.go-study-note-management-row > div:nth-child(2) strong,
+.go-study-note-management-row > div:nth-child(2) small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.go-study-note-management-row .rh-next-resource-actions { justify-self: end; }
+.go-study-folder-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; text-align: left; }
 .rh-next-vault-picker-modal .rh-next-picker-list {
   min-height: 0;
   max-height: none;
@@ -199,6 +331,7 @@ function installPickerUxStyles(plugin, doc = globalThis.document) {
 @media (max-width: 620px) {
   .modal.go-study-project-note-box-modal,
   .modal.go-study-study-note-picker-modal,
+  .modal.go-study-project-note-folder-modal,
   .modal.rh-next-vault-picker-modal { width: 96vw; height: min(720px, 90vh); }
   .go-study-picker-footer { align-items: stretch; flex-direction: column; }
   .go-study-picker-footer > .rh-next-button { width: 100%; }
@@ -216,6 +349,7 @@ class ProjectNoteBoxModal extends Modal {
     this.projectId = projectId;
     this.query = '';
     this.bodyEl = null;
+    this.createFolderOverride = null;
   }
 
   onOpen() {
@@ -239,14 +373,45 @@ class ProjectNoteBoxModal extends Modal {
       this.renderBody();
     });
 
+    ui.footer.addClass?.('is-note-box-footer');
+    const projectFolder = projectNoteFolder(this.plugin.state, this.projectId);
+    const folderDefault = ui.footer.createDiv({ cls: 'go-study-note-folder-default' });
+    const folderText = folderDefault.createSpan({ text: projectFolder ? `项目笔记文件夹：${projectFolder}` : '项目笔记文件夹：未设置 · 新建时跟随 Obsidian' });
+    folderText.title = projectFolder || '跟随 Obsidian 默认新建位置';
+    const folderButton = folderDefault.createEl('button', { cls: 'rh-next-button' });
+    folderButton.textContent = projectFolder ? '更改项目默认' : '设置项目默认';
+    folderButton.addEventListener('click', async () => {
+      const choice = await chooseProjectNoteFolder(this.plugin, { title: '设置项目笔记文件夹' });
+      if (!choice || choice.cancelled) return;
+      setProjectNoteFolder(this.plugin.state, this.projectId, choice.path);
+      await this.plugin.persist();
+      await this.plugin.workbenchLeaf?.view?.render?.();
+      this.createFolderOverride = null;
+      this.render();
+    });
+
     const createRow = ui.footer.createDiv({ cls: 'go-study-note-create-row' });
     const name = createRow.createEl('input', { cls: 'rh-next-input', attr: { placeholder: '新建项目笔记，例如：高等数学课堂笔记' } });
+    const location = createRow.createEl('button', { cls: 'rh-next-button go-study-note-create-location' });
+    const refreshLocationLabel = () => {
+      const effective = this.createFolderOverride === null ? projectNoteFolder(this.plugin.state, this.projectId) : this.createFolderOverride;
+      location.textContent = effective ? `位置：${effective}` : '位置：跟随 Obsidian';
+      location.title = this.createFolderOverride === null ? '默认使用项目设置；点击可仅修改本次位置' : '仅修改本次新建位置';
+    };
+    location.addEventListener('click', async () => {
+      const choice = await chooseProjectNoteFolder(this.plugin, { title: '选择本次新建位置' });
+      if (!choice || choice.cancelled) return;
+      this.createFolderOverride = choice.path;
+      refreshLocationLabel();
+    });
+    refreshLocationLabel();
     const create = createRow.createEl('button', { cls: 'rh-next-button is-primary' });
     create.textContent = '新建并打开';
     const submit = async () => {
       try {
         create.disabled = true;
-        await createProjectNote(this.plugin, this.projectId, name.value);
+        const options = this.createFolderOverride === null ? {} : { folder: this.createFolderOverride };
+        await createProjectNote(this.plugin, this.projectId, name.value, options);
         this.close();
       } catch (error) {
         new Notice(`创建笔记失败：${error instanceof Error ? error.message : String(error)}`, 5000);
@@ -358,7 +523,7 @@ class StudyNotePickerModal extends Modal {
       let selected = note;
       if (!selected && file) selected = linkProjectNote(this.plugin.state, this.projectId, file.path).note;
       if (!selected) return this.finish({ cancelled: false, note: null });
-      const opened = await openProjectNote(this.plugin, selected);
+      const opened = await openProjectNote(this.plugin, selected, { prepareForStudy: true });
       if (!opened) return;
       await this.plugin.workbenchLeaf?.view?.render?.();
       this.finish({ cancelled: false, note: selected });
@@ -485,11 +650,14 @@ function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
 
 module.exports = {
   ProjectNoteBoxModal,
+  ProjectNoteFolderPickerModal,
   StudyNotePickerModal,
+  chooseProjectNoteFolder,
   chooseStudyNote,
   createPickerShell,
   createProjectNote,
   installPickerUxStyles,
+  focusProjectNoteAtEnd,
   installProjectNoteEntryPoints,
   markdownFiles,
   newNoteParentPath,
@@ -497,5 +665,6 @@ module.exports = {
   openProjectNote,
   resolveNoteFile,
   safeNewNoteTitle,
-  uniqueNewNotePath
+  uniqueNewNotePath,
+  vaultFolders
 };
