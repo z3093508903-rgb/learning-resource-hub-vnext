@@ -183,7 +183,7 @@ class ProjectNoteFolderPickerModal extends Modal {
     });
     const all = vaultFolders(this.plugin);
 
-    const paint = () => {
+    let paint = () => {
       ui.body.empty();
       const query = String(ui.search.value || '').trim().toLocaleLowerCase('zh-CN');
       const section = ui.body.createDiv({ cls: 'go-study-picker-section' });
