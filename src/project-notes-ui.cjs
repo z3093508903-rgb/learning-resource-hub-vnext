@@ -236,8 +236,9 @@ class ProjectNoteFolderPickerModal extends Modal {
 
     const current = ui.footer.createEl('button', { cls: 'rh-next-button is-primary' });
     const updateCurrentButton = () => {
-      current.textContent = this.currentPath ? `选择：${this.currentPath}` : '选择 Vault 根目录';
-      current.title = this.currentPath || 'Vault 根目录';
+      current.textContent = this.currentPath ? `选择：${this.currentPath}` : '请进入要使用的文件夹';
+      current.title = this.currentPath || '项目默认文件夹留空时由 Obsidian 决定';
+      current.disabled = !this.currentPath;
     };
     current.addEventListener('click', () => this.choose(this.currentPath));
 
@@ -449,7 +450,7 @@ class ProjectNoteBoxModal extends Modal {
     const folderButton = folderDefault.createEl('button', { cls: 'rh-next-button' });
     folderButton.textContent = projectFolder ? '更改项目默认' : '设置项目默认';
     folderButton.addEventListener('click', async () => {
-      const choice = await chooseProjectNoteFolder(this.plugin, { title: '设置项目笔记文件夹' });
+      const choice = await chooseProjectNoteFolder(this.plugin, { title: '设置项目笔记文件夹', initialPath: projectNoteFolder(this.plugin.state, this.projectId) });
       if (!choice || choice.cancelled) return;
       setProjectNoteFolder(this.plugin.state, this.projectId, choice.path);
       await this.plugin.persist();
@@ -467,7 +468,7 @@ class ProjectNoteBoxModal extends Modal {
       location.title = this.createFolderOverride === null ? '默认使用项目设置；点击可仅修改本次位置' : '仅修改本次新建位置';
     };
     location.addEventListener('click', async () => {
-      const choice = await chooseProjectNoteFolder(this.plugin, { title: '选择本次新建位置' });
+      const choice = await chooseProjectNoteFolder(this.plugin, { title: '选择本次新建位置', initialPath: this.createFolderOverride === null ? projectNoteFolder(this.plugin.state, this.projectId) : this.createFolderOverride });
       if (!choice || choice.cancelled) return;
       this.createFolderOverride = choice.path;
       refreshLocationLabel();
