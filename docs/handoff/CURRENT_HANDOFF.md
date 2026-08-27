@@ -20,7 +20,7 @@
 
 ## Current milestone
 
-`0.3.0-beta.16 — Freeform jv:// 回链修复 / 真人验收`
+`0.3.0-beta.17 — Portable Freeform Backlink v2 / 真人验收`
 
 ## Verified GitHub state（2026-08-28）
 
@@ -30,6 +30,19 @@
 - Preview Release：已发布
 - Preview HEAD CI：失败；构建后的 `main.js` 与提交中的生成产物不一致
 - Stable / Merge：HOLD
+
+## beta.17 validation candidate
+
+- Branch：`work/portable-freeform-beta17`
+- HEAD：`fe7832bd833c36e4fde26d11b508b6c6a4110373`
+- Draft PR：#25
+- Release：`Go Study Preview 0.3.0-beta.17`
+- Protocol：Freeform v2 使用 `locator=` + `name=`，不使用 `path=`
+- New Markdown：不再直接写 `jv://`
+- Dynamic upgrade：先 exact Managed match，再尝试唯一文件名匹配
+- Cross-platform：协议格式跨平台；本地绝对路径跨设备恢复仍需要 Managed match 或未来 Path Mapping
+- Automation：293 tests PASS；release:check PASS；main.js consistency PASS；Preview package/release verification PASS
+- Manual Acceptance：PENDING
 
 ## beta.16 validation candidate
 
@@ -76,7 +89,7 @@
 
 ## Next action
 
-安装 beta.16 并依次验收：新 Freeform `jv://` → 旧 beta.15 Freeform 兼容 → Managed Resource 回归。三项通过后再确认协议与更新 ADR；不要继续加大型功能。
+安装 beta.17 并依次验收：新 Freeform `jv://` → 旧 beta.15 Freeform 兼容 → Managed Resource 回归。三项通过后再确认协议与更新 ADR；不要继续加大型功能。
 
 ## Do not change silently
 

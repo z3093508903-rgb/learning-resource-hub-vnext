@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study `0.3.0-beta.16` — Freeform `jv://` 回链修复 / 真人验收**
+**Go Study `0.3.0-beta.17` — Portable Freeform Backlink v2 / 真人验收**
 
 Stable / Merge：**HOLD**。
 
@@ -33,6 +33,24 @@ Stable / Merge：**HOLD**。
 - Published：2026-08-27 11:03:32 UTC
 
 Release 已发布且包含 Preview ZIP、`main.js`、`manifest.json`、`styles.css`、`TESTING.md`。
+
+### beta.17 Portable Freeform
+
+- Branch：`work/portable-freeform-beta17`
+- 当前远端 HEAD：`fe7832bd833c36e4fde26d11b508b6c6a4110373`
+- Draft PR：#25，真人验收前禁止 Merge
+- Preview Tag：`go-study-preview-v0.3.0-beta.17`
+- Release：`Go Study Preview 0.3.0-beta.17`
+- Release Target：`c4db348b2ece7c3d2bf93cb8a29c3ecead1d3b32`
+- 新 Freeform Markdown：`obsidian://go-study?mode=freeform&locator=...&name=...&position=...&v=2`
+- 不再在新笔记里暴露 `jv://`
+- `locator=` 取代会与 Obsidian Vault 路由冲突的 `path=`
+- 可用唯一媒体文件名在不同设备上尝试升级到 Managed Resource
+- Managed 回链保持 Resource ID + Resolver
+- Windows 的 `jv://` 仅作为内部执行兼容层
+- macOS/Linux 支持 POSIX 本地路径解析与系统播放器打开；精确 seek 仍需要平台 Player Adapter
+- 自动化：**293 项测试全部通过，release:check 与 committed main.js consistency 全绿**
+- 状态：**等待 Windows/macOS 真人验收**
 
 ### beta.16 Freeform 修复候选
 
@@ -138,6 +156,14 @@ Freeform 永久回链最终协议仍是 `PROPOSED`，但 beta.16 已选择方案
 不得把第二项扩展成“AHK / Companion 重新成为正常 Runtime 必需依赖”。选择方案前应结合真人复现、兼容范围和 ADR-003/005 决策。
 
 ## 下一步
+
+1. Windows 安装 beta.17，验证新 Freeform 链接显示为“↗ 回到课程 · 时间”，且目标使用 `locator=` / `v=2`；
+2. 点击新 Freeform 链接，验证 Windows 内部 fallback 仍能打开并 seek；
+3. 将同一视频后来收录到 Go Study，再点击历史 Freeform 链接，验证是否自动升级到 Managed；
+4. 回归 beta.16 老 `jv://` 与 beta.15 老 `path=` 链接；
+5. macOS 真机验证 POSIX 路径和网页 Freeform；精确 seek 暂不视为已完成；
+6. 若跨设备本地路径仍是主要需求，下一步设计 Path Mapping / Device Locator Map，而不是把绝对路径伪装成跨平台。
+
 
 1. 安装隔离 Preview `Go Study 0.3.0-beta.16`，保留现有 `data.json`；
 2. 验收新未收录本地视频生成的 `jv://` 回链能否直接打开 PotPlayer 并 seek；

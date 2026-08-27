@@ -101,7 +101,7 @@ Resource → Note → Heading Anchor
 
 Decision gate：**NEEDS USER ACCEPTANCE**
 
-当前验证候选（beta.16）：
+当前验证候选（beta.17）：
 
 - 新未收录 / Freeform 视频直接生成 `jv://open?path=...&time=...`；
 - Managed Resource 继续使用 Resource ID + Resolver；
@@ -125,3 +125,34 @@ beta.15 使用 `obsidian://go-study?mode=freeform&path=...`，真人验收出现
 - Freeform 仍必须允许 Capture；
 - 不得把 AHK / Companion 恢复为整个 Go Study 的正常 Runtime 必需依赖；
 - 旧链接兼容范围、跨设备性和 Web fallback 必须在决定前说明。
+
+
+---
+
+## Cross-device local path mapping
+
+状态：**PROPOSED**
+
+背景：
+
+beta.17 已使 Freeform 回链协议本身脱离 Windows `jv://`，但本地未收录视频仍可能携带设备绝对路径，例如：
+
+- Windows：`D:\Course\lesson.mp4`
+- macOS：`/Users/zl/Course/lesson.mp4`
+
+单一绝对路径无法在另一台设备上凭空定位同一文件。
+
+beta.17 当前策略：
+
+1. 先 exact Managed match；
+2. 再使用唯一媒体文件名进行 Managed upgrade；
+3. 当前设备本地路径有效时走平台 fallback；
+4. 外平台本地路径且无 Managed match 时明确失败，不猜路径。
+
+未来候选：
+
+- Device-specific path root mapping；
+- Resource-level multi-locator；
+- portable content fingerprint / media identity。
+
+在真实跨设备需求验证前，不直接加入 Roadmap。
