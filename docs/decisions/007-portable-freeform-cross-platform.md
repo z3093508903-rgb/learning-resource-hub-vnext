@@ -1,6 +1,6 @@
 # ADR-007：Freeform 永久笔记协议必须跨平台，平台播放器协议只能留在执行层
 
-状态：**PROPOSED / beta.17 validation**
+状态：**PROPOSED / Windows validation passed; macOS pending**
 
 ## 背景
 
@@ -51,4 +51,8 @@ obsidian://go-study
 
 ## 验收
 
-只有 Windows + macOS 真人验证完成后，本 ADR 才可从 PROPOSED 升级为 CONFIRMED。
+Windows beta.17 真人验证已通过：新 Freeform reopen、后续收录后的 Managed upgrade、beta.16 / beta.15 旧链接兼容、Managed Resource 回链回归。
+
+macOS 与跨设备本地路径仍未真人验证，因此本 ADR 暂不升为 CONFIRMED。
+
+跨设备 Path Mapping 明确延期，不阻塞 beta.17 Windows 收尾。
