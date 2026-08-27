@@ -33,7 +33,10 @@ function localPluginFixture() {
     activeMediaSession: { resourceId: resource.id, startedAt: '2026-08-24T12:00:00Z', lastKnownPosition: null },
     resourceActions: () => ({ playTarget: { type: 'potplayer', target: 'C:\\Course\\lesson.mp4' } }),
     app: {
-      workspace: { activeEditor: { editor: { replaceSelection: (text) => inserted.push(text) } } }
+      workspace: {
+        activeEditor: { editor: { replaceSelection: (text) => inserted.push(text) }, file: { path: 'Notes/Lesson.md' } },
+        getActiveFile: () => ({ path: 'Notes/Lesson.md' })
+      }
     },
     persistCalls: 0,
     async persist() { this.persistCalls += 1; },
@@ -92,14 +95,31 @@ test('insert current position writes permanent markdown through the editor and u
   assert.equal(plugin.persistCalls, 1);
 });
 
-test('insert current position refuses a different PotPlayer media before touching the editor', async () => {
+test('a self-opened unmatched PotPlayer video falls back to a freeform backlink without corrupting managed Resume', async () => {
   const { insertCurrentLearningPosition } = loadCaptureModule();
-  const { plugin, inserted } = localPluginFixture();
-  await assert.rejects(() => insertCurrentLearningPosition(plugin, {
-    bridgeRequest: async () => ({ ok: true, media: { path: 'c:/course/another.mp4', positionSeconds: 10 } }),
+  const { plugin, resource, inserted } = localPluginFixture();
+  const result = await insertCurrentLearningPosition(plugin, {
+    bridgeRequest: async () => ({ ok: true, media: { path: 'D:\\Loose\\another.mp4', title: 'another - PotPlayer', positionSeconds: 10 } }),
     requestUrl: async () => {},
     editor: { replaceSelection: (text) => inserted.push(text) }
-  }), /不一致/);
+  });
+  assert.equal(result.mode, 'freeform');
+  assert.equal(result.resource, null);
+  assert.match(inserted[0], /mode=freeform/);
+  assert.match(inserted[0], /position=time%3A10/);
+  assert.equal(resource.resume, undefined);
+  assert.equal(plugin.persistCalls, 0);
+});
+
+test('freeform fallback can be disabled for users who only want managed Go Study resources', async () => {
+  const { insertCurrentLearningPosition } = loadCaptureModule();
+  const { plugin, inserted } = localPluginFixture();
+  plugin.state.uiState.freeformVideoNotesEnabled = false;
+  await assert.rejects(() => insertCurrentLearningPosition(plugin, {
+    bridgeRequest: async () => ({ ok: true, media: { path: 'D:\\Loose\\another.mp4', positionSeconds: 10 } }),
+    requestUrl: async () => {},
+    editor: { replaceSelection: (text) => inserted.push(text) }
+  }), /没有匹配到 Go Study 资源/);
   assert.equal(inserted.length, 0);
   assert.equal(plugin.persistCalls, 0);
 });
@@ -160,6 +180,36 @@ test('capture honors the configurable Vault screenshot folder', async () => {
   });
   assert.ok(result.vaultPath.startsWith('Notes/Video Shots/'));
   assert.ok(inserted[0].startsWith('![[Notes/Video Shots/'));
+});
+
+test('blank capture folder follows Obsidian attachment placement instead of restoring GoStudy/Captures', async () => {
+  const { captureFrameAndInsertLearningPosition } = loadCaptureModule();
+  const { plugin, inserted } = localPluginFixture();
+  plugin.state.uiState.captureFolder = '';
+  const existing = new Set(['Attachments']);
+  const attachmentCalls = [];
+  plugin.app.fileManager = {
+    getAvailablePathForAttachment: async (filename, sourcePath) => {
+      attachmentCalls.push({ filename, sourcePath });
+      return `Attachments/${filename}`;
+    }
+  };
+  plugin.app.vault = {
+    getAbstractFileByPath: (value) => existing.has(value) ? { path: value } : null,
+    createFolder: async (value) => { existing.add(value); },
+    createBinary: async (value) => { existing.add(value); }
+  };
+  const result = await captureFrameAndInsertLearningPosition(plugin, {
+    bridgeRequest: async () => ({ ok: true, media: { path: 'C:\\Course\\lesson.mp4', positionSeconds: 75 } }),
+    requestUrl: async () => {},
+    editor: { replaceSelection: (text) => inserted.push(text) },
+    readClipboardPng: () => Buffer.from([4, 5, 6])
+  });
+  assert.equal(attachmentCalls.length, 1);
+  assert.equal(attachmentCalls[0].sourcePath, 'Notes/Lesson.md');
+  assert.ok(result.vaultPath.startsWith('Attachments/本地课程-01-15'));
+  assert.doesNotMatch(result.vaultPath, /^GoStudy\/Captures\//);
+  assert.ok(inserted[0].startsWith('![[Attachments/'));
 });
 
 test('capture validates editor before requesting a screenshot', async () => {

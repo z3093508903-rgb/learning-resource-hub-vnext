@@ -10,6 +10,7 @@ const {
   checkPotPlayerBridge,
   commandErrorText
 } = require('./learning-capture.cjs');
+const { CAPTURE_ACTIONS, HUD_SLOT_LABELS, HUD_SLOT_ORDER } = require('./capture-actions.cjs');
 const {
   HOTKEY_ACTIONS,
   immersiveStatus,
@@ -28,6 +29,9 @@ const {
   buildCaptureMarkdown,
   buildCaptureNoteMarkdown,
   buildNotePositionMarkdown,
+  buildPlainCaptureMarkdown,
+  buildPlainCaptureNoteMarkdown,
+  buildPlainNoteMarkdown,
   buildPositionMarkdown
 } = require('./resource-note.cjs');
 
@@ -39,7 +43,7 @@ function section(containerEl, title, description = '') {
 
 function videoStatusText(plugin) {
   const settings = currentProductSettings(plugin);
-  if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会注册 Alt+1～Alt+4，也不会显示视频增强状态点。';
+  if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会注册视频笔记快捷键，也不会显示视频增强状态点。';
   const status = immersiveStatus(plugin);
   if (status.registered) return `已就绪 · ${status.registeredAccelerators?.length || 0} 个全局快捷键已注册。`;
   return status.error || '已开启，但当前没有成功注册全局快捷键。';
@@ -58,7 +62,10 @@ function noteOutputOptions(settings) {
     backlinkTemplate: settings.backlinkTemplate,
     noteTemplate: settings.noteTemplate,
     captureTemplate: settings.captureTemplate,
-    captureNoteTemplate: settings.captureNoteTemplate
+    captureNoteTemplate: settings.captureNoteTemplate,
+    plainNoteTemplate: settings.plainNoteTemplate,
+    plainCaptureTemplate: settings.plainCaptureTemplate,
+    plainCaptureNoteTemplate: settings.plainCaptureNoteTemplate
   };
 }
 
@@ -70,7 +77,10 @@ function noteOutputPreview(settings) {
     `Alt+1 · 仅回链\n${buildPositionMarkdown(resource, position, options)}`,
     `Alt+2 · 截图回链\n${buildCaptureMarkdown(resource, position, 'GoStudy/Captures/example.png', options)}`,
     `Alt+3 · 快速笔记\n${buildNotePositionMarkdown(resource, position, '这里老师讲的是极限存在的必要条件。', options)}`,
-    `Alt+4 · 截图笔记\n${buildCaptureNoteMarkdown(resource, position, 'GoStudy/Captures/example.png', '这一帧的公式需要重新推导一次。', options)}`
+    `Alt+4 · 截图笔记\n${buildCaptureNoteMarkdown(resource, position, 'GoStudy/Captures/example.png', '这一帧的公式需要重新推导一次。', options)}`,
+    `HUD · 纯笔记（不记录时间）\n${buildPlainNoteMarkdown('这是不带时间戳的随手记录。', options)}`,
+    `HUD · 仅截图（不记录时间）\n${buildPlainCaptureMarkdown('GoStudy/Captures/example.png', options)}`,
+    `HUD · 截图 + 评论（不记录时间）\n${buildPlainCaptureNoteMarkdown('GoStudy/Captures/example.png', '只保存画面和评论。', options)}`
   ].join('\n\n');
 }
 
@@ -130,6 +140,15 @@ class GoStudySettingsTab extends PluginSettingTab {
           await updateProductSetting(this.plugin, 'autoCollapseSidebar', value);
           if (!value) await this.plugin.restoreSidebar?.();
         }));
+
+    new Setting(containerEl)
+      .setName('学习时把光标定位到笔记末尾')
+      .setDesc('开始学习或继续学习并打开一篇项目笔记时，自动进入编辑状态并把光标放到文件最后一行；关闭后只打开笔记，不改变光标位置。')
+      .addToggle((toggle) => toggle
+        .setValue(settings.focusStudyNoteAtEnd)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'focusStudyNoteAtEnd', value);
+        }));
   }
 
   renderVideoSettings(containerEl) {
@@ -150,6 +169,87 @@ class GoStudySettingsTab extends PluginSettingTab {
           this.display();
         }));
 
+    new Setting(containerEl)
+      .setName('未收录视频也启用增强')
+      .setDesc('开启后，自己打开的 PotPlayer 视频也能记录；匹配到已收录资源时自动使用 Managed 回链，否则生成可回到当前媒体位置的 Freeform 回链。')
+      .addToggle((toggle) => {
+        toggle.setValue(settings.freeformVideoNotesEnabled);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'freeformVideoNotesEnabled', value);
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('快捷键操作方式')
+      .setDesc('“混合”保留 Alt+1～Alt+4，同时启用动作盘；也可以只保留其中一种。')
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption('mixed', '混合 · 动作盘 + 独立快捷键')
+          .addOption('hud', '仅动作盘')
+          .addOption('legacy', '仅独立快捷键')
+          .setValue(settings.shortcutMode);
+        dropdown.setDisabled?.(!enabled);
+        dropdown.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'shortcutMode', value);
+          registerImmersiveHotkeys(this.plugin);
+          this.display();
+        });
+      });
+
+    if (settings.shortcutMode === 'hud' || settings.shortcutMode === 'mixed') {
+      new Setting(containerEl)
+        .setName('动作盘主快捷键')
+        .setDesc('默认 Alt+S。按下后短暂停顿会显示 HUD；在显示延迟内直接按方向键可跳过 HUD 执行动作。')
+        .addText((text) => {
+          text.setValue(settings.actionHudShortcut);
+          text.setPlaceholder('Alt+S');
+          text.setDisabled?.(!enabled);
+          const commit = async () => {
+            try {
+              await updateProductSetting(this.plugin, 'actionHudShortcut', text.getValue());
+              registerImmersiveHotkeys(this.plugin);
+              this.display();
+            } catch (error) {
+              text.setValue(currentProductSettings(this.plugin).actionHudShortcut);
+              new Notice(commandErrorText('动作盘快捷键更新失败', error), 5000);
+            }
+          };
+          text.inputEl?.addEventListener('change', () => void commit());
+        });
+
+      new Setting(containerEl)
+        .setName('动作盘显示延迟')
+        .setDesc('熟练时可在 HUD 出现前直接按方向执行；停顿超过这个时间才显示提示。')
+        .addDropdown((dropdown) => {
+          dropdown
+            .addOption('0', '立即显示')
+            .addOption('200', '200 ms')
+            .addOption('300', '300 ms · 推荐')
+            .addOption('500', '500 ms')
+            .setValue(String(settings.actionHudDelayMs));
+          dropdown.setDisabled?.(!enabled);
+          dropdown.onChange(async (value) => {
+            await updateProductSetting(this.plugin, 'actionHudDelayMs', Number(value));
+          });
+        });
+
+      for (const slot of HUD_SLOT_ORDER) {
+        new Setting(containerEl)
+          .setName(`动作盘 · ${HUD_SLOT_LABELS[slot]}`)
+          .setDesc('为这个方向选择要采集的组合；最终 Markdown 仍由对应模板决定。')
+          .addDropdown((dropdown) => {
+            for (const action of Object.values(CAPTURE_ACTIONS)) dropdown.addOption(action.id, action.label);
+            dropdown.setValue(settings.actionHudSlots[slot]);
+            dropdown.setDisabled?.(!enabled);
+            dropdown.onChange(async (value) => {
+              const next = { ...currentProductSettings(this.plugin).actionHudSlots, [slot]: value };
+              await updateProductSetting(this.plugin, 'actionHudSlots', next);
+            });
+          });
+      }
+    }
+
     const status = new Setting(containerEl)
       .setName('当前状态')
       .setDesc(videoStatusText(this.plugin));
@@ -169,46 +269,48 @@ class GoStudySettingsTab extends PluginSettingTab {
         }
       }));
 
-    const shortcutKeys = ['position', 'capture', 'note', 'captureNote'];
-    for (const key of shortcutKeys) {
-      new Setting(containerEl)
-        .setName(HOTKEY_ACTIONS[key])
-        .setDesc('留空可禁用这一动作；重复快捷键会被拒绝。')
-        .addText((text) => {
-          text.setValue(shortcuts[key] || '');
-          text.setPlaceholder('例如 Alt+1');
-          text.setDisabled?.(!enabled);
-          const commit = async () => {
-            try {
-              await updateImmersiveShortcut(this.plugin, key, text.getValue());
-              new Notice(`快捷键已更新：${HOTKEY_ACTIONS[key]}`);
-            } catch (error) {
-              text.setValue(immersiveShortcuts(this.plugin)[key] || '');
-              new Notice(commandErrorText('快捷键更新失败', error), 5000);
-            }
-            this.display();
-          };
-          text.inputEl?.addEventListener('change', () => void commit());
-          text.inputEl?.addEventListener('keydown', (event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              text.inputEl.blur();
-            }
+    if (settings.shortcutMode === 'legacy' || settings.shortcutMode === 'mixed') {
+      const shortcutKeys = ['position', 'capture', 'note', 'captureNote'];
+      for (const key of shortcutKeys) {
+        new Setting(containerEl)
+          .setName(HOTKEY_ACTIONS[key])
+          .setDesc('留空可禁用这一动作；重复快捷键会被拒绝。')
+          .addText((text) => {
+            text.setValue(shortcuts[key] || '');
+            text.setPlaceholder('例如 Alt+1');
+            text.setDisabled?.(!enabled);
+            const commit = async () => {
+              try {
+                await updateImmersiveShortcut(this.plugin, key, text.getValue());
+                new Notice(`快捷键已更新：${HOTKEY_ACTIONS[key]}`);
+              } catch (error) {
+                text.setValue(immersiveShortcuts(this.plugin)[key] || '');
+                new Notice(commandErrorText('快捷键更新失败', error), 5000);
+              }
+              this.display();
+            };
+            text.inputEl?.addEventListener('change', () => void commit());
+            text.inputEl?.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                text.inputEl.blur();
+              }
+            });
           });
-        });
-    }
+      }
 
-    new Setting(containerEl)
-      .setName('恢复默认快捷键')
-      .setDesc('恢复为 Alt+1、Alt+2、Alt+3、Alt+4。')
-      .addButton((button) => button
-        .setButtonText('恢复默认')
-        .setDisabled(!enabled)
-        .onClick(async () => {
-          await resetImmersiveShortcuts(this.plugin);
-          new Notice('已恢复默认视频快捷键。');
-          this.display();
-        }));
+      new Setting(containerEl)
+        .setName('恢复默认快捷键')
+        .setDesc('恢复为 Alt+1、Alt+2、Alt+3、Alt+4。')
+        .addButton((button) => button
+          .setButtonText('恢复默认')
+          .setDisabled(!enabled)
+          .onClick(async () => {
+            await resetImmersiveShortcuts(this.plugin);
+            new Notice('已恢复默认视频快捷键。');
+            this.display();
+          }));
+    }
 
     new Setting(containerEl)
       .setName('保存笔记后继续播放')
@@ -245,16 +347,16 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('截图保存目录')
-      .setDesc('Vault 内的相对路径，例如 GoStudy/Captures 或 Notes/Video Captures。使用独立附件管理插件的用户也可以继续交给自己的附件工作流管理。')
+      .setDesc('留空时跟随 Obsidian 当前附件设置；填写 Vault 相对路径时由 Go Study 固定保存到该目录。这样也更容易与自定义附件位置插件共存。')
       .addText((text) => {
         text.setValue(settings.captureFolder);
-        text.setPlaceholder('GoStudy/Captures');
+        text.setPlaceholder('留空 = 跟随 Obsidian 附件设置');
         text.setDisabled?.(!enabled);
         const commit = async () => {
           try {
             const next = await updateProductSetting(this.plugin, 'captureFolder', text.getValue());
             text.setValue(next.captureFolder);
-            new Notice(`截图目录已更新：${next.captureFolder}`);
+            new Notice(next.captureFolder ? `截图目录已更新：${next.captureFolder}` : '截图保存已改为跟随 Obsidian 附件设置。');
           } catch (error) {
             text.setValue(currentProductSettings(this.plugin).captureFolder);
             new Notice(commandErrorText('截图目录更新失败', error), 5000);
@@ -321,6 +423,24 @@ class GoStudySettingsTab extends PluginSettingTab {
       'captureNoteTemplate',
       'Alt+4 截图笔记模板',
       '可用变量：{image}、{note}、{backlink}。三者都必须保留。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'plainNoteTemplate',
+      '无时间 · 纯笔记模板',
+      '可用变量：{note}。用于 HUD 中不记录时间戳的评论动作。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'plainCaptureTemplate',
+      '无时间 · 仅截图模板',
+      '可用变量：{image}。用于只保存截图、不生成时间回链的动作。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'plainCaptureNoteTemplate',
+      '无时间 · 截图评论模板',
+      '可用变量：{image}、{note}。用于截图 + 评论但不记录时间戳。'
     );
 
     new Setting(containerEl)

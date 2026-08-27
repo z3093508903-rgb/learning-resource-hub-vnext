@@ -6,6 +6,7 @@ const assert = require('node:assert/strict');
 const {
   REFERENCE_ACTION,
   REFERENCE_VERSION,
+  buildFreeformReferenceUri,
   buildReferenceUri,
   parseProtocolParams,
   parseReferenceUri
@@ -126,5 +127,39 @@ test('Obsidian protocol-handler params accept only the registered action metadat
   assert.throws(
     () => parseProtocolParams({ resource: 'resource-1', position: 'time:12', v: '1', path: 'C:\\evil.exe' }),
     /不允许的参数/
+  );
+});
+
+test('freeform backlinks preserve a safe local or web locator plus time without inventing a Resource ID', () => {
+  const local = buildFreeformReferenceUri({
+    path: 'D:\\Course\\lesson 01.mp4',
+    position: { type: 'time', seconds: 754 },
+    version: 1
+  });
+  const parsedLocal = parseReferenceUri(local);
+  assert.equal(parsedLocal.mode, 'freeform');
+  assert.equal(parsedLocal.path, 'D:\\Course\\lesson 01.mp4');
+  assert.equal(parsedLocal.web, '');
+  assert.deepEqual(parsedLocal.position, { type: 'time', seconds: 754 });
+
+  const web = buildFreeformReferenceUri({
+    path: 'https://www.bilibili.com/video/BV1TEST?p=2',
+    web: 'https://www.bilibili.com/video/BV1TEST?p=2',
+    position: { type: 'time', seconds: 65 }
+  });
+  const parsedWeb = parseReferenceUri(web);
+  assert.equal(parsedWeb.mode, 'freeform');
+  assert.match(parsedWeb.path, /^https:\/\/www\.bilibili\.com\/video\/BV1TEST/);
+  assert.equal(parsedWeb.web, parsedWeb.path);
+});
+
+test('freeform backlinks reject arbitrary executable protocols and mixed managed/freeform identity', () => {
+  assert.throws(() => buildFreeformReferenceUri({
+    path: 'file:///C:/Windows/System32/calc.exe',
+    position: { type: 'time', seconds: 1 }
+  }), /只允许 Windows 本地路径或 HTTP/);
+  assert.throws(
+    () => parseReferenceUri('obsidian://go-study?mode=freeform&resource=r1&path=D%3A%5Cvideo.mp4&position=time%3A1&v=1'),
+    /不能同时包含 Resource ID/
   );
 });

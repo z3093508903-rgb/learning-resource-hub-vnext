@@ -2,7 +2,7 @@
 
 const { Notice, requestUrl } = require('obsidian');
 const { clipboard } = require('electron');
-const { resolveActiveMediaSession } = require('./media-session.cjs');
+const { resolveUniversalMediaSession } = require('./media-session.cjs');
 const {
   registerRememberedNoteTarget,
   resolveRememberedNoteTarget
@@ -12,11 +12,15 @@ const { requestPotPlayerBridge } = require('./potplayer-bridge.cjs');
 const { currentProductSettings, normalizeCaptureFolder } = require('./product-settings.cjs');
 const { updateResumePosition } = require('./resource-resolver.cjs');
 const {
-  buildCaptureMarkdown,
-  buildCaptureNoteMarkdown,
-  buildNotePositionMarkdown,
-  buildPositionMarkdown,
-  captureFileName
+  buildContextCaptureMarkdown,
+  buildContextCaptureNoteMarkdown,
+  buildContextNoteMarkdown,
+  buildContextPositionMarkdown,
+  buildPlainCaptureMarkdown,
+  buildPlainCaptureNoteMarkdown,
+  buildPlainNoteMarkdown,
+  captureFileName,
+  freeformMediaTitle
 } = require('./resource-note.cjs');
 
 const CAPTURE_FOLDER = 'GoStudy/Captures';
@@ -27,11 +31,13 @@ function activeEditor(plugin, preferredEditor = null) {
 }
 
 function resolveLearningContext(plugin, playerMedia) {
-  return resolveActiveMediaSession(
+  const settings = currentProductSettings(plugin);
+  return resolveUniversalMediaSession(
     plugin.state,
     plugin.activeMediaSession,
     playerMedia,
-    (resource) => plugin.resourceActions(resource)
+    (resource) => plugin.resourceActions(resource),
+    { allowFreeform: settings.freeformVideoNotesEnabled }
   );
 }
 
@@ -42,11 +48,15 @@ function noteOutputOptions(plugin) {
     backlinkTemplate: settings.backlinkTemplate,
     noteTemplate: settings.noteTemplate,
     captureTemplate: settings.captureTemplate,
-    captureNoteTemplate: settings.captureNoteTemplate
+    captureNoteTemplate: settings.captureNoteTemplate,
+    plainNoteTemplate: settings.plainNoteTemplate,
+    plainCaptureTemplate: settings.plainCaptureTemplate,
+    plainCaptureNoteTemplate: settings.plainCaptureNoteTemplate
   };
 }
 
 async function persistRecordedPosition(plugin, resource, position) {
+  if (!resource?.id || !plugin.state.resources?.[resource.id]) return false;
   updateResumePosition(plugin.state.resources[resource.id], position);
   plugin.activeMediaSession = {
     ...(plugin.activeMediaSession || {}),
@@ -56,6 +66,7 @@ async function persistRecordedPosition(plugin, resource, position) {
   };
   await plugin.persist();
   await plugin.workbenchLeaf?.view?.render?.();
+  return true;
 }
 
 async function requestLearningPlayer(plugin, action, options = {}) {
@@ -108,7 +119,7 @@ async function insertCurrentLearningPosition(plugin, options = {}) {
   return insertPreparedMarkdown(
     plugin,
     prepared,
-    buildPositionMarkdown(prepared.resource, prepared.position, noteOutputOptions(plugin))
+    buildContextPositionMarkdown(prepared, noteOutputOptions(plugin))
   );
 }
 
@@ -117,6 +128,7 @@ async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
     throw new Error('当前 Vault 不支持创建截图目录。');
   }
   const safeFolder = normalizeCaptureFolder(folderPath);
+  if (!safeFolder) return '';
   const parts = safeFolder.split('/').filter(Boolean);
   let current = '';
   for (const part of parts) {
@@ -134,11 +146,12 @@ async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
 function capturePathCandidate(resource, position, index = 1, folderPath = CAPTURE_FOLDER) {
   const folder = normalizeCaptureFolder(folderPath);
   const base = captureFileName(resource, position, 'png');
-  if (index <= 1) return `${folder}/${base}`;
+  const join = (name) => folder ? `${folder}/${name}` : name;
+  if (index <= 1) return join(base);
   const dot = base.lastIndexOf('.');
   const stem = dot >= 0 ? base.slice(0, dot) : base;
   const ext = dot >= 0 ? base.slice(dot) : '';
-  return `${folder}/${stem}-${index}${ext}`;
+  return join(`${stem}-${index}${ext}`);
 }
 
 function uniqueCapturePath(vault, resource, position, folderPath = CAPTURE_FOLDER) {
@@ -158,11 +171,45 @@ function clipboardPngBuffer(clipboardImpl = clipboard) {
   return Buffer.from(png);
 }
 
-async function saveCaptureToVault(plugin, resource, position, pngBuffer) {
+function learningNoteSourcePath(plugin) {
+  try { return String(resolveRememberedNoteTarget(plugin).filePath || ''); }
+  catch { return String(plugin?.app?.workspace?.getActiveFile?.()?.path || ''); }
+}
+
+async function systemAttachmentCapturePath(plugin, resource, position) {
   const vault = plugin?.app?.vault;
+  const fileManager = plugin?.app?.fileManager;
+  const filename = captureFileName(resource, position, 'png');
+  const sourcePath = learningNoteSourcePath(plugin);
+  if (typeof fileManager?.getAvailablePathForAttachment === 'function') {
+    const resolved = String(await fileManager.getAvailablePathForAttachment(filename, sourcePath) || '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '');
+    if (resolved) {
+      const parent = resolved.includes('/') ? resolved.slice(0, resolved.lastIndexOf('/')) : '';
+      if (parent) await ensureVaultFolder(vault, parent);
+      return resolved;
+    }
+  }
+  return uniqueCapturePath(vault, resource, position, '');
+}
+
+function captureSubject(resource, context = {}) {
+  if (resource?.title) return resource;
+  return { title: freeformMediaTitle(context.bridgeMedia || context.freeform || {}) };
+}
+
+async function saveCaptureToVault(plugin, resource, position, pngBuffer, context = {}) {
+  const vault = plugin?.app?.vault;
+  const subject = captureSubject(resource, context);
   const folder = currentProductSettings(plugin).captureFolder;
-  await ensureVaultFolder(vault, folder);
-  const vaultPath = uniqueCapturePath(vault, resource, position, folder);
+  let vaultPath;
+  if (folder) {
+    await ensureVaultFolder(vault, folder);
+    vaultPath = uniqueCapturePath(vault, subject, position, folder);
+  } else {
+    vaultPath = await systemAttachmentCapturePath(plugin, subject, position);
+  }
   if (typeof vault.createBinary !== 'function') throw new Error('当前 Vault 不支持写入二进制截图。');
   const bytes = Buffer.from(pngBuffer || []);
   if (!bytes.length) throw new Error('截图数据为空。');
@@ -180,7 +227,7 @@ async function prepareCaptureLearningPosition(plugin, options = {}) {
 }
 
 async function commitPreparedCapture(plugin, prepared, markdownBuilder) {
-  const vaultPath = await saveCaptureToVault(plugin, prepared.resource, prepared.position, prepared.png);
+  const vaultPath = await saveCaptureToVault(plugin, prepared.resource, prepared.position, prepared.png, prepared);
   const markdown = markdownBuilder(vaultPath);
   const result = await insertPreparedMarkdown(plugin, prepared, markdown);
   return { ...result, vaultPath };
@@ -191,7 +238,7 @@ async function captureFrameAndInsertLearningPosition(plugin, options = {}) {
   return commitPreparedCapture(
     plugin,
     prepared,
-    (vaultPath) => buildCaptureMarkdown(prepared.resource, prepared.position, vaultPath, noteOutputOptions(plugin))
+    (vaultPath) => buildContextCaptureMarkdown(prepared, vaultPath, noteOutputOptions(plugin))
   );
 }
 
@@ -199,7 +246,7 @@ async function commitPreparedTypedNote(plugin, prepared, noteText) {
   return insertPreparedMarkdown(
     plugin,
     prepared,
-    buildNotePositionMarkdown(prepared.resource, prepared.position, noteText, noteOutputOptions(plugin))
+    buildContextNoteMarkdown(prepared, noteText, noteOutputOptions(plugin))
   );
 }
 
@@ -207,13 +254,43 @@ async function commitPreparedCaptureTypedNote(plugin, prepared, noteText) {
   return commitPreparedCapture(
     plugin,
     prepared,
-    (vaultPath) => buildCaptureNoteMarkdown(
-      prepared.resource,
-      prepared.position,
+    (vaultPath) => buildContextCaptureNoteMarkdown(
+      prepared,
       vaultPath,
       noteText,
       noteOutputOptions(plugin)
     )
+  );
+}
+
+async function insertPlainTypedNote(plugin, noteText, options = {}) {
+  const editor = activeEditor(plugin, options.editor);
+  const markdown = buildPlainNoteMarkdown(noteText, noteOutputOptions(plugin));
+  editor.replaceSelection(markdown);
+  return { mode: 'plain', editor, markdown };
+}
+async function commitPreparedPlainTypedNote(plugin, prepared, noteText) {
+  return insertPreparedMarkdown(
+    plugin,
+    prepared,
+    buildPlainNoteMarkdown(noteText, noteOutputOptions(plugin))
+  );
+}
+
+
+async function commitPreparedPlainCapture(plugin, prepared) {
+  return commitPreparedCapture(
+    plugin,
+    prepared,
+    (vaultPath) => buildPlainCaptureMarkdown(vaultPath, noteOutputOptions(plugin))
+  );
+}
+
+async function commitPreparedPlainCaptureTypedNote(plugin, prepared, noteText) {
+  return commitPreparedCapture(
+    plugin,
+    prepared,
+    (vaultPath) => buildPlainCaptureNoteMarkdown(vaultPath, noteText, noteOutputOptions(plugin))
   );
 }
 
@@ -251,7 +328,10 @@ function registerLearningCaptureCommands(plugin) {
     callback: () => {
       new Notice('正在读取 PotPlayer 当前学习位置…', 1500);
       void insertCurrentLearningPosition(plugin)
-        .then((result) => new Notice(`已记录：${result.resource.title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`))
+        .then((result) => {
+          const title = result.resource?.title || freeformMediaTitle(result.bridgeMedia || result.freeform || {});
+          new Notice(`已记录：${title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`);
+        })
         .catch((error) => new Notice(commandErrorText('记录学习位置失败', error), 6000));
     }
   });
@@ -277,9 +357,13 @@ module.exports = {
   commandErrorText,
   commitPreparedCapture,
   commitPreparedCaptureTypedNote,
+  commitPreparedPlainCapture,
+  commitPreparedPlainCaptureTypedNote,
+  commitPreparedPlainTypedNote,
   commitPreparedTypedNote,
   ensureVaultFolder,
   insertCurrentLearningPosition,
+  insertPlainTypedNote,
   insertPreparedMarkdown,
   noteOutputOptions,
   persistRecordedPosition,
@@ -289,5 +373,7 @@ module.exports = {
   requestLearningPlayer,
   resolveLearningContext,
   saveCaptureToVault,
+  captureSubject,
+  systemAttachmentCapturePath,
   uniqueCapturePath
 };

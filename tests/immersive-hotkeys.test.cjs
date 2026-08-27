@@ -20,22 +20,25 @@ test('video enhancement is an opt-in runtime gate and disabled mode releases reg
   assert.match(source, /unregisterImmersiveHotkeys\(plugin, api\)/);
 });
 
-test('Alt+3 note flow pauses before opening the prompt and commits note plus backlink', () => {
-  const noteBlock = source.slice(source.indexOf("if (key === 'note')"), source.indexOf("if (key === 'captureNote')"));
-  assert.match(noteBlock, /pause:\s*true/);
-  assert.match(noteBlock, /showQuickNoteInput/);
-  assert.match(noteBlock, /commitPreparedTypedNote/);
-  assert.match(noteBlock, /resumePreparedPlayback\(plugin, prepared, 'save'/);
-  assert.match(noteBlock, /resumePreparedPlayback\(plugin, prepared, 'cancel'/);
+test('legacy Alt+3 maps into the unified time+note action with pause, prompt and resume semantics', () => {
+  assert.match(source, /note:\s*'timeNote'/);
+  assert.match(source, /action\.note/);
+  assert.match(source, /prepareCurrentLearningPosition/);
+  assert.match(source, /pause:\s*true/);
+  assert.match(source, /promptForPreparedNote/);
+  assert.match(source, /commitPreparedTypedNote/);
+  assert.match(source, /resumePreparedPlayback\(plugin, prepared, 'save'/);
+  assert.match(source, /resumePreparedPlayback\(plugin, prepared, 'cancel'/);
 });
 
-test('Alt+4 capture-note flow pauses, captures before prompting, then commits image note and backlink', () => {
-  const block = source.slice(source.indexOf("if (key === 'captureNote')"));
-  assert.match(block, /prepareCaptureLearningPosition/);
-  assert.match(block, /pause:\s*true/);
-  assert.match(block, /showQuickNoteInput/);
-  assert.match(block, /commitPreparedCaptureTypedNote/);
-  assert.match(block, /resumePreparedPlayback/);
+test('legacy Alt+4 maps into the unified all-elements action and captures before prompting', () => {
+  assert.match(source, /captureNote:\s*'all'/);
+  assert.match(source, /action\.image && action\.note/);
+  assert.match(source, /prepareCaptureLearningPosition/);
+  assert.match(source, /pause:\s*true/);
+  assert.match(source, /promptForPreparedNote/);
+  assert.match(source, /commitPreparedCaptureTypedNote/);
+  assert.match(source, /resumePreparedPlayback/);
 });
 
 test('duplicate configured shortcuts are rejected before registration', () => {

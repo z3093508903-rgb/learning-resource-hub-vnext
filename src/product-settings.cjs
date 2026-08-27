@@ -1,18 +1,29 @@
 'use strict';
 
+const { DEFAULT_HUD_SLOTS, normalizeHudSlots } = require('./capture-actions.cjs');
+
 const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   autoCollapseSidebar: true,
   videoEnhancementEnabled: false,
   videoResumeAfterSave: true,
   videoResumeAfterCancel: true,
   videoSuccessFeedback: true,
+  focusStudyNoteAtEnd: true,
+  freeformVideoNotesEnabled: true,
+  shortcutMode: 'mixed',
+  actionHudShortcut: 'Alt+S',
+  actionHudDelayMs: 300,
+  actionHudSlots: { ...DEFAULT_HUD_SLOTS },
   captureFolder: 'GoStudy/Captures',
   backupRetention: 10,
   timeDisplayFormat: 'smart',
   backlinkTemplate: '[↗ {title} · {time}]({uri})',
   noteTemplate: '{note}\n\n{backlink}',
   captureTemplate: '{image}\n\n{backlink}',
-  captureNoteTemplate: '{image}\n\n{note}\n\n{backlink}'
+  captureNoteTemplate: '{image}\n\n{note}\n\n{backlink}',
+  plainNoteTemplate: '{note}',
+  plainCaptureTemplate: '{image}',
+  plainCaptureNoteTemplate: '{image}\n\n{note}'
 });
 
 const TEMPLATE_RULES = Object.freeze({
@@ -31,6 +42,18 @@ const TEMPLATE_RULES = Object.freeze({
   captureNoteTemplate: Object.freeze({
     allowed: Object.freeze(['image', 'note', 'backlink']),
     required: Object.freeze(['image', 'note', 'backlink'])
+  }),
+  plainNoteTemplate: Object.freeze({
+    allowed: Object.freeze(['note']),
+    required: Object.freeze(['note'])
+  }),
+  plainCaptureTemplate: Object.freeze({
+    allowed: Object.freeze(['image']),
+    required: Object.freeze(['image'])
+  }),
+  plainCaptureNoteTemplate: Object.freeze({
+    allowed: Object.freeze(['image', 'note']),
+    required: Object.freeze(['image', 'note'])
   })
 });
 
@@ -46,8 +69,8 @@ function clampInteger(value, min, max, fallback) {
 
 function normalizeCaptureFolder(value) {
   const raw = String(value ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!raw) return '';
   const parts = raw.split('/').filter(Boolean);
-  if (!parts.length) return DEFAULT_PRODUCT_SETTINGS.captureFolder;
   if (parts.some((part) => part === '.' || part === '..' || /[<>:"|?*\x00-\x1F]/.test(part))) {
     throw new Error('截图目录必须是 Vault 内的安全相对路径。');
   }
@@ -59,6 +82,24 @@ function normalizeTimeDisplayFormat(value) {
   if (normalized === 'smart' || normalized === 'hms') return normalized;
   return DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat;
 }
+function normalizeShortcutMode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['mixed', 'hud', 'legacy'].includes(normalized) ? normalized : DEFAULT_PRODUCT_SETTINGS.shortcutMode;
+}
+
+function normalizeActionHudShortcut(value) {
+  const shortcut = String(value || '').trim();
+  if (!shortcut) return DEFAULT_PRODUCT_SETTINGS.actionHudShortcut;
+  if (shortcut.length > 40 || /[\r\n\t]/.test(shortcut)) throw new Error('动作盘快捷键格式无效。');
+  return shortcut;
+}
+
+function normalizeActionHudDelayMs(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_PRODUCT_SETTINGS.actionHudDelayMs;
+  return Math.min(1000, Math.max(0, parsed));
+}
+
 
 function outputTemplateTokens(value) {
   return [...String(value || '').matchAll(/\{([A-Za-z][A-Za-z0-9_-]*)\}/g)].map((match) => match[1]);
@@ -86,20 +127,36 @@ function safeOutputTemplate(key, value) {
 function currentProductSettings(plugin) {
   const ui = plugin?.state?.uiState || {};
   let captureFolder = DEFAULT_PRODUCT_SETTINGS.captureFolder;
-  try { captureFolder = normalizeCaptureFolder(ui.captureFolder || captureFolder); } catch {}
+  try {
+    captureFolder = Object.prototype.hasOwnProperty.call(ui, 'captureFolder')
+      ? normalizeCaptureFolder(ui.captureFolder)
+      : DEFAULT_PRODUCT_SETTINGS.captureFolder;
+  } catch {}
   return {
     autoCollapseSidebar: boolOr(ui.autoCollapseSidebar, DEFAULT_PRODUCT_SETTINGS.autoCollapseSidebar),
     videoEnhancementEnabled: boolOr(ui.videoEnhancementEnabled, DEFAULT_PRODUCT_SETTINGS.videoEnhancementEnabled),
     videoResumeAfterSave: boolOr(ui.videoResumeAfterSave, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterSave),
     videoResumeAfterCancel: boolOr(ui.videoResumeAfterCancel, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterCancel),
     videoSuccessFeedback: boolOr(ui.videoSuccessFeedback, DEFAULT_PRODUCT_SETTINGS.videoSuccessFeedback),
+    focusStudyNoteAtEnd: boolOr(ui.focusStudyNoteAtEnd, DEFAULT_PRODUCT_SETTINGS.focusStudyNoteAtEnd),
+    freeformVideoNotesEnabled: boolOr(ui.freeformVideoNotesEnabled, DEFAULT_PRODUCT_SETTINGS.freeformVideoNotesEnabled),
+    shortcutMode: normalizeShortcutMode(ui.shortcutMode),
+    actionHudShortcut: (() => {
+      try { return normalizeActionHudShortcut(ui.actionHudShortcut); }
+      catch { return DEFAULT_PRODUCT_SETTINGS.actionHudShortcut; }
+    })(),
+    actionHudDelayMs: normalizeActionHudDelayMs(ui.actionHudDelayMs),
+    actionHudSlots: normalizeHudSlots(ui.actionHudSlots),
     captureFolder,
     backupRetention: clampInteger(ui.backupRetention, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention),
     timeDisplayFormat: normalizeTimeDisplayFormat(ui.timeDisplayFormat),
     backlinkTemplate: safeOutputTemplate('backlinkTemplate', ui.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate),
     noteTemplate: safeOutputTemplate('noteTemplate', ui.noteTemplate ?? DEFAULT_PRODUCT_SETTINGS.noteTemplate),
     captureTemplate: safeOutputTemplate('captureTemplate', ui.captureTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureTemplate),
-    captureNoteTemplate: safeOutputTemplate('captureNoteTemplate', ui.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate)
+    captureNoteTemplate: safeOutputTemplate('captureNoteTemplate', ui.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate),
+    plainNoteTemplate: safeOutputTemplate('plainNoteTemplate', ui.plainNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainNoteTemplate),
+    plainCaptureTemplate: safeOutputTemplate('plainCaptureTemplate', ui.plainCaptureTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainCaptureTemplate),
+    plainCaptureNoteTemplate: safeOutputTemplate('plainCaptureNoteTemplate', ui.plainCaptureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainCaptureNoteTemplate)
   };
 }
 
@@ -109,7 +166,11 @@ function ensureProductSettings(plugin) {
   const normalized = currentProductSettings(plugin);
   let changed = false;
   for (const [key, value] of Object.entries(normalized)) {
-    if (plugin.state.uiState[key] !== value) {
+    const current = plugin.state.uiState[key];
+    const same = value && typeof value === 'object'
+      ? JSON.stringify(current) === JSON.stringify(value)
+      : current === value;
+    if (!same) {
       plugin.state.uiState[key] = value;
       changed = true;
     }
@@ -124,6 +185,10 @@ async function updateProductSetting(plugin, key, value) {
   if (key === 'captureFolder') next = normalizeCaptureFolder(value);
   else if (key === 'backupRetention') next = clampInteger(value, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention);
   else if (key === 'timeDisplayFormat') next = normalizeTimeDisplayFormat(value);
+  else if (key === 'shortcutMode') next = normalizeShortcutMode(value);
+  else if (key === 'actionHudShortcut') next = normalizeActionHudShortcut(value);
+  else if (key === 'actionHudDelayMs') next = normalizeActionHudDelayMs(value);
+  else if (key === 'actionHudSlots') next = normalizeHudSlots(value);
   else if (TEMPLATE_RULES[key]) next = normalizeOutputTemplate(key, value);
   else if (typeof DEFAULT_PRODUCT_SETTINGS[key] === 'boolean') next = Boolean(value);
   plugin.state.uiState[key] = next;
@@ -146,8 +211,11 @@ module.exports = {
   clampInteger,
   currentProductSettings,
   ensureProductSettings,
+  normalizeActionHudDelayMs,
+  normalizeActionHudShortcut,
   normalizeCaptureFolder,
   normalizeOutputTemplate,
+  normalizeShortcutMode,
   normalizeTimeDisplayFormat,
   outputTemplateTokens,
   resetOutputTemplates,

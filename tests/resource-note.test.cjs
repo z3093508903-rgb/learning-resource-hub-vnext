@@ -7,7 +7,10 @@ const { parseReferenceUri } = require('../src/resource-reference.cjs');
 const {
   buildCaptureMarkdown,
   buildCaptureNoteMarkdown,
+  buildFreeformPositionMarkdown,
   buildNotePositionMarkdown,
+  buildPlainCaptureNoteMarkdown,
+  buildPlainNoteMarkdown,
   buildPositionMarkdown,
   captureFileName,
   formatPositionClock,
@@ -84,4 +87,28 @@ test('custom note and capture-note templates can reorder visible blocks safely',
 test('capture filenames are Windows-safe and position-stable', () => {
   assert.equal(sanitizeCaptureBaseName('课程: 01 / 入门?*'), '课程- 01 - 入门--');
   assert.equal(captureFileName({ title: '课程: 01' }, { type: 'time', seconds: 3661 }), '课程- 01-01-01-01.png');
+});
+
+
+test('freeform position markdown keeps the same visible template while using a locator-based Go Study URI', () => {
+  const markdown = buildFreeformPositionMarkdown(
+    { path: 'D:\\Loose\\tutorial.mp4', title: 'tutorial - PotPlayer' },
+    { type: 'time', seconds: 754 },
+    { backlinkTemplate: '[🎬 {title} · {time}]({uri})' }
+  );
+  assert.match(markdown, /^\[🎬 tutorial · 12:34\]\(obsidian:\/\/go-study\?/);
+  const uri = markdown.match(/\((obsidian:\/\/go-study\?[^)]+)\)/)?.[1];
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.mode, 'freeform');
+  assert.equal(parsed.path, 'D:\\Loose\\tutorial.mp4');
+  assert.equal(parsed.position.seconds, 754);
+});
+
+test('no-timestamp templates can emit pure notes or image notes without backlinks', () => {
+  assert.equal(buildPlainNoteMarkdown('灵感', { plainNoteTemplate: '> {note}' }), '> 灵感');
+  const mixed = buildPlainCaptureNoteMarkdown('Shots/a.png', '只保留画面', {
+    plainCaptureNoteTemplate: '{image}\n> {note}'
+  });
+  assert.equal(mixed, '![[Shots/a.png]]\n> 只保留画面');
+  assert.doesNotMatch(mixed, /obsidian:\/\/go-study/);
 });
