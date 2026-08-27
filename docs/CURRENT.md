@@ -2,9 +2,9 @@
 
 更新时间：**2026-08-28（北京时间，UTC+8）**
 
-> 本文件保持短小，并区分远端产品事实、本地候选和真人验收。文档分支 HEAD 不等于产品基线 HEAD 是正常情况。
+> 本文件只保存“现在”的可恢复事实。历史过程见 `handoff/HISTORY.md` 与 `sessions/`。
 
-## 当前唯一权威仓库
+## 唯一权威仓库
 
 `z3093508903-rgb/learning-resource-hub-vnext`
 
@@ -12,186 +12,148 @@
 
 ## 当前 Milestone
 
-**Go Study `0.3.0-beta.17` — Portable Freeform Backlink v2 / 真人验收**
+**Go Study `0.3.0-beta.18` — Companion Note Window / 真人验收**
 
-Stable / Merge：**HOLD**。
+Stable / Merge：**HOLD**
 
-## GitHub 产品基线（2026-08-28 已重新核对）
+## 当前开发候选
 
-### 开发分支
+- Branch：`work/companion-note-beta18`
+- HEAD：`28208c9e244d0fcbe4fb1c7132bb800da09b0d67`
+- Draft PR：**#26**
+- Base：`work/portable-freeform-beta17`
+- Preview：`Go Study Preview 0.3.0-beta.18`
+- Tag：`go-study-preview-v0.3.0-beta.18`
+- Release Target：`7eb7fa2f66e7b8df03335e168d0c4ed6e48d6cc0`
 
-- Branch：`work/universal-capture-beta15`
-- HEAD：`ec854a9d5ca813e97f5c4f48b80f2afc3bf8de56`
-- Subject：`polish(notes): clarify folder selection never auto-imports notes`
+## 自动化状态
 
-### Preview 分支与 Release
+最终分支 CI #188：
 
-- Branch：`preview/go-study-0.3.0-beta.15`
-- HEAD：`11acbda84255c1df3cdf56b9f46a689c7a5b1066`
-- Tag：`go-study-preview-v0.3.0-beta.15`
-- Release：`Go Study Preview 0.3.0-beta.15`
-- Published：2026-08-27 11:03:32 UTC
+- `npm run release:check` ✅
+- committed `main.js` consistency ✅
+- **307 / 307 tests passing**
+- Build ✅
+- Release validation ✅
 
-Release 已发布且包含 Preview ZIP、`main.js`、`manifest.json`、`styles.css`、`TESTING.md`。
+beta.18 发布流水线：
 
-### beta.17 Portable Freeform
+- Full release validation ✅
+- isolated `go-study-preview` packaging ✅
+- prerelease upload ✅
+- release asset verification ✅
 
-- Branch：`work/portable-freeform-beta17`
-- 当前远端 HEAD：`fe7832bd833c36e4fde26d11b508b6c6a4110373`
-- Draft PR：#25，真人验收前禁止 Merge
-- Preview Tag：`go-study-preview-v0.3.0-beta.17`
-- Release：`Go Study Preview 0.3.0-beta.17`
-- Release Target：`c4db348b2ece7c3d2bf93cb8a29c3ecead1d3b32`
-- 新 Freeform Markdown：`obsidian://go-study?mode=freeform&locator=...&name=...&position=...&v=2`
-- 不再在新笔记里暴露 `jv://`
-- `locator=` 取代会与 Obsidian Vault 路由冲突的 `path=`
-- 可用唯一媒体文件名在不同设备上尝试升级到 Managed Resource
-- Managed 回链保持 Resource ID + Resolver
-- Windows 的 `jv://` 仅作为内部执行兼容层
-- macOS/Linux 支持 POSIX 本地路径解析与系统播放器打开；精确 seek 仍需要平台 Player Adapter
-- 自动化：**293 项测试全部通过，release:check 与 committed main.js consistency 全绿**
-- 状态：**Windows 核心链路真人验收通过；macOS / 跨设备路径仍延期验证**
-
-### beta.16 Freeform 修复候选
-
-- Fix Branch：`fix/freeform-jv-reopen-v1`
-- 当前远端 HEAD：`7e8a0cc52277bb1f87fbbb3d8168b575964cfba1`
-- Validation PR：Draft PR #24，禁止在真人验收前 Merge
-- Preview Tag：`go-study-preview-v0.3.0-beta.16`
-- Release：`Go Study Preview 0.3.0-beta.16`
-- Release Target：`7fd6c15bae574af961b45e6263fdfaba07b81659`
-- 新 Freeform 回链：直接生成 `jv://open?path=...&time=HH:MM:SS`
-- Managed Resource 回链：继续保持 `obsidian://go-study?resource=...`
-- 旧 beta.15 Freeform `obsidian://go-study?...&path=...`：增加 Obsidian 内点击拦截兼容，尽量在默认 Vault 路由前交回 Go Study 处理
-- 状态：**自动化通过，等待 Windows + Obsidian + PotPlayer 真人验收**
-
-
-### 项目记忆配置分支
-
-- Branch：`docs/project-memory-v1`
-- Base：`origin/work/universal-capture-beta15` @ `ec854a9`
-- Remote：`origin/docs/project-memory-v1`（已上传）
-- Merge 状态：尚未合入 beta.15 开发基线
-- 说明：项目记忆分支自身 HEAD 会随每次 Memory Sync 提交变化，因此不在 CURRENT 中固化；开工时通过 Git / GitHub 实时核对。
-
-## 当前 CI / 自动化事实
-
-- `288 / 288` 是 beta.15 的历史自动化 checkpoint。
-- beta.16 修复候选完整发布验证为 **289 / 289 tests passing**。
-- Preview HEAD `11acbda` 的 GitHub CI run `33065679457` 为 **failure**。
-- 失败发生在 release check 生成 `main.js` 后：提交中的生成产物与当前源码构建结果不一致，最终以非零状态结束。
-- Preview Release 仍由独立发布流程成功生成；“Release 存在”不能替代 CI 绿色。
-- beta.16 Fix CI #167：`Run release checks` ✅，`Verify committed main.js is current` ✅。
-- beta.16 发布流水线：Full release validation ✅、isolated Preview packaging ✅、prerelease upload ✅、release asset verification ✅。
-
-文档配置任务不运行 build、test 或 `release:check`。
-
-## beta.15 已实现范围
-
-- Universal Capture 与 `Alt+S` Action HUD；
-- timestamp / comment / screenshot 的 7 种非空组合；
-- No-Timestamp Capture；
-- Managed + Freeform 视频笔记；
-- Project Notes Box / Deep Folder Picker；
-- Legacy `Alt+1..Alt+4` 兼容；
-- Native Windows/PotPlayer 为正常 Runtime 主路线。
-
-## 当前已确认 Bug
-
-### Freeform 回链被 Obsidian 路由误判
-
-状态：**REPRODUCED / REMOTE UNFIXED**
-
-beta.15 生成：
-
-```text
-obsidian://go-study?mode=freeform&path=...
-```
-
-Obsidian 会把保留参数 `path` 当成 Vault 路径，出现 `Vault not found`，未收录视频无法可靠回跳。
-
-远端 `work/universal-capture-beta15` 和 Preview 分支仍使用 `path`，只对 Freeform Web 的 Ctrl+点击做特殊处理。
-
-### 远程修复候选（VALIDATION CANDIDATE）
-
-beta.15 的 local-only 尝试已被新的远程可恢复候选取代：
-
-- Branch：`fix/freeform-jv-reopen-v1`
-- Preview：`0.3.0-beta.16`
-- 新 Freeform Link：直接使用原 `jv://open?path=...&time=...` 协议，不再先经过带 `path` 的 Obsidian 自定义 URI；
-- Managed Resource：不变，仍使用 Resource ID + Resolver；
-- 旧 beta.15 Freeform Link：保留兼容拦截尝试；
-- 自动化：289/289 tests + build + release validation + committed `main.js` consistency 全部通过；
-- 真人验收：**尚未完成**。
-
-该方案只把 `jv://` 用于未收录 / Freeform 视频回链，不等于恢复 AHK / Companion 为整个 Go Study 的正常 Runtime 必需依赖。
-
-## 真人验收状态
+## beta.17 Windows 验收
 
 已确认：
 
-- beta.17 新 Freeform `locator=` / `v=2` 链路在 Windows 实机可用；
-- 未收录视频点击可正常回到播放器 / 时间位置；
-- 视频后来被收录后，历史 Freeform 链接可由 Go Study 动态升级到 Managed 解析；
-- beta.16 旧 `jv://` 链接与 beta.15 旧 Freeform 链接兼容测试通过；
-- 已收录 Resource 仍生成 Resource-ID Managed 回链；
-- 当前遗留：Freeform 可见标题仍可能受 PotPlayer / Bridge 标题乱码影响，属于显示层问题，不影响回跳逻辑。
+- Freeform v2 `locator=` / `v=2` 回链可用；
+- 未收录视频可以回到播放器与时间位置；
+- 视频后来被收录后，历史 Freeform Link 可以动态升级为 Managed；
+- beta.16 `jv://` 与 beta.15 legacy Freeform Link 兼容；
+- 已收录 Resource 继续使用 Resource ID + Resolver；
+- macOS / cross-device local path 仍延期。
 
-仍需验收：
+## beta.17 Polish — 已进入 beta.18 Preview
 
-- Preview cold start；
-- `Alt+S` 注册、HUD Focus 与 7 种 Capture；
-- No Timestamp、Managed、Freeform；
-- 修复后的 Freeform reopen；
-- Legacy `Alt+1..Alt+4`；
-- Folder Picker / Project Notes；
-- Restart Persistence；
-- PotPlayer launch/seek；
-- Bilibili、OpenList；
-- Vault rename/delete/rebuild；
-- Backup creation/retention/restore。
+- Freeform 可见标题统一为 `回到课程`，不再使用乱码播放器标题；
+- HUD：同一方向快速双击可直接执行，保留原“方向 + Enter”；
+- Quick Note Popup：可拖动、位置记忆、默认位置下移、滚动条弱化；
+- Settings：HUD 映射压缩为紧凑面板；
+- Template：编辑器与实时渲染预览相邻，输入时即时刷新，可折叠查看原始 Markdown。
 
-## 当前未决产品选择
+## beta.18 Companion Note Window — 已实现 Preview 候选
 
-Freeform 永久回链最终协议仍是 `PROPOSED`，但 beta.16 已选择方案 2 作为真人验证候选：
+### Window
 
-1. 保留 `obsidian://go-study`，改用非保留 locator 参数并由插件拦截；
-2. **当前 beta.16 候选**：仅 Freeform 直接生成 `jv://` 兼容链接，同时尝试兼容旧 beta.15 Freeform 链接。
+- 使用 **真实 Obsidian Markdown pop-out leaf**；
+- 默认 `播放器右侧栏` 窄高布局；
+- 另有 `右侧半高` 布局；
+- 支持 move / resize；
+- 保存最后 Geometry（x/y/width/height）；
+- 支持 70% / 80% / 82% / 90% / 100% Scale；
+- 支持保存自定义 Layout；
+- Companion Window 使用独立 CSS 隐藏 Ribbon / Sidebars / Status Bar / Tab chrome。
 
-不得把第二项扩展成“AHK / Companion 重新成为正常 Runtime 必需依赖”。选择方案前应结合真人复现、兼容范围和 ADR-003/005 决策。
+### Capture Target
+
+优先级现在是：
+
+```text
+Locked Companion Note
+→ Active Markdown
+→ Remembered Markdown
+```
+
+小窗锁定后，即使 PotPlayer 或主 Obsidian 窗口获得焦点，Capture 仍应写入小窗中的真实 Markdown。
+
+### Commands
+
+- 在学习笔记小窗中打开当前笔记
+- 恢复上次学习笔记小窗
+- 切换学习笔记小窗 Capture 锁定
+- 保存当前学习笔记小窗布局
+
+### Settings
+
+Go Study 设置页新增“学习笔记小窗”：
+
+- 打开当前笔记
+- 恢复上次
+- Capture 锁定
+- Layout 选择
+- Scale
+- 保存当前布局
+
+## beta.18 真人验收仍需完成
+
+### 高优先级
+
+1. Preview cold start；
+2. 从设置/命令打开真实 Markdown 小窗；
+3. 小窗确实是可编辑的真实 Vault Note；
+4. 默认宽高和位置是否接近 PotPlayer 右侧栏体验；
+5. Move / resize / close / restore Geometry；
+6. Scale 的光标、输入、选择、滚动是否正常；
+7. Locked Companion Capture：PotPlayer 前台时 Alt+S 是否稳定写入该 Note；
+8. Unlock 后是否恢复普通 Active/Remembered targeting；
+9. 自定义 Layout 保存与恢复；
+10. 主窗口与小窗编辑同一 Note 时的数据一致性。
+
+### beta.17 Polish
+
+- `Alt+S → ↑↑` 只执行一次；
+- 原 `Alt+S → ↑ → Enter` 仍正常；
+- Quick Note Popup 位置记忆；
+- Freeform 标题不再乱码；
+- Settings 模板实时预览的实际 UI；
+- HUD 设置区域是否明显更紧凑。
+
+### Regression
+
+- Managed / Freeform backlink；
+- Legacy Alt+1..Alt+4；
+- Project Notes / Recent Note；
+- No-Timestamp Capture；
+- HUD 在没有 Companion Window 时仍正常。
+
+## 明确延期
+
+- macOS 本地视频精确 Player Adapter；
+- cross-device Path Mapping / multi-locator / content fingerprint；
+- Always-on-top（可选增强，非 beta.18 阻塞）；
+- 自动吸附 PotPlayer；
+- 完整 Study Workspace。
 
 ## 下一步
 
-### beta.17 收尾小优化
+**不要继续加 beta.19 功能。**
 
-1. HUD：同一方向键快速连按两次，等价于“方向 + Enter”执行当前动作；
-   - 目标：`Alt+S → ↑ → Enter` 缩短为 `Alt+S → ↑↑`；
-   - 保留原单击方向 + Enter 交互。
-2. 笔记弹窗 UI：
-   - 弱化明显突兀的滚动条 / 滑块视觉；
-   - 默认位置下移到更自然区域；
-   - 支持拖动位置并记忆最后位置；
-   - 后续如支持尺寸调整，同样记忆 geometry。
-3. 设置页模板区域：
-   - 模板编辑器与实时示例相邻；
-   - 输入模板时示例实时更新；
-   - 示例直接展示最终 Markdown / 可见效果。
-4. 设置页信息层级：
-   - HUD 映射、模板编辑、实例预览重新分组；
-   - 减少长页面卡片堆叠与无效空白。
-5. 修复 Freeform 可见标题乱码，优先稳定显示“回到课程 · 时间”。
+先安装 beta.18 Preview，完成 Windows 真人验收。出现问题时只修当前 beta.18 边界。
 
-### 延期：跨平台本地路径
+真人验收通过后：
 
-beta.17 已完成“协议跨平台”，但 macOS / Windows 本地绝对路径映射不在本轮继续开发。
-后续单独评估 Device Path Mapping、Resource multi-locator、content fingerprint / media identity。
-
-### beta.18 候选
-
-优先评估“Go Study 笔记小窗 / Companion Note Window”：
-- 不依赖 Windows 系统分屏；
-- 与 PotPlayer 边看边记；
-- 使用真实 Markdown Note，不创建第二套私有笔记格式；
-- Capture 稳定写入被锁定的小窗笔记；
-- 位置 / 尺寸 / 最近笔记可恢复；
-- 与完整 Study Workspace 分离，先做最小可用小窗。
+1. 将 beta.17 Polish 标记 accepted behavior；
+2. 将 Companion Note Window MVP 标记 accepted behavior；
+3. 更新 ADR-008；
+4. 再决定是否 Merge / 进入下一轮。
