@@ -1,6 +1,6 @@
 # 产品规格：Companion Note Window / 学习笔记小窗
 
-状态：**CONFIRMED — beta.18 scope**
+状态：**CONFIRMED — beta.18 scope / Preview implemented, human acceptance pending**
 
 ## 一、产品目标
 
@@ -268,3 +268,46 @@ Project
 - 自动总结；
 - 多人协作；
 - 强依赖 Windows 系统分屏。
+
+
+## 十五、当前 beta.18 Preview 实现
+
+实现分支：
+
+`work/companion-note-beta18`
+
+Draft PR：
+
+`#26`
+
+Preview：
+
+`Go Study Preview 0.3.0-beta.18`
+
+当前已经实现：
+
+- Obsidian pop-out Markdown leaf；
+- Right Rail / Right Half builtin layouts；
+- move / resize / last geometry persistence；
+- compact scale；
+- custom layout save；
+- locked Companion Capture Target；
+- commands；
+- settings entry；
+- companion-only compact CSS。
+
+自动化：
+
+- 307 / 307 tests；
+- release:check PASS；
+- main.js consistency PASS；
+- Preview package validation PASS。
+
+未实现 / 延期：
+
+- Always-on-top；
+- automatic PotPlayer docking；
+- complete Study Workspace；
+- macOS real-machine acceptance。
+
+**注意：自动化只能证明状态逻辑与构建完整性，不能证明真实 Obsidian pop-out 的窗口几何、CSS、编辑器光标与 OS 行为。**
