@@ -177,7 +177,7 @@ class ProjectNoteFolderPickerModal extends Modal {
     this.contentEl.empty();
     const ui = createPickerShell(this.contentEl, {
       title: this.options.title || '选择笔记文件夹',
-      description: this.options.description || '逐层进入 Vault 文件夹，或搜索完整路径；只决定新建笔记保存位置。',
+      description: this.options.description || '逐层进入 Vault 文件夹，或搜索完整路径；只决定新建笔记保存位置，不会自动收录整个文件夹。',
       searchLabel: '搜索 Vault 文件夹',
       placeholder: '搜索任意层级文件夹…'
     });
