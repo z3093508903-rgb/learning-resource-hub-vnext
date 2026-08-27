@@ -56,7 +56,11 @@ test('native settings tab exposes workbench, optional video enhancement, output 
     'Alt+2 截图模板',
     'Alt+4 截图笔记模板',
     '恢复默认输出格式',
-    '实时示例',
+    '实时效果',
+    '学习笔记小窗',
+    '打开当前笔记',
+    '锁定为 Capture 目标',
+    '保存当前布局',
     '自动备份保留数量',
     '当前插件版本'
   ]) assert.match(settingsSource, new RegExp(label.replace(/[+]/g, '\\+')));
@@ -64,6 +68,8 @@ test('native settings tab exposes workbench, optional video enhancement, output 
   assert.match(settingsSource, /resetOutputTemplates/);
   assert.match(settingsSource, /updateImmersiveShortcut/);
   assert.match(settingsSource, /captureFrameAndInsertLearningPosition/);
+  assert.match(settingsSource, /go-study-template-card/);
+  assert.match(settingsSource, /go-study-hud-map/);
 });
 
 test('disabled video enhancement removes the workbench status dot', () => {
