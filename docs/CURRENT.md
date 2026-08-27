@@ -1,6 +1,6 @@
 # Go Study — 当前状态
 
-更新时间：**2026-08-28（Asia/Shanghai）**
+更新时间：**2026-08-28（北京时间，UTC+8）**
 
 > 本文件保持短小，并区分远端产品事实、本地候选和真人验收。文档分支 HEAD 不等于产品基线 HEAD 是正常情况。
 
@@ -36,9 +36,11 @@ Release 已发布且包含 Preview ZIP、`main.js`、`manifest.json`、`styles.c
 
 ### 项目记忆配置分支
 
-- Local branch：`docs/project-memory-v1`
+- Branch：`docs/project-memory-v1`
 - Base：`origin/work/universal-capture-beta15` @ `ec854a9`
-- Remote：未上传
+- Remote：`origin/docs/project-memory-v1`（已上传）
+- Merge 状态：尚未合入 beta.15 开发基线
+- 说明：项目记忆分支自身 HEAD 会随每次 Memory Sync 提交变化，因此不在 CURRENT 中固化；开工时通过 Git / GitHub 实时核对。
 
 ## 当前 CI / 自动化事实
 
@@ -75,15 +77,14 @@ Obsidian 会把保留参数 `path` 当成 Vault 路径，出现 `Vault not found
 
 远端 `work/universal-capture-beta15` 和 Preview 分支仍使用 `path`，只对 Freeform Web 的 Ctrl+点击做特殊处理。
 
-### 本地修复候选（未上传、未验收）
+### 本地修复候选（EPHEMERAL / LOCAL ONLY）
 
-本机存在 `fix/beta15-freeform-reopen` 候选分支：
+曾存在一个针对 Freeform reopen 的本地修复候选，并有 targeted/load 验证记录，但它**尚未形成可从 GitHub 恢复的正式修复事实**。
 
-- `27d43dc`：Freeform URI 使用 `locator`，并在 Obsidian 内拦截普通点击；
-- `105543c`：Windows 换行符测试兼容；
-- `92137d8`：旧 Windows PowerShell 部署兼容。
-
-候选曾通过 Freeform targeted tests、HUD targeted tests、bundle/load tests 与 release validation；完整 `release:check` 未在最后状态重新运行。
+- 未来 Agent 不得依赖任何 local-only branch 或 commit SHA；
+- 当时的本地 branch / commit 仅作为历史线索，记录在 `docs/sessions/2026-08-28.md`；
+- 真正进入项目事实前，必须从正确 beta.15 基线形成远程可恢复的 branch / commit，并完成真人验收；
+- 完整 `release:check` 未在该候选最后状态重新运行。
 
 真人验收未完成。早期手工包曾错误使用 `learning-resource-hub-next` manifest 覆盖 `go-study-preview` 目录，因此不能作为产品行为证据。任何后续 Preview 包必须保持：
 
