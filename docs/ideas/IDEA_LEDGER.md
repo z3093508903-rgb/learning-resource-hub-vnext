@@ -174,11 +174,13 @@ beta.17 当前策略：
 
 ## Companion Note Window / 分屏小窗笔记
 
-状态：**PROPOSED — beta.18 candidate**
+状态：**CONFIRMED — beta.18 scope**
 
 用户目标：
 
 > 不依赖 Windows 系统分屏，能和 PotPlayer 边看边记，并让笔记结构更稳定。
+
+视觉参考已经确认：默认大小接近 PotPlayer 右侧播放列表区域；小窗可以非常窄，但应通过 compact scale 保持完整真实 Markdown 编辑能力。用户可自由 resize，并保存多套布局。
 
 当前已知边界：
 
@@ -189,4 +191,4 @@ beta.17 当前策略：
 - 不新增专属“返回 Obsidian”快捷键；
 - 不第一步就扩成完整 Study Workspace。
 
-当前尚未恢复到旧对话中的具体规格：默认尺寸、是否置顶、Note 锁定/切换、小窗关闭后的 Capture 回退规则、多 Project / 多 Note 切换逻辑、是否使用 Obsidian popout/new window。
+详细产品规格已进入 `docs/product/companion-note-window.md`。Always-on-top 仍作为可选项；具体 Obsidian popout/new-window 技术路线在实现前验证。
