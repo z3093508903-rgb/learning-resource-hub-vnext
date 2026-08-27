@@ -106,13 +106,17 @@ function resolveUniversalMediaSession(state, activeSession, bridgeMedia, resolve
 }
 
 function resolveActiveMediaSession(state, activeSession, bridgeMedia, resolveActions) {
-  const context = resolveUniversalMediaSession(state, activeSession, bridgeMedia, resolveActions, { allowFreeform: false });
-  if (!context.resource) throw new Error('当前没有有效的 Go Study 学习会话，请先从 Go Study 启动资源。');
-  return {
-    resource: context.resource,
-    position: context.position,
-    bridgeMedia: context.bridgeMedia
-  };
+  const resourceId = String(activeSession?.resourceId || '');
+  const resource = state?.resources?.[resourceId];
+  if (!resource || resource.deletedAt) throw new Error('当前没有有效的 Go Study 学习会话，请先从 Go Study 启动资源。');
+  const position = validatedBridgePosition(bridgeMedia);
+  if (typeof resolveActions !== 'function') throw new Error('资源启动解析器不可用。');
+  const actions = resolveActions(resource) || {};
+  if (!actions.playTarget) throw new Error('当前学习资源没有可验证的视频播放目标。');
+  if (!targetMatchesBridgeMedia(state, resource, actions.playTarget, bridgeMedia.path)) {
+    throw new Error('PotPlayer 当前媒体与 Go Study 最近启动的资源不一致；为避免把笔记记到错误课程，已停止插入。');
+  }
+  return { resource, position, bridgeMedia };
 }
 
 module.exports = {
