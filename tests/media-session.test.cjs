@@ -7,6 +7,7 @@ const {
   normalizeLocalMediaPath,
   openListMediaMatches,
   resolveActiveMediaSession,
+  resolveUniversalMediaSession,
   targetMatchesBridgeMedia
 } = require('../src/media-session.cjs');
 
@@ -68,4 +69,45 @@ test('active session resolution refuses to guess when PotPlayer is on another re
     { path: 'https://cloud.example.com/d/%E7%99%BE%E5%BA%A6/%E9%AB%98%E6%95%B0/18.mp4?sign=x', positionSeconds: 5076 },
     resolveActions
   ), /不一致/);
+});
+
+
+test('universal resolution recognizes a managed resource even when PotPlayer was opened outside Go Study', () => {
+  const state = {
+    resources: {
+      local: { id: 'local', kind: 'video', title: 'Lesson', deletedAt: '' }
+    },
+    sources: {}
+  };
+  const resolveActions = () => ({ playTarget: { type: 'potplayer', target: 'D:\\Course\\lesson.mp4' } });
+  const resolved = resolveUniversalMediaSession(
+    state,
+    null,
+    { path: 'd:/course/lesson.mp4', positionSeconds: 42, title: 'lesson - PotPlayer' },
+    resolveActions
+  );
+  assert.equal(resolved.mode, 'managed');
+  assert.equal(resolved.resource.id, 'local');
+  assert.deepEqual(resolved.position, { type: 'time', seconds: 42 });
+});
+
+test('universal resolution falls back to freeform only when no managed resource matches', () => {
+  const resolved = resolveUniversalMediaSession(
+    { resources: {}, sources: {} },
+    null,
+    { path: 'D:\\Loose\\temporary.mp4', positionSeconds: 15, title: 'temporary - PotPlayer' },
+    () => ({}),
+    { allowFreeform: true }
+  );
+  assert.equal(resolved.mode, 'freeform');
+  assert.equal(resolved.resource, null);
+  assert.equal(resolved.freeform.path, 'D:\\Loose\\temporary.mp4');
+
+  assert.throws(() => resolveUniversalMediaSession(
+    { resources: {}, sources: {} },
+    null,
+    { path: 'D:\\Loose\\temporary.mp4', positionSeconds: 15 },
+    () => ({}),
+    { allowFreeform: false }
+  ), /没有匹配到 Go Study 资源/);
 });
