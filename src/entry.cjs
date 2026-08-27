@@ -29,9 +29,11 @@ const {
   parseProtocolParams
 } = require('./resource-reference.cjs');
 const {
+  formatPotPlayerTime,
   resolveReferencePlayback,
   updateResumePosition
 } = require('./resource-resolver.cjs');
+const { matchingManagedResource } = require('./media-session.cjs');
 const {
   applySafeOpenListPathRemap,
   normalizeStrictOpenListPath,
@@ -81,6 +83,7 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   }
 
   async openResourceReference(reference) {
+    if (reference?.mode === 'freeform') return this.openFreeformReference(reference);
     const resolved = resolveReferencePlayback(this.state, reference, (resource) => this.resourceActions(resource));
     const opened = await this.openPositionedPlayTarget(resolved.resource, resolved.playTarget, resolved.playerTime);
     if (!opened) return false;
@@ -94,6 +97,31 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     await this.persist();
     await this.workbenchLeaf?.view?.render?.();
     return true;
+  }
+
+  async openFreeformReference(reference) {
+    const managed = matchingManagedResource(
+      this.state,
+      reference.path,
+      (resource) => this.resourceActions(resource)
+    );
+    if (managed) {
+      return this.openResourceReference({
+        resourceId: managed.id,
+        position: reference.position,
+        version: reference.version
+      });
+    }
+    try {
+      const playerTime = formatPotPlayerTime(reference.position);
+      new Notice(`正在跳转临时视频 · ${playerTime}`);
+      await shell.openExternal(this.toPotPlayerUri(reference.path, playerTime));
+      new Notice(`已跳转临时视频 · ${playerTime}`);
+      return true;
+    } catch (error) {
+      new Notice(`自由回链跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      return false;
+    }
   }
 
   async openPositionedPlayTarget(resource, target, playerTime) {
