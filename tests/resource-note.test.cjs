@@ -113,3 +113,16 @@ test('no-timestamp templates can emit pure notes or image notes without backlink
   assert.equal(mixed, '![[Shots/a.png]]\n> 只保留画面');
   assert.doesNotMatch(mixed, /obsidian:\/\/go-study/);
 });
+
+
+test('freeform context backlinks use a stable human label instead of player title text', () => {
+  const markdown = buildContextPositionMarkdown({
+    mode: 'freeform',
+    bridgeMedia: { path: 'https://example.com/video.mp4', title: 'bl��e��� - PotPlayer' },
+    position: { type: 'time', seconds: 18 }
+  }, {
+    backlinkTemplate: '[↗ {title} · {time}]({uri})'
+  });
+  assert.match(markdown, /^\[↗ 回到课程 · 00:18\]/);
+  assert.doesNotMatch(markdown, /bl��e/);
+});

@@ -860,3 +860,24 @@ textarea.rh-next-input { min-height: 100px; padding: 10px 12px; resize: vertical
   .rh-next-picker-toolbar { grid-template-columns: 1fr; }
   .rh-next-picker-group-body { margin-left: 10px; }
 }
+
+
+/* Go Study beta.18 polish */
+.go-study-hud-map{margin:10px 0 18px;padding:12px 14px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary)}
+.go-study-hud-map-head{display:flex;align-items:baseline;justify-content:space-between;gap:16px;margin-bottom:8px}
+.go-study-hud-map-title{font-weight:650}
+.go-study-hud-map-row{display:grid;grid-template-columns:minmax(90px,130px) minmax(180px,1fr);align-items:center;gap:12px;padding:7px 0;border-top:1px solid color-mix(in srgb,var(--background-modifier-border) 70%,transparent)}
+.go-study-hud-map-key{font-weight:600;color:var(--text-muted)}
+.go-study-hud-map-select{width:100%;max-width:360px;justify-self:end}
+.go-study-template-card{margin:12px 0;padding:14px;border:1px solid var(--background-modifier-border);border-radius:12px;background:var(--background-secondary)}
+.go-study-template-card.is-invalid{border-color:var(--text-error)}
+.go-study-template-card-head{margin-bottom:10px}.go-study-template-title{font-weight:650;margin-bottom:3px}
+.go-study-template-card-body{display:grid;grid-template-columns:minmax(240px,1fr) minmax(240px,1fr);gap:14px;align-items:start}
+.go-study-template-pane-label{font-size:11px;font-weight:650;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:6px}
+.go-study-template-textarea{width:100%;min-height:88px;resize:vertical;font-family:var(--font-monospace);line-height:1.45}
+.go-study-template-preview-pane{min-width:0;padding:10px 12px;border-radius:9px;background:var(--background-primary)}
+.go-study-template-rendered{min-height:44px;overflow-wrap:anywhere}
+.go-study-template-rendered p:first-child{margin-top:0}.go-study-template-rendered p:last-child{margin-bottom:0}
+.go-study-template-markdown-details{margin-top:10px;color:var(--text-muted)}
+.go-study-template-markdown{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;padding:9px;border-radius:7px;background:var(--background-secondary-alt);font-size:11px}
+@media (max-width:760px){.go-study-template-card-body{grid-template-columns:1fr}.go-study-hud-map-row{grid-template-columns:90px 1fr}}

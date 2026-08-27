@@ -1,6 +1,7 @@
 'use strict';
 
 const {
+  MarkdownRenderer,
   Notice,
   PluginSettingTab = class {},
   Setting = class {}
@@ -84,16 +85,32 @@ function noteOutputPreview(settings) {
   ].join('\n\n');
 }
 
+function templatePreviewMarkdown(key, settings) {
+  const resource = { id: 'preview-resource', title: '高等数学' };
+  const position = { type: 'time', seconds: 754 };
+  const options = noteOutputOptions(settings);
+  if (key === 'backlinkTemplate') return buildPositionMarkdown(resource, position, options);
+  if (key === 'noteTemplate') return buildNotePositionMarkdown(resource, position, '这里老师讲的是极限存在的必要条件。', options);
+  if (key === 'captureTemplate') return buildCaptureMarkdown(resource, position, 'GoStudy/Captures/example.png', options);
+  if (key === 'captureNoteTemplate') return buildCaptureNoteMarkdown(resource, position, 'GoStudy/Captures/example.png', '这一帧的公式需要重新推导一次。', options);
+  if (key === 'plainNoteTemplate') return buildPlainNoteMarkdown('这是不带时间戳的随手记录。', options);
+  if (key === 'plainCaptureTemplate') return buildPlainCaptureMarkdown('GoStudy/Captures/example.png', options);
+  if (key === 'plainCaptureNoteTemplate') return buildPlainCaptureNoteMarkdown('GoStudy/Captures/example.png', '只保存画面和评论。', options);
+  return '';
+}
+
 class GoStudySettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
     this.outputPreviewEl = null;
+    this.templatePreviewRefreshers = [];
   }
 
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    this.templatePreviewRefreshers = [];
     containerEl.createEl('h2', { text: 'Go Study' });
     containerEl.createEl('p', {
       text: '资源管理保持轻量；视频笔记增强和笔记输出格式都可以按需定制。',
@@ -234,19 +251,24 @@ class GoStudySettingsTab extends PluginSettingTab {
           });
         });
 
+      const map = containerEl.createDiv({ cls: 'go-study-hud-map' });
+      const mapHead = map.createDiv({ cls: 'go-study-hud-map-head' });
+      mapHead.createDiv({ text: '动作盘映射', cls: 'go-study-hud-map-title' });
+      mapHead.createDiv({ text: '同一方向快速连按两次可直接执行，无需再按 Enter。', cls: 'setting-item-description' });
       for (const slot of HUD_SLOT_ORDER) {
-        new Setting(containerEl)
-          .setName(`动作盘 · ${HUD_SLOT_LABELS[slot]}`)
-          .setDesc('为这个方向选择要采集的组合；最终 Markdown 仍由对应模板决定。')
-          .addDropdown((dropdown) => {
-            for (const action of Object.values(CAPTURE_ACTIONS)) dropdown.addOption(action.id, action.label);
-            dropdown.setValue(settings.actionHudSlots[slot]);
-            dropdown.setDisabled?.(!enabled);
-            dropdown.onChange(async (value) => {
-              const next = { ...currentProductSettings(this.plugin).actionHudSlots, [slot]: value };
-              await updateProductSetting(this.plugin, 'actionHudSlots', next);
-            });
-          });
+        const row = map.createDiv({ cls: 'go-study-hud-map-row' });
+        row.createSpan({ text: HUD_SLOT_LABELS[slot], cls: 'go-study-hud-map-key' });
+        const select = row.createEl('select', { cls: 'dropdown go-study-hud-map-select' });
+        for (const action of Object.values(CAPTURE_ACTIONS)) {
+          const option = select.createEl('option', { text: action.label });
+          option.value = action.id;
+        }
+        select.value = settings.actionHudSlots[slot];
+        select.disabled = !enabled;
+        select.addEventListener('change', () => {
+          const next = { ...currentProductSettings(this.plugin).actionHudSlots, [slot]: select.value };
+          void updateProductSetting(this.plugin, 'actionHudSlots', next);
+        });
       }
     }
 
@@ -445,7 +467,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('恢复默认输出格式')
-      .setDesc('恢复 Go Study 默认的时间显示和四种 Markdown 输出模板。')
+      .setDesc('恢复后，每张模板卡片右侧的实时效果会一起更新。')
       .addButton((button) => button
         .setButtonText('恢复默认')
         .onClick(async () => {
@@ -453,38 +475,62 @@ class GoStudySettingsTab extends PluginSettingTab {
           new Notice('已恢复默认笔记输出格式。');
           this.display();
         }));
-
-    containerEl.createEl('h4', { text: '实时示例' });
-    containerEl.createEl('p', {
-      text: '下面只展示最终 Markdown 文本。真实回链中的 Resource ID 与位置仍由 Go Study 自动生成。',
-      cls: 'setting-item-description'
-    });
-    this.outputPreviewEl = containerEl.createEl('pre', { cls: 'go-study-note-output-preview' });
-    this.refreshOutputPreview();
   }
 
   addTemplateSetting(containerEl, key, name, description) {
-    const settings = currentProductSettings(this.plugin);
-    new Setting(containerEl)
-      .setName(name)
-      .setDesc(description)
-      .addTextArea((text) => {
-        text.setValue(settings[key]);
-        text.setPlaceholder(DEFAULT_PRODUCT_SETTINGS[key]);
-        if (text.inputEl) text.inputEl.rows = Math.min(7, Math.max(2, settings[key].split('\n').length + 1));
-        const commit = async () => {
-          try {
-            const next = await updateProductSetting(this.plugin, key, text.getValue());
-            text.setValue(next[key]);
-            this.refreshOutputPreview();
-            new Notice(`${name}已更新。`);
-          } catch (error) {
-            text.setValue(currentProductSettings(this.plugin)[key]);
-            new Notice(commandErrorText(`${name}无效`, error), 6000);
-          }
-        };
-        text.inputEl?.addEventListener('change', () => void commit());
-      });
+    const initial = currentProductSettings(this.plugin);
+    const card = containerEl.createDiv({ cls: 'go-study-template-card' });
+    const head = card.createDiv({ cls: 'go-study-template-card-head' });
+    head.createDiv({ text: name, cls: 'go-study-template-title' });
+    head.createDiv({ text: description, cls: 'setting-item-description' });
+    const body = card.createDiv({ cls: 'go-study-template-card-body' });
+    const editorPane = body.createDiv({ cls: 'go-study-template-editor-pane' });
+    editorPane.createDiv({ text: '模板', cls: 'go-study-template-pane-label' });
+    const input = editorPane.createEl('textarea', { cls: 'go-study-template-textarea' });
+    input.value = initial[key];
+    input.placeholder = DEFAULT_PRODUCT_SETTINGS[key];
+    input.rows = Math.min(7, Math.max(3, initial[key].split('\n').length + 1));
+    const previewPane = body.createDiv({ cls: 'go-study-template-preview-pane' });
+    previewPane.createDiv({ text: '实时效果', cls: 'go-study-template-pane-label' });
+    const rendered = previewPane.createDiv({ cls: 'go-study-template-rendered' });
+    const details = previewPane.createEl('details', { cls: 'go-study-template-markdown-details' });
+    details.createEl('summary', { text: '查看最终 Markdown' });
+    const raw = details.createEl('pre', { cls: 'go-study-template-markdown' });
+
+    const refresh = async () => {
+      try {
+        const settings = { ...currentProductSettings(this.plugin), [key]: input.value };
+        const markdown = templatePreviewMarkdown(key, settings);
+        raw.textContent = markdown;
+        rendered.empty?.();
+        if (MarkdownRenderer?.render) {
+          await MarkdownRenderer.render(this.app, markdown, rendered, '', this);
+        } else {
+          rendered.textContent = markdown;
+        }
+        card.removeClass?.('is-invalid');
+      } catch (error) {
+        card.addClass?.('is-invalid');
+        rendered.empty?.();
+        rendered.setText?.(`模板暂时无效：${error instanceof Error ? error.message : String(error)}`);
+        if (!rendered.setText) rendered.textContent = `模板暂时无效：${error instanceof Error ? error.message : String(error)}`;
+        raw.textContent = input.value;
+      }
+    };
+    this.templatePreviewRefreshers.push(() => { void refresh(); });
+    input.addEventListener('input', () => { void refresh(); });
+    input.addEventListener('change', async () => {
+      try {
+        const next = await updateProductSetting(this.plugin, key, input.value);
+        input.value = next[key];
+        await refresh();
+      } catch (error) {
+        input.value = currentProductSettings(this.plugin)[key];
+        await refresh();
+        new Notice(commandErrorText(`${name}无效`, error), 6000);
+      }
+    });
+    void refresh();
   }
 
   renderDataSettings(containerEl) {

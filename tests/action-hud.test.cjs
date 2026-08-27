@@ -28,3 +28,11 @@ test('legacy actions and HUD actions share one capture-action executor', () => {
   assert.match(hotkeySource, /timeImage/);
   assert.match(hotkeySource, /commitPreparedPlainCaptureTypedNote/);
 });
+
+
+test('visible HUD supports double-pressing the same direction as direction plus Enter', () => {
+  assert.match(hotkeySource, /lastDirectionAt/);
+  assert.match(hotkeySource, /directionDoublePressMs/);
+  assert.match(hotkeySource, /selected === slot && now - lastDirectionAt <= doublePressMs/);
+  assert.match(hotkeySource, /return execute\(slot\)/);
+});

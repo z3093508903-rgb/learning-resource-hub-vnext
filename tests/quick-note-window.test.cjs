@@ -41,3 +41,14 @@ test('quick note BrowserWindow disables Node integration', () => {
   assert.match(source, /sandbox:\s*true/);
   assert.match(source, /alwaysOnTop:\s*true/);
 });
+
+
+test('quick note popup is draggable, remembers geometry and uses a subtle scrollbar', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'quick-note-window.cjs'), 'utf8');
+  assert.match(source, /-webkit-app-region:drag/);
+  assert.match(source, /::-webkit-scrollbar/);
+  assert.match(source, /quickNoteWindowGeometry/);
+  assert.match(source, /getBounds/);
+  assert.match(source, /area\.height \* 0\.36/);
+});

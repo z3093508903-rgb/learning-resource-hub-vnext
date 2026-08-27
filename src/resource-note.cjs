@@ -168,11 +168,9 @@ function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText, 
   );
   return renderOutputTemplate(template, { image, note, backlink });
 }
-function contextBacklinkTitle(context, options = {}) {
+function contextBacklinkTitle(_context, options = {}) {
   if (options.backlinkTitle) return options.backlinkTitle;
-  return context?.mode === 'freeform'
-    ? freeformMediaTitle(context.bridgeMedia || context.freeform || {})
-    : '回到课程';
+  return '回到课程';
 }
 
 function buildContextNoteMarkdown(context, noteText, options = {}) {

@@ -219,6 +219,7 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
   const temporary = [];
   let visible = false;
   let selected = '';
+  let lastDirectionAt = 0;
   let closed = false;
   let showTimer = null;
   let expiryTimer = null;
@@ -243,7 +244,11 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
 
   const chooseDirection = (slot) => {
     if (!visible) return execute(slot);
+    const now = Date.now();
+    const doublePressMs = Math.max(180, Math.min(650, Number(options.directionDoublePressMs || 420)));
+    if (selected === slot && now - lastDirectionAt <= doublePressMs) return execute(slot);
     selected = slot;
+    lastDirectionAt = now;
     void hud?.select?.(slot);
   };
 
