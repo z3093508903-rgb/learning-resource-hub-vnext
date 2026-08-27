@@ -2,7 +2,7 @@
 
 const REFERENCE_ACTION = 'go-study';
 const REFERENCE_VERSION = 1;
-const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v']);
+const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v', 'mode', 'path', 'web']);
 const ALLOWED_PROTOCOL_META_KEYS = new Set(['action']);
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 
@@ -37,10 +37,45 @@ function normalizeReferenceVersion(value) {
   return version;
 }
 
+function normalizeFreeformLocator(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 4096 || /[\x00-\x1F]/.test(raw)) throw new Error('Go Study 自由回链中的媒体地址无效。');
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
+    return url.toString();
+  } catch {
+    if (!/^[A-Za-z]:[\\/]/.test(raw) && !/^\\\\[^\\]+\\[^\\]+/.test(raw)) {
+      throw new Error('Go Study 自由回链只允许 Windows 本地路径或 HTTP(S) 地址。');
+    }
+    return raw;
+  }
+}
+
+function normalizeOptionalWebLocator(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  let url;
+  try { url = new URL(raw); } catch { throw new Error('Go Study 自由回链中的网页地址无效。'); }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Go Study 自由回链网页地址只允许 HTTP(S)。');
+  return url.toString();
+}
+
 function validateReferenceData(input) {
   const source = input && typeof input === 'object' ? input : {};
   return {
     resourceId: normalizeResourceId(source.resourceId ?? source.resource),
+    position: normalizeReferencePosition(source.position),
+    version: normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION)
+  };
+}
+
+function validateFreeformReferenceData(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  return {
+    mode: 'freeform',
+    path: normalizeFreeformLocator(source.path),
+    web: normalizeOptionalWebLocator(source.web),
     position: normalizeReferencePosition(source.position),
     version: normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION)
   };
@@ -55,17 +90,41 @@ function buildReferenceUri(input) {
   return url.toString();
 }
 
+function buildFreeformReferenceUri(input) {
+  const reference = validateFreeformReferenceData(input);
+  const url = new URL(`obsidian://${REFERENCE_ACTION}`);
+  url.searchParams.set('mode', 'freeform');
+  url.searchParams.set('path', reference.path);
+  if (reference.web) url.searchParams.set('web', reference.web);
+  url.searchParams.set('position', serializeReferencePosition(reference.position));
+  url.searchParams.set('v', String(reference.version));
+  return url.toString();
+}
+
 function parseQueryEntries(searchParams) {
   const keys = [...searchParams.keys()];
   for (const key of keys) {
     if (!ALLOWED_QUERY_KEYS.has(key)) throw new Error(`Go Study 回链包含不允许的参数：${key}。`);
     if (searchParams.getAll(key).length !== 1) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
   }
-  return {
+  if (searchParams.get('mode') === 'freeform') {
+    if (searchParams.has('resource')) throw new Error('Go Study 自由回链不能同时包含 Resource ID。');
+    return validateFreeformReferenceData({
+      mode: 'freeform',
+      path: searchParams.get('path'),
+      web: searchParams.get('web'),
+      position: searchParams.get('position'),
+      v: searchParams.get('v')
+    });
+  }
+  if (searchParams.has('mode') || searchParams.has('path') || searchParams.has('web')) {
+    throw new Error('Go Study 管理型回链包含不允许的自由回链参数。');
+  }
+  return validateReferenceData({
     resource: searchParams.get('resource'),
     position: searchParams.get('position'),
     v: searchParams.get('v')
-  };
+  });
 }
 
 function parseReferenceUri(rawUri) {
@@ -77,7 +136,7 @@ function parseReferenceUri(rawUri) {
   if ((url.pathname && url.pathname !== '/') || url.username || url.password || url.port || url.hash) {
     throw new Error('Go Study 回链包含不允许的地址结构。');
   }
-  return validateReferenceData(parseQueryEntries(url.searchParams));
+  return parseQueryEntries(url.searchParams);
 }
 
 function parseProtocolParams(params) {
@@ -94,6 +153,13 @@ function parseProtocolParams(params) {
     if (!ALLOWED_QUERY_KEYS.has(key)) throw new Error(`Go Study 回链包含不允许的参数：${key}。`);
     if (Array.isArray(source[key])) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
   }
+  if (String(source.mode || '') === 'freeform') {
+    if (source.resource != null) throw new Error('Go Study 自由回链不能同时包含 Resource ID。');
+    return validateFreeformReferenceData(source);
+  }
+  if (source.mode != null || source.path != null || source.web != null) {
+    throw new Error('Go Study 管理型回链包含不允许的自由回链参数。');
+  }
   return validateReferenceData({
     resource: source.resource,
     position: source.position,
@@ -106,12 +172,16 @@ module.exports = {
   ALLOWED_QUERY_KEYS,
   REFERENCE_ACTION,
   REFERENCE_VERSION,
+  buildFreeformReferenceUri,
   buildReferenceUri,
+  normalizeFreeformLocator,
+  normalizeOptionalWebLocator,
   normalizeReferencePosition,
   normalizeReferenceVersion,
   normalizeResourceId,
   parseProtocolParams,
   parseReferenceUri,
   serializeReferencePosition,
+  validateFreeformReferenceData,
   validateReferenceData
 };
