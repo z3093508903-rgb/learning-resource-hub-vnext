@@ -6,6 +6,7 @@ const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   videoResumeAfterSave: true,
   videoResumeAfterCancel: true,
   videoSuccessFeedback: true,
+  focusStudyNoteAtEnd: true,
   captureFolder: 'GoStudy/Captures',
   backupRetention: 10,
   timeDisplayFormat: 'smart',
@@ -46,8 +47,8 @@ function clampInteger(value, min, max, fallback) {
 
 function normalizeCaptureFolder(value) {
   const raw = String(value ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!raw) return '';
   const parts = raw.split('/').filter(Boolean);
-  if (!parts.length) return DEFAULT_PRODUCT_SETTINGS.captureFolder;
   if (parts.some((part) => part === '.' || part === '..' || /[<>:"|?*\x00-\x1F]/.test(part))) {
     throw new Error('截图目录必须是 Vault 内的安全相对路径。');
   }
@@ -86,13 +87,18 @@ function safeOutputTemplate(key, value) {
 function currentProductSettings(plugin) {
   const ui = plugin?.state?.uiState || {};
   let captureFolder = DEFAULT_PRODUCT_SETTINGS.captureFolder;
-  try { captureFolder = normalizeCaptureFolder(ui.captureFolder || captureFolder); } catch {}
+  try {
+    captureFolder = Object.prototype.hasOwnProperty.call(ui, 'captureFolder')
+      ? normalizeCaptureFolder(ui.captureFolder)
+      : DEFAULT_PRODUCT_SETTINGS.captureFolder;
+  } catch {}
   return {
     autoCollapseSidebar: boolOr(ui.autoCollapseSidebar, DEFAULT_PRODUCT_SETTINGS.autoCollapseSidebar),
     videoEnhancementEnabled: boolOr(ui.videoEnhancementEnabled, DEFAULT_PRODUCT_SETTINGS.videoEnhancementEnabled),
     videoResumeAfterSave: boolOr(ui.videoResumeAfterSave, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterSave),
     videoResumeAfterCancel: boolOr(ui.videoResumeAfterCancel, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterCancel),
     videoSuccessFeedback: boolOr(ui.videoSuccessFeedback, DEFAULT_PRODUCT_SETTINGS.videoSuccessFeedback),
+    focusStudyNoteAtEnd: boolOr(ui.focusStudyNoteAtEnd, DEFAULT_PRODUCT_SETTINGS.focusStudyNoteAtEnd),
     captureFolder,
     backupRetention: clampInteger(ui.backupRetention, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention),
     timeDisplayFormat: normalizeTimeDisplayFormat(ui.timeDisplayFormat),
