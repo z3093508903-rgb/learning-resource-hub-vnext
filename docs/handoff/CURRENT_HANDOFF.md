@@ -42,7 +42,7 @@
 - Dynamic upgrade：先 exact Managed match，再尝试唯一文件名匹配
 - Cross-platform：协议格式跨平台；本地绝对路径跨设备恢复仍需要 Managed match 或未来 Path Mapping
 - Automation：293 tests PASS；release:check PASS；main.js consistency PASS；Preview package/release verification PASS
-- Manual Acceptance：PENDING
+- Manual Acceptance：Windows 核心链路 PASS；macOS / cross-device path PENDING
 
 ## beta.16 validation candidate
 
@@ -59,6 +59,12 @@
 项目记忆 v1 已上传到 `origin/docs/project-memory-v1`，基于开发 HEAD `ec854a9`，当前尚未合入 beta.15 开发基线。该文档分支自身 HEAD 为动态状态，接手时应通过 Git / GitHub 实时核对，而不是依赖文档中的固定 SHA。
 
 ## What changed in the latest acceptance
+
+- beta.17 Windows 实机测试通过：新 Freeform reopen、收录后动态 Managed upgrade、旧链接兼容均可用；
+- Managed Resource 回链未退化；
+- Freeform 可见标题仍存在乱码显示问题，需要在 beta.17 polish 中修；
+- 跨平台本地绝对路径映射明确延期，不阻塞当前 Windows 收尾；
+- 下一阶段先做交互小优化，再进入 beta.18“笔记小窗 / Companion Note Window”。
 
 - 真人复现 Freeform 回链 `Vault not found`；
 - 根因定位到 `obsidian://go-study?...&path=...` 与 Obsidian 保留路由参数冲突；
@@ -89,7 +95,9 @@
 
 ## Next action
 
-安装 beta.17 并依次验收：新 Freeform `jv://` → 旧 beta.15 Freeform 兼容 → Managed Resource 回归。三项通过后再确认协议与更新 ADR；不要继续加大型功能。
+先完成 beta.17 polish：HUD 双击方向执行、笔记弹窗位置记忆与 UI、模板编辑实时预览和设置页信息层级。
+
+随后准备 beta.18“Companion Note Window”设计，不要直接扩成完整 Study Workspace。
 
 ## Do not change silently
 
