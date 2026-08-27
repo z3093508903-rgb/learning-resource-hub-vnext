@@ -73,7 +73,7 @@ jobs:
             'buildFreeformReferenceUri',
             'openFreeformReference',
             'installFreeformBrowserModifier',
-            'Ctrl',
+            'ctrlKey',
             'plainNoteTemplate',
             'plainCaptureNoteTemplate',
             'focusStudyNoteAtEnd',
