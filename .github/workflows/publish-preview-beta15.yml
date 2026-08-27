@@ -1,0 +1,168 @@
+name: Preview Release Runner beta.15
+
+on:
+  pull_request:
+    branches:
+      - preview-release-runner
+
+permissions:
+  contents: read
+
+jobs:
+  publish-preview:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'preview/go-study-0.3.0-beta.15'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.15
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.15
+    steps:
+      - name: Checkout preview head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Verify source, build and tests
+        run: npm run check && npm run build && npm test
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Isolated Go Study preview build for Universal Capture acceptance.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error(`Expected view type not found: ${oldView}`);
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const previewBundle = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          if (!previewBundle.includes(newView) || previewBundle.includes(oldView)) throw new Error('Preview view isolation failed.');
+          for (const required of [
+            'ProjectNoteBoxModal',
+            'StudyNotePickerModal',
+            '项目笔记盒',
+            '项目笔记文件夹',
+            'go-study-folder-breadcrumbs',
+            '搜索任意层级文件夹',
+            'Action HUD',
+            'Alt+S',
+            'freeformVideoNotesEnabled',
+            'actionHudSlots',
+            'buildFreeformReferenceUri',
+            'mode=freeform',
+            'installFreeformBrowserModifier',
+            'Ctrl',
+            'plainNoteTemplate',
+            'plainCaptureNoteTemplate',
+            'focusStudyNoteAtEnd',
+            'getAvailablePathForAttachment'
+          ]) {
+            if (!previewBundle.includes(required)) throw new Error(`Project Note Box marker missing: ${required}`);
+          }
+          if (previewBundle.includes('registerCompanionEventPoller')) throw new Error('beta.15 normal runtime must not restore Companion polling.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.15
+
+          Universal Capture acceptance build: hierarchical project-note folders, configurable Action HUD, and managed/freeform PotPlayer notes.
+
+          ## Acceptance A · Folder Picker v2
+          1. Open a project note box and choose **设置项目默认**.
+          2. Enter a first-level folder, then continue into second/third-level folders.
+          3. Breadcrumbs should let you jump back to any parent.
+          4. Search should match the full Vault folder path.
+          5. Choose a deep folder, create a note, and confirm it lands there.
+          6. Use the per-create **位置** button once and confirm the project default remains unchanged.
+
+          ## Acceptance B · Action HUD
+          1. In Go Study settings, enable video enhancement and use **混合** or **仅动作盘**.
+          2. Default master shortcut is **Alt+S**.
+          3. Tap Alt+S and pause about 300 ms: the five-slot HUD should appear without stealing PotPlayer focus.
+          4. Use ↑↓←→ to select and Enter to execute; Esc cancels.
+          5. Press Alt+S and immediately press a direction before the HUD appears: the action should execute directly.
+          6. Change at least two direction recipes in settings and confirm the new actions persist after restart.
+          7. Test **纯笔记**: it must insert note text without a timestamp/backlink.
+          8. Test **截图 + 评论** without time: it must insert image + note without a timestamp/backlink.
+          9. Legacy Alt+1–Alt+4 should still work in **混合** mode.
+
+          ## Acceptance C · Universal / Freeform
+          1. Open a Markdown note manually, put the cursor where you want it, and open a video directly in PotPlayer without using Go Study.
+          2. With **未收录视频也启用增强** on, Alt+S actions should work.
+          3. If that media matches an already stored Go Study Resource, the generated link should be the durable managed Resource link.
+          4. If it does not match any Resource, Go Study should generate a **Freeform** obsidian://go-study link carrying the current media locator + time.
+          5. Ordinary click on a Freeform link is a compatibility experiment: it should follow the existing jv:// PotPlayer jump path on machines where that old protocol is still registered.
+          6. For a Freeform web-video link, Ctrl+click should attempt to open the browser URL instead of PotPlayer. Test both Reading View and Live Preview because Obsidian click handling differs by mode.
+          7. Add the same freeform media to Go Study later, then click the old Freeform link again. Go Study should prefer the matching managed Resource resolver when it can identify it.
+
+          ## Important beta.15 boundary
+          Freeform link capture/generation is native to Go Study, but opening an unmatched Freeform link still uses the existing jv:// compatibility jump path in this preview. This is intentional for A/B validation against the old AHK experience; it is not yet the final one-product launch implementation.
+          EOFF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish GitHub prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          NOTES='Go Study Preview beta.15 adds Universal Capture: a configurable Alt+S action HUD, no-timestamp note actions, deep project-note folder browsing, and managed/freeform PotPlayer note capture. Freeform link opening intentionally keeps the old jv:// compatibility jump path for this validation build.'
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md" --clobber
+          else
+            gh release create "$RELEASE_TAG" \
+              --target "${{ github.event.pull_request.head.sha }}" \
+              --title "Go Study Preview ${PREVIEW_VERSION}" \
+              --notes "$NOTES" --prerelease \
+              "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+              "dist-preview/go-study-preview/main.js" \
+              "dist-preview/go-study-preview/manifest.json" \
+              "dist-preview/go-study-preview/styles.css" \
+              "dist-preview/go-study-preview/TESTING.md"
+          fi
+
+      - name: Verify published prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isPrerelease,url,assets > release.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const release = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+          if (release.tagName !== process.env.RELEASE_TAG) throw new Error('Release tag mismatch.');
+          if (!release.isPrerelease) throw new Error('Release must be prerelease.');
+          const names = new Set((release.assets || []).map((asset) => asset.name));
+          for (const required of [`go-study-preview-${process.env.PREVIEW_VERSION}.zip`, 'main.js', 'manifest.json', 'styles.css', 'TESTING.md']) {
+            if (!names.has(required)) throw new Error(`Missing asset: ${required}`);
+          }
+          NODE
