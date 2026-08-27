@@ -119,6 +119,30 @@ function normalizeCaptureImage(vaultImagePath) {
   if (!imagePath || imagePath.includes('..')) throw new Error('截图 Vault 路径无效。');
   return `![[${imagePath}]]`;
 }
+function buildPlainNoteMarkdown(noteText, options = {}) {
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const template = normalizeOutputTemplate('plainNoteTemplate', options.plainNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainNoteTemplate);
+  return renderOutputTemplate(template, { note });
+}
+
+function buildPlainCaptureMarkdown(vaultImagePath, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const template = normalizeOutputTemplate('plainCaptureTemplate', options.plainCaptureTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainCaptureTemplate);
+  return renderOutputTemplate(template, { image });
+}
+
+function buildPlainCaptureNoteMarkdown(vaultImagePath, noteText, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const template = normalizeOutputTemplate(
+    'plainCaptureNoteTemplate',
+    options.plainCaptureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainCaptureNoteTemplate
+  );
+  return renderOutputTemplate(template, { image, note });
+}
+
 
 function buildCaptureMarkdown(resource, position, vaultImagePath, options = {}) {
   const image = normalizeCaptureImage(vaultImagePath);
@@ -212,6 +236,9 @@ module.exports = {
   buildNotePositionMarkdown,
   buildPositionMarkdown,
   buildFreeformPositionMarkdown,
+  buildPlainCaptureMarkdown,
+  buildPlainCaptureNoteMarkdown,
+  buildPlainNoteMarkdown,
   captureFileName,
   freeformMediaTitle,
   freeformWebLocator,
