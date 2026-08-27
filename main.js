@@ -271,6 +271,523 @@ module.exports = {
 };
 
 },
+"companion-note-window.cjs": (module, exports, require) => {
+'use strict';
+
+function resolveRemote(options = {}) {
+  if (options.remote) return options.remote;
+  try { return require('@electron/remote'); } catch { return null; }
+}
+
+const { projectIdForResource, recentProjectNote } = __rhLoad("project-notes.cjs");
+
+const DEFAULT_LAYOUT_ID = 'right-rail';
+const BUILTIN_LAYOUTS = Object.freeze({
+  'right-rail': Object.freeze({
+    id: 'right-rail',
+    name: '播放器右侧栏',
+    widthRatio: 0.20,
+    minWidth: 300,
+    maxWidth: 380,
+    heightRatio: 0.88,
+    scale: 0.82
+  }),
+  'right-half': Object.freeze({
+    id: 'right-half',
+    name: '右侧半高',
+    widthRatio: 0.23,
+    minWidth: 320,
+    maxWidth: 430,
+    heightRatio: 0.58,
+    scale: 0.88
+  })
+});
+
+function clampNumber(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function normalizeCompanionScale(value) {
+  return Math.round(clampNumber(value, 0.6, 1.2, 0.82) * 100) / 100;
+}
+
+function objectOr(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function ensureCompanionWindowState(plugin) {
+  if (!plugin?.state) throw new Error('Go Study 状态不可用。');
+  plugin.state.uiState ||= {};
+  const raw = objectOr(plugin.state.uiState.companionNoteWindow);
+  const customLayouts = Array.isArray(raw.customLayouts)
+    ? raw.customLayouts
+      .filter((item) => item && typeof item === 'object' && String(item.id || '').startsWith('custom-'))
+      .map((item) => ({
+        id: String(item.id),
+        name: String(item.name || '自定义布局'),
+        geometry: normalizeStoredGeometry(item.geometry),
+        scale: normalizeCompanionScale(item.scale)
+      }))
+      .filter((item) => item.geometry)
+    : [];
+  const next = {
+    notePath: String(raw.notePath || ''),
+    locked: raw.locked !== false,
+    scale: normalizeCompanionScale(raw.scale),
+    activeLayoutId: String(raw.activeLayoutId || DEFAULT_LAYOUT_ID),
+    lastGeometry: normalizeStoredGeometry(raw.lastGeometry),
+    customLayouts
+  };
+  Object.assign(raw, next);
+  plugin.state.uiState.companionNoteWindow = raw;
+  return raw;
+}
+
+function companionWindowState(plugin) {
+  return ensureCompanionWindowState(plugin);
+}
+
+function normalizeStoredGeometry(value) {
+  const raw = objectOr(value);
+  const width = Number(raw.width);
+  const height = Number(raw.height);
+  const x = Number(raw.x);
+  const y = Number(raw.y);
+  if (![width, height, x, y].every(Number.isFinite)) return null;
+  if (width < 180 || height < 220) return null;
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height)
+  };
+}
+
+function fallbackWorkArea() {
+  const screenObj = globalThis.screen;
+  return {
+    x: 0,
+    y: 0,
+    width: Math.max(800, Number(screenObj?.availWidth || 1600)),
+    height: Math.max(600, Number(screenObj?.availHeight || 900))
+  };
+}
+
+function activeWorkArea(options = {}) {
+  if (options.workArea) return { ...options.workArea };
+  const remote = options.remote || resolveRemote(options);
+  const screenApi = options.screen || remote?.screen;
+  try {
+    const point = screenApi?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+    return screenApi?.getDisplayNearestPoint?.(point)?.workArea || fallbackWorkArea();
+  } catch {
+    return fallbackWorkArea();
+  }
+}
+
+function clampGeometry(rawGeometry, workArea) {
+  const area = workArea || fallbackWorkArea();
+  const raw = normalizeStoredGeometry(rawGeometry) || {};
+  const width = Math.round(clampNumber(raw.width, 260, Math.max(260, area.width), Math.min(340, area.width)));
+  const height = Math.round(clampNumber(raw.height, 320, Math.max(320, area.height), Math.min(720, area.height)));
+  const x = Math.round(clampNumber(raw.x, area.x, area.x + area.width - width, area.x + area.width - width - 10));
+  const y = Math.round(clampNumber(raw.y, area.y, area.y + area.height - height, area.y + Math.max(8, (area.height - height) / 2)));
+  return { x, y, width, height };
+}
+
+function builtinGeometry(layout, workArea) {
+  const area = workArea || fallbackWorkArea();
+  const width = Math.round(clampNumber(area.width * layout.widthRatio, layout.minWidth, Math.min(layout.maxWidth, area.width), layout.minWidth));
+  const height = Math.round(clampNumber(area.height * layout.heightRatio, 360, Math.max(360, area.height - 8), Math.min(720, area.height)));
+  return clampGeometry({
+    x: area.x + area.width - width - 8,
+    y: area.y + Math.max(4, (area.height - height) / 2),
+    width,
+    height
+  }, area);
+}
+
+function listCompanionLayouts(plugin, options = {}) {
+  const state = companionWindowState(plugin);
+  const area = activeWorkArea(options);
+  const builtins = Object.values(BUILTIN_LAYOUTS).map((layout) => ({
+    id: layout.id,
+    name: layout.name,
+    geometry: builtinGeometry(layout, area),
+    scale: layout.scale,
+    builtin: true
+  }));
+  return [...builtins, ...state.customLayouts.map((layout) => ({ ...layout, builtin: false }))];
+}
+
+function resolveLayout(plugin, layoutId, options = {}) {
+  const layouts = listCompanionLayouts(plugin, options);
+  return layouts.find((layout) => layout.id === layoutId)
+    || layouts.find((layout) => layout.id === DEFAULT_LAYOUT_ID)
+    || layouts[0];
+}
+
+function currentCompanionWindow(plugin) {
+  return plugin?._goStudyCompanionWindow || null;
+}
+
+function currentWindowGeometry(plugin) {
+  const session = currentCompanionWindow(plugin);
+  const win = session?.win;
+  if (!win || win.closed) return null;
+  try {
+    return normalizeStoredGeometry({
+      x: Number(win.screenX),
+      y: Number(win.screenY),
+      width: Number(win.outerWidth),
+      height: Number(win.outerHeight)
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function persistCompanionState(plugin) {
+  await plugin?.persist?.();
+}
+
+function activeMarkdownPath(plugin) {
+  const workspace = plugin?.app?.workspace;
+  const active = workspace?.activeEditor;
+  const file = active?.file || workspace?.getActiveFile?.();
+  if (!file || String(file.extension || '').toLowerCase() !== 'md') return '';
+  return String(file.path || '');
+}
+
+function recentStudyNotePath(plugin) {
+  const resourceId = String(plugin?.activeMediaSession?.resourceId || '');
+  if (!resourceId) return '';
+  try {
+    const projectId = projectIdForResource(plugin.state, resourceId);
+    return String(recentProjectNote(plugin.state, projectId)?.path || '');
+  } catch {
+    return '';
+  }
+}
+
+function resolveCompanionNotePath(plugin, options = {}) {
+  const state = companionWindowState(plugin);
+  const explicit = String(options.filePath || '');
+  if (explicit) return explicit;
+  if (options.preferSaved && state.notePath) return state.notePath;
+  return activeMarkdownPath(plugin)
+    || state.notePath
+    || recentStudyNotePath(plugin);
+}
+
+function resolveMarkdownFile(plugin, path) {
+  const normalized = String(path || '');
+  if (!normalized) return null;
+  const file = plugin?.app?.vault?.getAbstractFileByPath?.(normalized);
+  if (!file || Array.isArray(file.children) || String(file.extension || '').toLowerCase() !== 'md') return null;
+  return file;
+}
+
+async function loadedMarkdownView(leaf, timeoutMs = 2500) {
+  const deadline = Date.now() + Math.max(300, Number(timeoutMs || 2500));
+  while (Date.now() < deadline) {
+    try { await leaf?.loadIfDeferred?.(); } catch {}
+    const view = leaf?.view;
+    if (view?.editor && view?.file) return view;
+    await new Promise((resolve) => setTimeout(resolve, 40));
+  }
+  return leaf?.view || null;
+}
+
+function leafWindow(leaf) {
+  const el = leaf?.view?.containerEl || leaf?.containerEl;
+  return el?.win || el?.ownerDocument?.defaultView || el?.doc?.defaultView || null;
+}
+
+function applyCompanionChrome(win, scale) {
+  const doc = win?.document;
+  if (!doc?.body) return false;
+  doc.documentElement?.classList?.add('go-study-companion-document');
+  doc.body.classList.add('go-study-companion-window');
+  doc.documentElement?.style?.setProperty('--go-study-companion-scale', String(normalizeCompanionScale(scale)));
+  return true;
+}
+
+function applyGeometry(win, geometry) {
+  if (!win || !geometry) return false;
+  try {
+    win.resizeTo?.(geometry.width, geometry.height);
+    win.moveTo?.(geometry.x, geometry.y);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function detachCompanionTarget(plugin) {
+  if (!plugin) return;
+  plugin._goStudyCompanionTarget = null;
+}
+
+function cleanupCompanionSession(plugin, session, options = {}) {
+  if (!session || session.cleaned) return;
+  session.cleaned = true;
+  try { if (session.timer) session.win?.clearInterval?.(session.timer); } catch {}
+  try { session.win?.removeEventListener?.('resize', session.captureGeometry); } catch {}
+  try { session.win?.removeEventListener?.('beforeunload', session.beforeUnload); } catch {}
+  const finalGeometry = currentWindowGeometry(plugin);
+  if (finalGeometry && plugin?.state) {
+    const state = companionWindowState(plugin);
+    state.lastGeometry = finalGeometry;
+  }
+  if (plugin?._goStudyCompanionWindow === session) plugin._goStudyCompanionWindow = null;
+  if (plugin?._goStudyCompanionTarget?.leaf === session.leaf) detachCompanionTarget(plugin);
+  if (options.persist !== false && plugin?.state) void persistCompanionState(plugin).catch(() => {});
+}
+
+function installGeometryTracking(plugin, session) {
+  const win = session.win;
+  if (!win) return;
+  let last = currentWindowGeometry(plugin);
+  let dirty = false;
+  let persistTimer = null;
+  const flush = () => {
+    if (!dirty || !plugin?.state) return;
+    dirty = false;
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = null;
+    void persistCompanionState(plugin).catch(() => {});
+  };
+  const captureGeometry = () => {
+    const geometry = currentWindowGeometry(plugin);
+    if (!geometry) return;
+    const same = last && ['x','y','width','height'].every((key) => geometry[key] === last[key]);
+    if (same) return;
+    last = geometry;
+    const state = companionWindowState(plugin);
+    state.lastGeometry = geometry;
+    dirty = true;
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(flush, 450);
+  };
+  const beforeUnload = () => {
+    captureGeometry();
+    flush();
+    cleanupCompanionSession(plugin, session, { persist: true });
+  };
+  session.captureGeometry = captureGeometry;
+  session.beforeUnload = beforeUnload;
+  win.addEventListener?.('resize', captureGeometry);
+  win.addEventListener?.('beforeunload', beforeUnload);
+  session.timer = win.setInterval?.(captureGeometry, 800);
+}
+
+async function closeCompanionNoteWindow(plugin, options = {}) {
+  const session = currentCompanionWindow(plugin);
+  if (!session) return false;
+  cleanupCompanionSession(plugin, session, { persist: options.persist !== false });
+  try { session.leaf?.detach?.(); } catch {
+    try { session.win?.close?.(); } catch {}
+  }
+  return true;
+}
+
+async function openCompanionNoteWindow(plugin, options = {}) {
+  const workspace = plugin?.app?.workspace;
+  if (!workspace?.getLeaf) throw new Error('当前 Obsidian Workspace 不可用。');
+  const state = companionWindowState(plugin);
+  const path = resolveCompanionNotePath(plugin, options);
+  const file = resolveMarkdownFile(plugin, path);
+  if (!file) throw new Error('请先打开一篇可编辑的 Markdown 笔记，或先恢复上次的小窗笔记。');
+
+  await closeCompanionNoteWindow(plugin, { persist: true });
+
+  let leaf = null;
+  try { leaf = workspace.getLeaf('window'); }
+  catch {}
+  if (!leaf || typeof leaf.openFile !== 'function') {
+    throw new Error('当前 Obsidian 桌面版无法创建独立笔记窗口。');
+  }
+
+  await leaf.openFile(file, { active: true });
+  try { await workspace.revealLeaf?.(leaf); } catch {}
+  const view = await loadedMarkdownView(leaf, options.loadTimeoutMs);
+  if (!view?.editor) {
+    try { leaf.detach?.(); } catch {}
+    throw new Error('学习笔记小窗没有加载出可编辑 Markdown Editor。');
+  }
+  const win = leafWindow(leaf);
+  if (!win) {
+    try { leaf.detach?.(); } catch {}
+    throw new Error('无法取得学习笔记小窗的 Window。');
+  }
+
+  state.notePath = file.path;
+  state.locked = options.locked == null ? state.locked : Boolean(options.locked);
+  const layout = resolveLayout(plugin, options.layoutId || state.activeLayoutId, options);
+  state.activeLayoutId = layout.id;
+  const scale = normalizeCompanionScale(options.scale ?? state.scale ?? layout.scale);
+  state.scale = scale;
+  const area = activeWorkArea(options);
+  const geometry = clampGeometry(
+    options.geometry || (options.forceLayout ? layout.geometry : state.lastGeometry) || layout.geometry,
+    area
+  );
+  state.lastGeometry = geometry;
+
+  applyCompanionChrome(win, scale);
+  applyGeometry(win, geometry);
+  try { win.focus?.(); } catch {}
+
+  const session = { leaf, win, filePath: file.path, cleaned: false, timer: null };
+  plugin._goStudyCompanionWindow = session;
+  plugin._goStudyCompanionTarget = {
+    editor: view.editor,
+    filePath: file.path,
+    leaf,
+    locked: state.locked,
+    openedAt: Date.now()
+  };
+  installGeometryTracking(plugin, session);
+  await persistCompanionState(plugin);
+  return { leaf, win, file, editor: view.editor, geometry, scale, locked: state.locked, layoutId: state.activeLayoutId };
+}
+
+async function setCompanionLocked(plugin, value) {
+  const state = companionWindowState(plugin);
+  state.locked = Boolean(value);
+  if (plugin?._goStudyCompanionTarget) plugin._goStudyCompanionTarget.locked = state.locked;
+  await persistCompanionState(plugin);
+  return state.locked;
+}
+
+async function setCompanionScale(plugin, value) {
+  const state = companionWindowState(plugin);
+  state.scale = normalizeCompanionScale(value);
+  const session = currentCompanionWindow(plugin);
+  if (session?.win) applyCompanionChrome(session.win, state.scale);
+  await persistCompanionState(plugin);
+  return state.scale;
+}
+
+async function applyCompanionLayout(plugin, layoutId, options = {}) {
+  const state = companionWindowState(plugin);
+  const layout = resolveLayout(plugin, layoutId, options);
+  if (!layout) throw new Error('找不到学习小窗布局。');
+  state.activeLayoutId = layout.id;
+  state.scale = normalizeCompanionScale(layout.scale ?? state.scale);
+  const geometry = clampGeometry(layout.geometry, activeWorkArea(options));
+  state.lastGeometry = geometry;
+  const session = currentCompanionWindow(plugin);
+  if (session?.win) {
+    applyCompanionChrome(session.win, state.scale);
+    applyGeometry(session.win, geometry);
+  }
+  await persistCompanionState(plugin);
+  return { ...layout, geometry, scale: state.scale };
+}
+
+async function saveCurrentCompanionLayout(plugin, name = '') {
+  const geometry = currentWindowGeometry(plugin) || companionWindowState(plugin).lastGeometry;
+  if (!geometry) throw new Error('请先打开并调整学习笔记小窗，再保存布局。');
+  const state = companionWindowState(plugin);
+  const index = state.customLayouts.length + 1;
+  const id = `custom-${Date.now().toString(36)}-${index}`;
+  const layout = {
+    id,
+    name: String(name || `自定义布局 ${index}`).trim().slice(0, 60) || `自定义布局 ${index}`,
+    geometry,
+    scale: state.scale
+  };
+  state.customLayouts.push(layout);
+  state.activeLayoutId = id;
+  state.lastGeometry = geometry;
+  await persistCompanionState(plugin);
+  return layout;
+}
+
+function companionStatusText(plugin) {
+  const state = companionWindowState(plugin);
+  const open = Boolean(currentCompanionWindow(plugin)?.win && !currentCompanionWindow(plugin).win.closed);
+  const name = state.notePath ? state.notePath.split('/').pop()?.replace(/\.md$/i, '') : '未选择笔记';
+  return `${open ? '已打开' : '未打开'} · ${name} · ${state.locked ? '已锁定 Capture' : '未锁定'} · 缩放 ${Math.round(state.scale * 100)}%`;
+}
+
+function registerCompanionNoteCommands(plugin) {
+  plugin.addCommand?.({
+    id: 'open-current-note-in-companion-window',
+    name: '在学习笔记小窗中打开当前笔记',
+    checkCallback: (checking) => {
+      const path = activeMarkdownPath(plugin);
+      if (!path) return false;
+      if (!checking) void openCompanionNoteWindow(plugin, { filePath: path }).catch((error) => {
+        console.error('Go Study companion note window failed.', error);
+      });
+      return true;
+    }
+  });
+  plugin.addCommand?.({
+    id: 'restore-companion-note-window',
+    name: '恢复上次学习笔记小窗',
+    checkCallback: (checking) => {
+      const path = companionWindowState(plugin).notePath;
+      if (!path || !resolveMarkdownFile(plugin, path)) return false;
+      if (!checking) void openCompanionNoteWindow(plugin, { preferSaved: true }).catch((error) => {
+        console.error('Go Study companion note restore failed.', error);
+      });
+      return true;
+    }
+  });
+  plugin.addCommand?.({
+    id: 'toggle-companion-note-lock',
+    name: '切换学习笔记小窗 Capture 锁定',
+    callback: () => void setCompanionLocked(plugin, !companionWindowState(plugin).locked)
+  });
+  plugin.addCommand?.({
+    id: 'save-companion-note-layout',
+    name: '保存当前学习笔记小窗布局',
+    checkCallback: (checking) => {
+      if (!currentWindowGeometry(plugin)) return false;
+      if (!checking) void saveCurrentCompanionLayout(plugin);
+      return true;
+    }
+  });
+  plugin.register?.(() => { void closeCompanionNoteWindow(plugin, { persist: true }); });
+  return true;
+}
+
+module.exports = {
+  BUILTIN_LAYOUTS,
+  DEFAULT_LAYOUT_ID,
+  activeMarkdownPath,
+  activeWorkArea,
+  applyCompanionChrome,
+  applyCompanionLayout,
+  applyGeometry,
+  builtinGeometry,
+  clampGeometry,
+  closeCompanionNoteWindow,
+  companionStatusText,
+  companionWindowState,
+  currentCompanionWindow,
+  currentWindowGeometry,
+  ensureCompanionWindowState,
+  leafWindow,
+  listCompanionLayouts,
+  normalizeCompanionScale,
+  normalizeStoredGeometry,
+  openCompanionNoteWindow,
+  registerCompanionNoteCommands,
+  resolveCompanionNotePath,
+  resolveLayout,
+  saveCurrentCompanionLayout,
+  setCompanionLocked,
+  setCompanionScale
+};
+
+},
 "entry.cjs": (module, exports, require) => {
 'use strict';
 
@@ -1006,6 +1523,7 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
   const temporary = [];
   let visible = false;
   let selected = '';
+  let lastDirectionAt = 0;
   let closed = false;
   let showTimer = null;
   let expiryTimer = null;
@@ -1030,7 +1548,11 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
 
   const chooseDirection = (slot) => {
     if (!visible) return execute(slot);
+    const now = Date.now();
+    const doublePressMs = Math.max(180, Math.min(650, Number(options.directionDoublePressMs || 420)));
+    if (selected === slot && now - lastDirectionAt <= doublePressMs) return execute(slot);
     selected = slot;
+    lastDirectionAt = now;
     void hud?.select?.(slot);
   };
 
@@ -8375,8 +8897,30 @@ function targetLeaf(workspace, target) {
   }) || null;
 }
 
+function resolveCompanionNoteTarget(plugin) {
+  const workspace = plugin?.app?.workspace;
+  const target = plugin?._goStudyCompanionTarget;
+  if (!target?.locked || !target.filePath || !isEditableMarkdownEditor(target.editor)) return null;
+  const leaf = target.leaf;
+  const view = leaf?.view;
+  const valid = String(view?.file?.path || '') === target.filePath
+    && view?.editor === target.editor
+    && isEditableMarkdownEditor(view.editor);
+  if (!valid) {
+    plugin._goStudyCompanionTarget = null;
+    return null;
+  }
+  return {
+    editor: target.editor,
+    filePath: target.filePath,
+    source: 'companion'
+  };
+}
+
 function resolveRememberedNoteTarget(plugin) {
   const workspace = plugin?.app?.workspace;
+  const companion = resolveCompanionNoteTarget(plugin);
+  if (companion) return companion;
   const active = workspace?.activeEditor;
   if (isEditableMarkdownEditor(active?.editor) && normalizeFilePath(active?.file || workspace?.getActiveFile?.())) {
     rememberNoteTarget(plugin, active.editor, active.file || workspace.getActiveFile?.());
@@ -8439,6 +8983,7 @@ module.exports = {
   normalizeFilePath,
   registerRememberedNoteTarget,
   rememberNoteTarget,
+  resolveCompanionNoteTarget,
   resolveRememberedNoteTarget,
   targetLeaf
 };
@@ -8685,6 +9230,7 @@ module.exports = {
 'use strict';
 
 const {
+  MarkdownRenderer,
   Notice,
   PluginSettingTab = class {},
   Setting = class {}
@@ -8703,6 +9249,16 @@ const {
   updateImmersiveShortcut
 } = __rhLoad("immersive-hotkeys.cjs");
 const { immersiveShortcuts } = __rhLoad("native-potplayer.cjs");
+const {
+  applyCompanionLayout,
+  companionStatusText,
+  companionWindowState,
+  listCompanionLayouts,
+  openCompanionNoteWindow,
+  saveCurrentCompanionLayout,
+  setCompanionLocked,
+  setCompanionScale
+} = __rhLoad("companion-note-window.cjs");
 const {
   DEFAULT_PRODUCT_SETTINGS,
   currentProductSettings,
@@ -8768,16 +9324,32 @@ function noteOutputPreview(settings) {
   ].join('\n\n');
 }
 
+function templatePreviewMarkdown(key, settings) {
+  const resource = { id: 'preview-resource', title: '高等数学' };
+  const position = { type: 'time', seconds: 754 };
+  const options = noteOutputOptions(settings);
+  if (key === 'backlinkTemplate') return buildPositionMarkdown(resource, position, options);
+  if (key === 'noteTemplate') return buildNotePositionMarkdown(resource, position, '这里老师讲的是极限存在的必要条件。', options);
+  if (key === 'captureTemplate') return buildCaptureMarkdown(resource, position, 'GoStudy/Captures/example.png', options);
+  if (key === 'captureNoteTemplate') return buildCaptureNoteMarkdown(resource, position, 'GoStudy/Captures/example.png', '这一帧的公式需要重新推导一次。', options);
+  if (key === 'plainNoteTemplate') return buildPlainNoteMarkdown('这是不带时间戳的随手记录。', options);
+  if (key === 'plainCaptureTemplate') return buildPlainCaptureMarkdown('GoStudy/Captures/example.png', options);
+  if (key === 'plainCaptureNoteTemplate') return buildPlainCaptureNoteMarkdown('GoStudy/Captures/example.png', '只保存画面和评论。', options);
+  return '';
+}
+
 class GoStudySettingsTab extends PluginSettingTab {
   constructor(app, plugin) {
     super(app, plugin);
     this.plugin = plugin;
     this.outputPreviewEl = null;
+    this.templatePreviewRefreshers = [];
   }
 
   display() {
     const { containerEl } = this;
     containerEl.empty();
+    this.templatePreviewRefreshers = [];
     containerEl.createEl('h2', { text: 'Go Study' });
     containerEl.createEl('p', {
       text: '资源管理保持轻量；视频笔记增强和笔记输出格式都可以按需定制。',
@@ -8785,6 +9357,7 @@ class GoStudySettingsTab extends PluginSettingTab {
     });
 
     this.renderWorkbenchSettings(containerEl);
+    this.renderCompanionWindowSettings(containerEl);
     this.renderVideoSettings(containerEl);
     this.renderNoteOutputSettings(containerEl);
     this.renderDataSettings(containerEl);
@@ -8832,6 +9405,109 @@ class GoStudySettingsTab extends PluginSettingTab {
         .setValue(settings.focusStudyNoteAtEnd)
         .onChange(async (value) => {
           await updateProductSetting(this.plugin, 'focusStudyNoteAtEnd', value);
+        }));
+  }
+
+  renderCompanionWindowSettings(containerEl) {
+    const state = companionWindowState(this.plugin);
+    const layouts = listCompanionLayouts(this.plugin);
+    section(
+      containerEl,
+      '学习笔记小窗',
+      '把真实 Markdown 笔记弹成一个极简窄窗，适合覆盖播放器右侧栏；窗口位置、尺寸和缩放会保留。'
+    );
+
+    const status = new Setting(containerEl)
+      .setName('当前小窗')
+      .setDesc(companionStatusText(this.plugin));
+    status.addButton((button) => button
+      .setButtonText('打开当前笔记')
+      .onClick(async () => {
+        button.setDisabled(true);
+        try {
+          await openCompanionNoteWindow(this.plugin, {
+            filePath: String(this.app.workspace?.getActiveFile?.()?.path || '')
+          });
+          new Notice('学习笔记小窗已打开。');
+        } catch (error) {
+          new Notice(commandErrorText('打开学习笔记小窗失败', error), 6000);
+        } finally {
+          button.setDisabled(false);
+          this.display();
+        }
+      }));
+    status.addButton((button) => button
+      .setButtonText('恢复上次')
+      .setDisabled(!state.notePath)
+      .onClick(async () => {
+        button.setDisabled(true);
+        try {
+          await openCompanionNoteWindow(this.plugin, { preferSaved: true });
+          new Notice('已恢复上次学习笔记小窗。');
+        } catch (error) {
+          new Notice(commandErrorText('恢复学习笔记小窗失败', error), 6000);
+        } finally {
+          button.setDisabled(false);
+          this.display();
+        }
+      }));
+
+    new Setting(containerEl)
+      .setName('锁定为 Capture 目标')
+      .setDesc('开启后，即使 PotPlayer 或 Obsidian 主窗口获得焦点，Alt+S 仍优先写入这篇小窗笔记。')
+      .addToggle((toggle) => toggle
+        .setValue(state.locked)
+        .onChange(async (value) => {
+          await setCompanionLocked(this.plugin, value);
+          this.display();
+        }));
+
+    new Setting(containerEl)
+      .setName('小窗布局')
+      .setDesc('“播放器右侧栏”是默认窄高布局；也可以拖动调整后保存为自定义布局。')
+      .addDropdown((dropdown) => {
+        for (const layout of layouts) dropdown.addOption(layout.id, layout.name);
+        dropdown.setValue(state.activeLayoutId);
+        dropdown.onChange(async (value) => {
+          try {
+            await applyCompanionLayout(this.plugin, value);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('应用小窗布局失败', error), 5000);
+          }
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('小窗缩放')
+      .setDesc('只压缩小窗里的 Obsidian 编辑区密度，不改变 Markdown 文件本身。')
+      .addDropdown((dropdown) => dropdown
+        .addOption('0.70', '70% · 极紧凑')
+        .addOption('0.80', '80%')
+        .addOption('0.82', '82% · 右侧栏推荐')
+        .addOption('0.90', '90%')
+        .addOption('1', '100%')
+        .setValue(String(state.scale))
+        .onChange(async (value) => {
+          await setCompanionScale(this.plugin, Number(value));
+          this.display();
+        }));
+
+    new Setting(containerEl)
+      .setName('保存当前布局')
+      .setDesc('保存当前 x / y / 宽 / 高 / 缩放，之后可以从“布局”下拉框恢复。')
+      .addButton((button) => button
+        .setButtonText('保存为自定义布局')
+        .onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const layout = await saveCurrentCompanionLayout(this.plugin);
+            new Notice(`已保存：${layout.name}`);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('保存小窗布局失败', error), 5000);
+            button.setDisabled(false);
+          }
         }));
   }
 
@@ -8918,19 +9594,24 @@ class GoStudySettingsTab extends PluginSettingTab {
           });
         });
 
+      const map = containerEl.createDiv({ cls: 'go-study-hud-map' });
+      const mapHead = map.createDiv({ cls: 'go-study-hud-map-head' });
+      mapHead.createDiv({ text: '动作盘映射', cls: 'go-study-hud-map-title' });
+      mapHead.createDiv({ text: '同一方向快速连按两次可直接执行，无需再按 Enter。', cls: 'setting-item-description' });
       for (const slot of HUD_SLOT_ORDER) {
-        new Setting(containerEl)
-          .setName(`动作盘 · ${HUD_SLOT_LABELS[slot]}`)
-          .setDesc('为这个方向选择要采集的组合；最终 Markdown 仍由对应模板决定。')
-          .addDropdown((dropdown) => {
-            for (const action of Object.values(CAPTURE_ACTIONS)) dropdown.addOption(action.id, action.label);
-            dropdown.setValue(settings.actionHudSlots[slot]);
-            dropdown.setDisabled?.(!enabled);
-            dropdown.onChange(async (value) => {
-              const next = { ...currentProductSettings(this.plugin).actionHudSlots, [slot]: value };
-              await updateProductSetting(this.plugin, 'actionHudSlots', next);
-            });
-          });
+        const row = map.createDiv({ cls: 'go-study-hud-map-row' });
+        row.createSpan({ text: HUD_SLOT_LABELS[slot], cls: 'go-study-hud-map-key' });
+        const select = row.createEl('select', { cls: 'dropdown go-study-hud-map-select' });
+        for (const action of Object.values(CAPTURE_ACTIONS)) {
+          const option = select.createEl('option', { text: action.label });
+          option.value = action.id;
+        }
+        select.value = settings.actionHudSlots[slot];
+        select.disabled = !enabled;
+        select.addEventListener('change', () => {
+          const next = { ...currentProductSettings(this.plugin).actionHudSlots, [slot]: select.value };
+          void updateProductSetting(this.plugin, 'actionHudSlots', next);
+        });
       }
     }
 
@@ -9129,7 +9810,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('恢复默认输出格式')
-      .setDesc('恢复 Go Study 默认的时间显示和四种 Markdown 输出模板。')
+      .setDesc('恢复后，每张模板卡片右侧的实时效果会一起更新。')
       .addButton((button) => button
         .setButtonText('恢复默认')
         .onClick(async () => {
@@ -9137,38 +9818,62 @@ class GoStudySettingsTab extends PluginSettingTab {
           new Notice('已恢复默认笔记输出格式。');
           this.display();
         }));
-
-    containerEl.createEl('h4', { text: '实时示例' });
-    containerEl.createEl('p', {
-      text: '下面只展示最终 Markdown 文本。真实回链中的 Resource ID 与位置仍由 Go Study 自动生成。',
-      cls: 'setting-item-description'
-    });
-    this.outputPreviewEl = containerEl.createEl('pre', { cls: 'go-study-note-output-preview' });
-    this.refreshOutputPreview();
   }
 
   addTemplateSetting(containerEl, key, name, description) {
-    const settings = currentProductSettings(this.plugin);
-    new Setting(containerEl)
-      .setName(name)
-      .setDesc(description)
-      .addTextArea((text) => {
-        text.setValue(settings[key]);
-        text.setPlaceholder(DEFAULT_PRODUCT_SETTINGS[key]);
-        if (text.inputEl) text.inputEl.rows = Math.min(7, Math.max(2, settings[key].split('\n').length + 1));
-        const commit = async () => {
-          try {
-            const next = await updateProductSetting(this.plugin, key, text.getValue());
-            text.setValue(next[key]);
-            this.refreshOutputPreview();
-            new Notice(`${name}已更新。`);
-          } catch (error) {
-            text.setValue(currentProductSettings(this.plugin)[key]);
-            new Notice(commandErrorText(`${name}无效`, error), 6000);
-          }
-        };
-        text.inputEl?.addEventListener('change', () => void commit());
-      });
+    const initial = currentProductSettings(this.plugin);
+    const card = containerEl.createDiv({ cls: 'go-study-template-card' });
+    const head = card.createDiv({ cls: 'go-study-template-card-head' });
+    head.createDiv({ text: name, cls: 'go-study-template-title' });
+    head.createDiv({ text: description, cls: 'setting-item-description' });
+    const body = card.createDiv({ cls: 'go-study-template-card-body' });
+    const editorPane = body.createDiv({ cls: 'go-study-template-editor-pane' });
+    editorPane.createDiv({ text: '模板', cls: 'go-study-template-pane-label' });
+    const input = editorPane.createEl('textarea', { cls: 'go-study-template-textarea' });
+    input.value = initial[key];
+    input.placeholder = DEFAULT_PRODUCT_SETTINGS[key];
+    input.rows = Math.min(7, Math.max(3, initial[key].split('\n').length + 1));
+    const previewPane = body.createDiv({ cls: 'go-study-template-preview-pane' });
+    previewPane.createDiv({ text: '实时效果', cls: 'go-study-template-pane-label' });
+    const rendered = previewPane.createDiv({ cls: 'go-study-template-rendered' });
+    const details = previewPane.createEl('details', { cls: 'go-study-template-markdown-details' });
+    details.createEl('summary', { text: '查看最终 Markdown' });
+    const raw = details.createEl('pre', { cls: 'go-study-template-markdown' });
+
+    const refresh = async () => {
+      try {
+        const settings = { ...currentProductSettings(this.plugin), [key]: input.value };
+        const markdown = templatePreviewMarkdown(key, settings);
+        raw.textContent = markdown;
+        rendered.empty?.();
+        if (MarkdownRenderer?.render) {
+          await MarkdownRenderer.render(this.app, markdown, rendered, '', this);
+        } else {
+          rendered.textContent = markdown;
+        }
+        card.removeClass?.('is-invalid');
+      } catch (error) {
+        card.addClass?.('is-invalid');
+        rendered.empty?.();
+        rendered.setText?.(`模板暂时无效：${error instanceof Error ? error.message : String(error)}`);
+        if (!rendered.setText) rendered.textContent = `模板暂时无效：${error instanceof Error ? error.message : String(error)}`;
+        raw.textContent = input.value;
+      }
+    };
+    this.templatePreviewRefreshers.push(() => { void refresh(); });
+    input.addEventListener('input', () => { void refresh(); });
+    input.addEventListener('change', async () => {
+      try {
+        const next = await updateProductSetting(this.plugin, key, input.value);
+        input.value = next[key];
+        await refresh();
+      } catch (error) {
+        input.value = currentProductSettings(this.plugin)[key];
+        await refresh();
+        new Notice(commandErrorText(`${name}无效`, error), 6000);
+      }
+    });
+    void refresh();
   }
 
   renderDataSettings(containerEl) {
@@ -10525,11 +11230,14 @@ function promptHtml(options = {}) {
   const placeholder = String(options.placeholder || '写下这一刻的笔记…');
   const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
   return `<!doctype html><html><head><meta charset="utf-8"><style>
-  *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:#17191d;color:#f3f4f6;padding:16px}
-  .title{font-size:14px;font-weight:650;margin-bottom:4px}.sub{font-size:12px;color:#9ca3af;margin-bottom:10px}
-  textarea{width:100%;height:76px;resize:none;border:1px solid #3b4048;border-radius:9px;background:#22252b;color:#fff;padding:10px 12px;font:14px/1.45 Segoe UI,system-ui,sans-serif;outline:none}
-  textarea:focus{border-color:#6b7280}.hint{margin-top:8px;font-size:11px;color:#7f8793;text-align:right}
-  </style></head><body><div class="title">${esc(title)}</div><div class="sub">${esc(subtitle)}</div><textarea autofocus placeholder="${esc(placeholder)}"></textarea><div class="hint">Go Study</div><script>
+  *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:#17191d;color:#f3f4f6;padding:13px 14px 12px;overflow:hidden}
+  .drag{padding:1px 2px 8px;-webkit-app-region:drag;cursor:move;user-select:none}
+  .title{font-size:14px;font-weight:650;margin-bottom:3px}.sub{font-size:11.5px;color:#8f96a3}
+  textarea{-webkit-app-region:no-drag;width:100%;height:82px;resize:none;border:1px solid rgba(148,163,184,.22);border-radius:10px;background:#22252b;color:#fff;padding:10px 12px;font:14px/1.45 Segoe UI,system-ui,sans-serif;outline:none;scrollbar-width:thin;scrollbar-color:rgba(148,163,184,.32) transparent}
+  textarea:focus{border-color:rgba(167,139,250,.62);box-shadow:0 0 0 2px rgba(124,58,237,.10)}
+  textarea::-webkit-scrollbar{width:5px}textarea::-webkit-scrollbar-track{background:transparent}textarea::-webkit-scrollbar-thumb{background:rgba(148,163,184,.28);border-radius:999px}textarea::-webkit-scrollbar-thumb:hover{background:rgba(148,163,184,.45)}
+  .hint{margin-top:5px;font-size:10px;color:#666d78;text-align:right}
+  </style></head><body><div class="drag"><div class="title">${esc(title)}</div><div class="sub">${esc(subtitle)} · 拖动顶部可调整位置</div></div><textarea autofocus placeholder="${esc(placeholder)}"></textarea><div class="hint">Go Study</div><script>
   const box=document.querySelector('textarea');
   const submit=()=>{ const text=box.value.trim(); if(!text) return; document.title='GO_STUDY_SUBMIT:'+btoa(unescape(encodeURIComponent(text))); };
   box.addEventListener('keydown',(event)=>{ if(event.key==='Escape'){event.preventDefault();document.title='GO_STUDY_CANCEL:';} else if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submit();} });
@@ -10546,12 +11254,19 @@ function showNativeQuickNote(options = {}) {
   const display = screen?.getDisplayNearestPoint?.(point);
   const area = display?.workArea || { x: 0, y: 0, width: 1280, height: 720 };
   const width = 520;
-  const height = 160;
+  const height = 176;
+  const remembered = options.geometry && typeof options.geometry === 'object' ? options.geometry : {};
+  const safeX = Number.isFinite(Number(remembered.x))
+    ? Math.min(area.x + area.width - width, Math.max(area.x, Number(remembered.x)))
+    : Math.round(area.x + (area.width - width) / 2);
+  const safeY = Number.isFinite(Number(remembered.y))
+    ? Math.min(area.y + area.height - height, Math.max(area.y, Number(remembered.y)))
+    : Math.round(area.y + Math.max(90, area.height * 0.36));
   const win = new BrowserWindow({
     width,
     height,
-    x: Math.round(area.x + (area.width - width) / 2),
-    y: Math.round(area.y + Math.max(60, area.height * 0.24)),
+    x: safeX,
+    y: safeY,
     frame: false,
     resizable: false,
     minimizable: false,
@@ -10567,7 +11282,20 @@ function showNativeQuickNote(options = {}) {
     const finish = (value) => {
       if (settled) return;
       settled = true;
-      try { if (!win.isDestroyed()) win.close(); } catch {}
+      try {
+        if (!win.isDestroyed()) {
+          const bounds = win.getBounds?.();
+          if (bounds && typeof options.onGeometryChange === 'function') {
+            void Promise.resolve(options.onGeometryChange({
+              x: Number(bounds.x),
+              y: Number(bounds.y),
+              width: Number(bounds.width),
+              height: Number(bounds.height)
+            })).catch(() => {});
+          }
+          win.close();
+        }
+      } catch {}
       resolve(value);
     };
     win.on('closed', () => finish(null));
@@ -10601,7 +11329,17 @@ class FallbackNoteModal extends Modal {
 }
 
 function showQuickNoteInput(plugin, options = {}) {
-  const native = showNativeQuickNote(options);
+  const remembered = plugin?.state?.uiState?.quickNoteWindowGeometry || null;
+  const native = showNativeQuickNote({
+    ...options,
+    geometry: options.geometry || remembered,
+    onGeometryChange: options.onGeometryChange || (async (geometry) => {
+      if (!plugin?.state) return;
+      plugin.state.uiState ||= {};
+      plugin.state.uiState.quickNoteWindowGeometry = geometry;
+      await plugin.persist?.();
+    })
+  });
   if (native) return native;
   return new Promise((resolve) => new FallbackNoteModal(plugin.app, options, resolve).open());
 }
@@ -11294,11 +12032,9 @@ function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText, 
   );
   return renderOutputTemplate(template, { image, note, backlink });
 }
-function contextBacklinkTitle(context, options = {}) {
+function contextBacklinkTitle(_context, options = {}) {
   if (options.backlinkTitle) return options.backlinkTitle;
-  return context?.mode === 'freeform'
-    ? freeformMediaTitle(context.bridgeMedia || context.freeform || {})
-    : '回到课程';
+  return '回到课程';
 }
 
 function buildContextNoteMarkdown(context, noteText, options = {}) {
@@ -12182,6 +12918,7 @@ const { installLearningControls } = __rhLoad("learning-controls-ui.cjs");
 const { installFreeformBrowserModifier } = __rhLoad("freeform-link-ui.cjs");
 const { GoStudySettingsTab } = __rhLoad("product-settings-tab.cjs");
 const { currentProductSettings, ensureProductSettings } = __rhLoad("product-settings.cjs");
+const { registerCompanionNoteCommands } = __rhLoad("companion-note-window.cjs");
 const { pruneStateBackups } = __rhLoad("release-hardening.cjs");
 const {
   clearProjectNoteFoldersOnDelete,
@@ -12220,6 +12957,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     ensureProjectNotesState(this.state);
     if (normalized.changed || !hadProjectNotes) await this.persist();
     registerRememberedNoteTarget(this);
+    registerCompanionNoteCommands(this);
     registerImmersiveHotkeys(this);
     installScopedUiFixes(this);
     installLearningControls(this);
