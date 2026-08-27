@@ -4,18 +4,22 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  clearProjectNoteFoldersOnDelete,
   ensureProjectNotesState,
   linkProjectNote,
   markProjectNotesMissing,
   playerTimeFromSeconds,
   projectIdForResource,
+  projectNoteFolder,
   projectNotes,
   recentProjectNote,
   recentStudy,
   recordRecentStudy,
   restoreProjectNotePath,
+  setProjectNoteFolder,
   setRecentProjectNote,
   unlinkProjectNote,
+  updateProjectNoteFoldersOnRename,
   updateProjectNotePathsOnRename
 } = require('../src/project-notes.cjs');
 
@@ -88,6 +92,17 @@ test('note references follow Vault rename and missing/restore lifecycle', () => 
   assert.ok(note.missingAt);
   assert.equal(restoreProjectNotePath(state, '学习/数学/高数.md'), 1);
   assert.equal(note.missingAt, '');
+});
+
+test('project note folder is optional, follows folder rename, and clears safely on deletion', () => {
+  const state = fixture();
+  assert.equal(projectNoteFolder(state, 'project-a'), '');
+  setProjectNoteFolder(state, 'project-a', '20.项目/高等数学');
+  assert.equal(projectNoteFolder(state, 'project-a'), '20.项目/高等数学');
+  assert.equal(updateProjectNoteFoldersOnRename(state, '20.项目', '30.学习'), 1);
+  assert.equal(projectNoteFolder(state, 'project-a'), '30.学习/高等数学');
+  assert.equal(clearProjectNoteFoldersOnDelete(state, '30.学习'), 1);
+  assert.equal(projectNoteFolder(state, 'project-a'), '');
 });
 
 test('resource membership resolves to the current project and player time is stable', () => {
