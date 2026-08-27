@@ -64,18 +64,19 @@ function validatedBridgePosition(bridgeMedia) {
 function matchingManagedResource(state, mediaPath, resolveActions, preferredResourceId = '') {
   if (typeof resolveActions !== 'function') throw new Error('资源启动解析器不可用。');
   const resources = Object.values(state?.resources || {}).filter((resource) => resource && !resource.deletedAt);
+  const matches = (resource) => {
+    try {
+      const actions = resolveActions(resource) || {};
+      return Boolean(actions.playTarget && targetMatchesBridgeMedia(state, resource, actions.playTarget, mediaPath));
+    } catch {
+      return false;
+    }
+  };
   if (preferredResourceId) {
     const preferred = state?.resources?.[preferredResourceId];
-    if (preferred && !preferred.deletedAt) {
-      const actions = resolveActions(preferred) || {};
-      if (actions.playTarget && targetMatchesBridgeMedia(state, preferred, actions.playTarget, mediaPath)) return preferred;
-    }
+    if (preferred && !preferred.deletedAt && matches(preferred)) return preferred;
   }
-  return resources.find((resource) => {
-    if (resource.id === preferredResourceId) return false;
-    const actions = resolveActions(resource) || {};
-    return Boolean(actions.playTarget && targetMatchesBridgeMedia(state, resource, actions.playTarget, mediaPath));
-  }) || null;
+  return resources.find((resource) => resource.id !== preferredResourceId && matches(resource)) || null;
 }
 
 function resolveUniversalMediaSession(state, activeSession, bridgeMedia, resolveActions, options = {}) {
