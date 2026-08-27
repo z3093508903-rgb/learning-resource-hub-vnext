@@ -26,6 +26,8 @@ jobs:
           node-version: '22'
 
       - name: Full release validation
+        env:
+          RELEASE_TAG: ''
         run: npm run release:check
 
       - name: Package isolated preview
