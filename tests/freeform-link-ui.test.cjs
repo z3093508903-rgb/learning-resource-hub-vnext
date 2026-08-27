@@ -8,16 +8,22 @@ const path = require('node:path');
 const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'freeform-link-ui.cjs'), 'utf8');
 const entry = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'entry.cjs'), 'utf8');
 
-test('freeform web links reserve Ctrl-click for browser as an explicit experiment', () => {
-  assert.match(source, /event\?\.ctrlKey/);
+test('new freeform links use jv and keep Ctrl-click browser behavior for web locators', () => {
+  assert.match(source, /href\.startsWith\('jv:\/\/open\?'/);
+  assert.match(source, /jvWebLocator/);
+  assert.match(source, /shellImpl\.openExternal\(web\)/);
+});
+
+test('legacy beta.15 obsidian freeform links are intercepted before default routing', () => {
+  assert.match(source, /href\.startsWith\('obsidian:\/\/go-study'/);
+  assert.match(source, /parseReferenceUri\(href\)/);
   assert.match(source, /reference\?\.mode !== 'freeform'/);
-  assert.match(source, /shellImpl\.openExternal\(reference\.web\)/);
+  assert.match(source, /stopLinkEvent\(event\)/);
+  assert.match(source, /plugin\?\.openFreeformReference/);
   assert.match(source, /addEventListener\('click', onClick, true\)/);
 });
 
-test('ordinary freeform protocol activation reopens PotPlayer and upgrades to managed resource when possible', () => {
-  assert.match(entry, /openFreeformReference/);
-  assert.match(entry, /matchingManagedResource/);
-  assert.match(entry, /this\.toPotPlayerUri\(reference\.path, playerTime\)/);
+test('managed backlink runtime remains Resource ID based', () => {
+  assert.match(entry, /resolveReferencePlayback/);
   assert.match(entry, /resourceId:\s*managed\.id/);
 });

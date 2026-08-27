@@ -1,6 +1,6 @@
 'use strict';
 
-const { buildFreeformReferenceUri, buildReferenceUri, normalizeReferencePosition } = require('./resource-reference.cjs');
+const { buildReferenceUri, normalizeFreeformLocator, normalizeReferencePosition } = require('./resource-reference.cjs');
 const {
   DEFAULT_PRODUCT_SETTINGS,
   normalizeOutputTemplate,
@@ -72,16 +72,16 @@ function freeformWebLocator(media = {}) {
   } catch { return ''; }
 }
 
+function buildFreeformPlaybackUri(media, position) {
+  const normalized = normalizeReferencePosition(position);
+  const locator = normalizeFreeformLocator(media?.path);
+  const playerTime = formatPositionClock(normalized, 'hms');
+  return `jv://open?path=${encodeURIComponent(locator)}&time=${encodeURIComponent(playerTime)}`;
+}
+
 function buildFreeformPositionMarkdown(media, position, options = {}) {
   const normalized = normalizeReferencePosition(position);
-  const path = String(media?.path || '').trim();
-  if (!path) throw new Error('无法为缺少媒体地址的视频生成自由回链。');
-  const uri = buildFreeformReferenceUri({
-    path,
-    web: freeformWebLocator(media),
-    position: normalized,
-    version: 1
-  });
+  const uri = buildFreeformPlaybackUri(media, normalized);
   const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
   const title = escapeMarkdownLabel(options.title || freeformMediaTitle(media));
   const template = normalizeOutputTemplate(
@@ -242,6 +242,7 @@ module.exports = {
   buildCaptureNoteMarkdown,
   buildNotePositionMarkdown,
   buildPositionMarkdown,
+  buildFreeformPlaybackUri,
   buildFreeformPositionMarkdown,
   buildPlainCaptureMarkdown,
   buildPlainCaptureNoteMarkdown,
