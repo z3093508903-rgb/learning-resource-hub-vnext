@@ -1,0 +1,155 @@
+name: Publish Freeform JV Fix Preview
+
+on:
+  push:
+    branches:
+      - fix/freeform-jv-reopen-v1
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.16
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.16
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Full release validation
+        run: npm run release:check
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Go Study Preview beta.16: direct jv:// Freeform reopen acceptance build.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const packed = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          for (const marker of [
+            'go-study-preview-workbench',
+            'createNativeActionHud',
+            'installFreeformBrowserModifier',
+            'jv://open?path=',
+            'obsidian://go-study',
+            'freeformVideoNotesEnabled'
+          ]) {
+            if (!packed.includes(marker)) throw new Error('Missing preview marker: ' + marker);
+          }
+          if (packed.includes(oldView)) throw new Error('Preview view isolation failed.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.16
+
+          Freeform reopen fix acceptance build.
+
+          ## What changed
+          - Managed Resource backlinks remain Resource-ID based: obsidian://go-study?resource=...
+          - New unmatched / Freeform video backlinks now use the original PotPlayer jump protocol directly:
+            jv://open?path=...&time=HH:MM:SS
+          - Historical beta.15 obsidian://go-study Freeform links are intercepted inside Obsidian before its reserved path routing when possible.
+          - Ctrl+click on a Freeform web-video link still attempts to open the browser URL.
+
+          ## Install / upgrade
+          1. Close or reload Obsidian before replacing files.
+          2. Use folder: .obsidian/plugins/go-study-preview/
+          3. Replace only main.js, manifest.json, styles.css from this package.
+          4. Keep your existing data.json.
+          5. Reload Obsidian and enable Go Study Preview.
+          6. Confirm Settings -> Community plugins shows Go Study Preview 0.3.0-beta.16.
+
+          ## Required Windows condition
+          The jv:// URL protocol must already be registered to the original note2potplayer handler (or an equivalent compatible handler).
+          If existing Go Study/PotPlayer launches through jv:// already work on this machine, this condition is normally already satisfied.
+
+          ## Acceptance A - new uncollected local video
+          1. Open a local video directly in PotPlayer; do not add it to Go Study.
+          2. Open an editable Markdown note.
+          3. Use Alt+S and create any capture action that includes a timestamp backlink.
+          4. Confirm the new link target starts with jv://open? rather than obsidian://go-study?mode=freeform.
+          5. Click the link normally.
+          6. Expected: PotPlayer opens/focuses the same video and seeks near the recorded time.
+
+          ## Acceptance B - historical beta.15 link
+          1. Find an older link beginning obsidian://go-study?mode=freeform&path=...
+          2. Click it in Reading View.
+          3. Repeat in Live Preview if clickable there.
+          4. Expected: no Vault not found; Go Study should intercept it and forward to the existing PotPlayer jv jump.
+
+          ## Acceptance C - managed regression
+          1. Capture from a video already stored as a Go Study Resource.
+          2. Confirm its link remains obsidian://go-study?resource=...
+          3. Click it and confirm Resource resolver + timestamp still work.
+
+          Do not merge this fix until Windows acceptance passes.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release tag already exists; refusing to overwrite."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG"             --target "${{ github.sha }}"             --title "Go Study Preview ${PREVIEW_VERSION}"             --notes "Freeform reopen validation: new unmatched video links use direct jv://; Managed Resource backlinks remain Resource-ID based. Draft acceptance build; do not merge until Windows testing passes."             --prerelease             "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip"             "dist-preview/go-study-preview/main.js"             "dist-preview/go-study-preview/manifest.json"             "dist-preview/go-study-preview/styles.css"             "dist-preview/go-study-preview/TESTING.md"
+
+      - name: Verify release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isPrerelease,assets > release.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const r = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+          if (r.tagName !== process.env.RELEASE_TAG || !r.isPrerelease) throw new Error('Release metadata mismatch.');
+          const names = new Set(r.assets.map(x => x.name));
+          for (const name of [
+            'go-study-preview-' + process.env.PREVIEW_VERSION + '.zip',
+            'main.js', 'manifest.json', 'styles.css', 'TESTING.md'
+          ]) if (!names.has(name)) throw new Error('Missing asset: ' + name);
+          NODE
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-freeform-jvfix-preview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-freeform-jvfix-preview.yml
+          git commit -m "ci: remove one-shot freeform preview publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
