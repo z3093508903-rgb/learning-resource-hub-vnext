@@ -1,6 +1,107 @@
 'use strict';
 
 const __rhModules = {
+"action-hud.cjs": (module, exports, require) => {
+'use strict';
+
+const { resolveRemote } = __rhLoad("quick-note-window.cjs");
+const { CAPTURE_ACTIONS, HUD_SLOT_LABELS, HUD_SLOT_ORDER, normalizeHudSlots } = __rhLoad("capture-actions.cjs");
+
+function escapeHtml(value) {
+  return String(value || '').replace(/[&<>"']/g, (char) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+  })[char]);
+}
+
+function slotCopy(slots, slot) {
+  const action = CAPTURE_ACTIONS[slots[slot]];
+  return {
+    slot,
+    direction: HUD_SLOT_LABELS[slot] || slot,
+    label: action?.label || slots[slot] || '未设置'
+  };
+}
+
+function hudHtml(rawSlots) {
+  const slots = normalizeHudSlots(rawSlots);
+  const copies = Object.fromEntries(HUD_SLOT_ORDER.map((slot) => [slot, slotCopy(slots, slot)]));
+  const cell = (slot) => `<div class="slot ${slot}" data-slot="${slot}"><span class="dir">${escapeHtml(copies[slot].direction)}</span><strong>${escapeHtml(copies[slot].label)}</strong></div>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  *{box-sizing:border-box}body{margin:0;background:transparent;font-family:Segoe UI,system-ui,sans-serif;color:#f4f4f5;overflow:hidden}
+  .hud{width:100%;height:100%;border:1px solid rgba(255,255,255,.12);border-radius:18px;background:rgba(20,22,27,.94);box-shadow:0 18px 50px rgba(0,0,0,.38);display:grid;grid-template-columns:1fr 1.25fr 1fr;grid-template-rows:1fr 1.15fr 1fr;gap:8px;padding:15px;backdrop-filter:blur(18px)}
+  .slot{border:1px solid rgba(255,255,255,.08);border-radius:12px;background:rgba(255,255,255,.035);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-width:0;transition:.12s ease}
+  .slot .dir{font-size:10px;color:#9ca3af}.slot strong{font-size:12px;font-weight:620;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:100%;padding:0 4px}
+  .slot.is-selected{border-color:rgba(167,139,250,.85);background:rgba(124,58,237,.25);transform:scale(1.025)}
+  .up{grid-column:2;grid-row:1}.left{grid-column:1;grid-row:2}.center{grid-column:2;grid-row:2}.right{grid-column:3;grid-row:2}.down{grid-column:2;grid-row:3}
+  .brand{position:absolute;right:18px;bottom:10px;font-size:9px;color:#71717a}
+  </style></head><body><div class="hud">${cell('up')}${cell('left')}${cell('center')}${cell('right')}${cell('down')}</div><div class="brand">Go Study · ↑↓←→ · Enter · Esc</div></body></html>`;
+}
+
+function createNativeActionHud(rawSlots, options = {}) {
+  const remote = resolveRemote(options);
+  const BrowserWindow = options.BrowserWindow || remote?.BrowserWindow;
+  if (!BrowserWindow) return null;
+  const screen = options.screen || remote?.screen;
+  const point = screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+  const display = screen?.getDisplayNearestPoint?.(point);
+  const area = display?.workArea || { x: 0, y: 0, width: 1280, height: 720 };
+  const width = 460;
+  const height = 300;
+  const win = new BrowserWindow({
+    width,
+    height,
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: Math.round(area.y + Math.max(60, area.height * 0.24)),
+    frame: false,
+    transparent: true,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    focusable: false,
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+  });
+  let shown = false;
+  let closed = false;
+  const ready = win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(hudHtml(rawSlots))}`).catch(() => {});
+  return {
+    async show() {
+      if (closed || shown) return false;
+      await ready;
+      if (closed || win.isDestroyed?.()) return false;
+      shown = true;
+      try { win.showInactive?.(); } catch { try { win.show(); } catch {} }
+      return true;
+    },
+    async select(slot) {
+      if (closed || !HUD_SLOT_ORDER.includes(slot)) return false;
+      await ready;
+      if (closed || win.isDestroyed?.()) return false;
+      const safe = JSON.stringify(slot);
+      try {
+        await win.webContents.executeJavaScript(`document.querySelectorAll('.slot').forEach(x=>x.classList.toggle('is-selected',x.dataset.slot===${safe}))`);
+        return true;
+      } catch { return false; }
+    },
+    close() {
+      if (closed) return;
+      closed = true;
+      try { if (!win.isDestroyed?.()) win.close(); } catch {}
+    },
+    get shown() { return shown; }
+  };
+}
+
+module.exports = {
+  createNativeActionHud,
+  escapeHtml,
+  hudHtml,
+  slotCopy
+};
+
+},
 "anki-launch.cjs": (module, exports, require) => {
 'use strict';
 
@@ -110,6 +211,66 @@ module.exports = {
 };
 
 },
+"capture-actions.cjs": (module, exports, require) => {
+'use strict';
+
+const CAPTURE_ACTIONS = Object.freeze({
+  time: Object.freeze({ id: 'time', label: '仅时间戳', time: true, note: false, image: false }),
+  note: Object.freeze({ id: 'note', label: '纯笔记', time: false, note: true, image: false }),
+  image: Object.freeze({ id: 'image', label: '仅截图', time: false, note: false, image: true }),
+  timeNote: Object.freeze({ id: 'timeNote', label: '评论 + 时间戳', time: true, note: true, image: false }),
+  timeImage: Object.freeze({ id: 'timeImage', label: '截图 + 时间戳', time: true, note: false, image: true }),
+  imageNote: Object.freeze({ id: 'imageNote', label: '截图 + 评论', time: false, note: true, image: true }),
+  all: Object.freeze({ id: 'all', label: '截图 + 评论 + 时间戳', time: true, note: true, image: true })
+});
+
+const HUD_SLOT_ORDER = Object.freeze(['left', 'up', 'right', 'down', 'center']);
+const HUD_SLOT_LABELS = Object.freeze({
+  left: '← 左',
+  up: '↑ 上',
+  right: '→ 右',
+  down: '↓ 下',
+  center: 'Enter 中心'
+});
+
+const DEFAULT_HUD_SLOTS = Object.freeze({
+  left: 'time',
+  up: 'timeNote',
+  right: 'timeImage',
+  down: 'note',
+  center: 'all'
+});
+
+function normalizeCaptureActionId(value, fallback = 'time') {
+  const id = String(value || '').trim();
+  return Object.prototype.hasOwnProperty.call(CAPTURE_ACTIONS, id) ? id : fallback;
+}
+
+function normalizeHudSlots(value) {
+  const source = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  const result = {};
+  for (const slot of HUD_SLOT_ORDER) {
+    result[slot] = normalizeCaptureActionId(source[slot], DEFAULT_HUD_SLOTS[slot]);
+  }
+  return result;
+}
+
+function actionForSlot(slots, slot) {
+  const normalized = normalizeHudSlots(slots);
+  return CAPTURE_ACTIONS[normalized[slot] || DEFAULT_HUD_SLOTS[slot]];
+}
+
+module.exports = {
+  CAPTURE_ACTIONS,
+  DEFAULT_HUD_SLOTS,
+  HUD_SLOT_LABELS,
+  HUD_SLOT_ORDER,
+  actionForSlot,
+  normalizeCaptureActionId,
+  normalizeHudSlots
+};
+
+},
 "entry.cjs": (module, exports, require) => {
 'use strict';
 
@@ -142,9 +303,11 @@ const {
   parseProtocolParams
 } = __rhLoad("resource-reference.cjs");
 const {
+  formatPotPlayerTime,
   resolveReferencePlayback,
   updateResumePosition
 } = __rhLoad("resource-resolver.cjs");
+const { matchingManagedResource } = __rhLoad("media-session.cjs");
 const {
   applySafeOpenListPathRemap,
   normalizeStrictOpenListPath,
@@ -194,6 +357,7 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   }
 
   async openResourceReference(reference) {
+    if (reference?.mode === 'freeform') return this.openFreeformReference(reference);
     const resolved = resolveReferencePlayback(this.state, reference, (resource) => this.resourceActions(resource));
     const opened = await this.openPositionedPlayTarget(resolved.resource, resolved.playTarget, resolved.playerTime);
     if (!opened) return false;
@@ -207,6 +371,31 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     await this.persist();
     await this.workbenchLeaf?.view?.render?.();
     return true;
+  }
+
+  async openFreeformReference(reference) {
+    const managed = matchingManagedResource(
+      this.state,
+      reference.path,
+      (resource) => this.resourceActions(resource)
+    );
+    if (managed) {
+      return this.openResourceReference({
+        resourceId: managed.id,
+        position: reference.position,
+        version: reference.version
+      });
+    }
+    try {
+      const playerTime = formatPotPlayerTime(reference.position);
+      new Notice(`正在跳转临时视频 · ${playerTime}`);
+      await shell.openExternal(this.toPotPlayerUri(reference.path, playerTime));
+      new Notice(`已跳转临时视频 · ${playerTime}`);
+      return true;
+    } catch (error) {
+      new Notice(`自由回链跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      return false;
+    }
   }
 
   async openPositionedPlayTarget(resource, target, playerTime) {
@@ -437,40 +626,576 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
 module.exports = ResourceHubNextPlugin;
 
 },
+"freeform-link-ui.cjs": (module, exports, require) => {
+'use strict';
+
+const { shell } = require('electron');
+const { parseReferenceUri } = __rhLoad("resource-reference.cjs");
+
+function stopLinkEvent(event) {
+  event.preventDefault?.();
+  event.stopPropagation?.();
+  event.stopImmediatePropagation?.();
+}
+
+function jvWebLocator(rawUri) {
+  let uri;
+  try { uri = new URL(String(rawUri || '').trim()); } catch { return ''; }
+  if (uri.protocol !== 'jv:' || uri.hostname !== 'open') return '';
+  const locator = String(uri.searchParams.get('path') || '').trim();
+  if (!locator) return '';
+  try {
+    const web = new URL(locator);
+    return web.protocol === 'http:' || web.protocol === 'https:' ? web.toString() : '';
+  } catch { return ''; }
+}
+
+function installFreeformBrowserModifier(plugin, doc = globalThis.document, options = {}) {
+  if (!doc?.addEventListener) return null;
+  const shellImpl = options.shell || shell;
+  const onClick = (event) => {
+    const target = event?.target?.closest?.('a[href]');
+    if (!target) return;
+    const href = String(target.getAttribute?.('href') || target.href || '');
+
+    if (href.startsWith('jv://open?')) {
+      if (!event?.ctrlKey) return;
+      const web = jvWebLocator(href);
+      if (!web) return;
+      stopLinkEvent(event);
+      void shellImpl.openExternal(web);
+      return;
+    }
+
+    if (!href.startsWith('obsidian://go-study')) return;
+    let reference;
+    try { reference = parseReferenceUri(href); } catch { return; }
+    if (reference?.mode !== 'freeform') return;
+
+    stopLinkEvent(event);
+    if (event?.ctrlKey && reference.web) {
+      void shellImpl.openExternal(reference.web);
+      return;
+    }
+    if (typeof plugin?.openFreeformReference === 'function') {
+      void Promise.resolve(plugin.openFreeformReference(reference)).catch(() => {});
+    }
+  };
+  doc.addEventListener('click', onClick, true);
+  plugin?.register?.(() => doc.removeEventListener?.('click', onClick, true));
+  return { onClick };
+}
+
+module.exports = {
+  installFreeformBrowserModifier,
+  jvWebLocator,
+  stopLinkEvent
+};
+
+},
+"immersive-hotkeys.cjs": (module, exports, require) => {
+'use strict';
+
+const {
+  captureFrameAndInsertLearningPosition,
+  commitPreparedCaptureTypedNote,
+  commitPreparedPlainCapture,
+  commitPreparedPlainCaptureTypedNote,
+  commitPreparedPlainTypedNote,
+  commitPreparedTypedNote,
+  insertCurrentLearningPosition,
+  prepareCaptureLearningPosition,
+  prepareCurrentLearningPosition
+} = __rhLoad("learning-capture.cjs");
+const { CAPTURE_ACTIONS, actionForSlot } = __rhLoad("capture-actions.cjs");
+const { createNativeActionHud } = __rhLoad("action-hud.cjs");
+const {
+  DEFAULT_IMMERSIVE_SHORTCUTS,
+  immersiveShortcuts,
+  normalizeShortcut,
+  requestNativePotPlayer,
+  resolveElectronGlobalShortcut
+} = __rhLoad("native-potplayer.cjs");
+const { currentProductSettings } = __rhLoad("product-settings.cjs");
+const { formatPositionClock } = __rhLoad("resource-note.cjs");
+const { showNativeToast, showQuickNoteInput } = __rhLoad("quick-note-window.cjs");
+
+const HOTKEY_ACTIONS = Object.freeze({
+  position: '记录当前位置',
+  capture: '截图并记录',
+  note: '输入笔记并记录',
+  captureNote: '截图、输入笔记并记录'
+});
+
+const LEGACY_ACTION_MAP = Object.freeze({
+  position: 'time',
+  capture: 'timeImage',
+  note: 'timeNote',
+  captureNote: 'all'
+});
+
+const HUD_ACCELERATORS = Object.freeze({
+  Up: 'up',
+  Down: 'down',
+  Left: 'left',
+  Right: 'right'
+});
+
+function immersiveStatus(plugin) {
+  return plugin?._goStudyImmersiveStatus || {
+    mode: currentProductSettings(plugin).videoEnhancementEnabled ? 'unavailable' : 'disabled',
+    registered: false,
+    shortcuts: immersiveShortcuts(plugin),
+    error: ''
+  };
+}
+
+function setImmersiveStatus(plugin, patch = {}) {
+  plugin._goStudyImmersiveStatus = {
+    ...immersiveStatus(plugin),
+    ...patch,
+    updatedAt: Date.now()
+  };
+  try { globalThis.document?.dispatchEvent?.(new CustomEvent('go-study-immersive-status')); } catch {}
+  return plugin._goStudyImmersiveStatus;
+}
+
+function compactError(error) {
+  return (error instanceof Error ? error.message : String(error || '未知错误')).replace(/[\r\n\t]+/g, ' ').slice(0, 220);
+}
+
+async function feedback(message, options = {}) {
+  try { if (await showNativeToast(message, options.toastOptions || {})) return true; } catch {}
+  return false;
+}
+
+async function successFeedback(plugin, message, options = {}) {
+  if (!currentProductSettings(plugin).videoSuccessFeedback) return false;
+  return feedback(message, options);
+}
+
+function shortcutConflict(shortcuts) {
+  const seen = new Map();
+  for (const [key, value] of Object.entries(shortcuts || {})) {
+    const normalized = normalizeShortcut(value).toLowerCase();
+    if (!normalized) continue;
+    if (seen.has(normalized)) return [seen.get(normalized), key, value];
+    seen.set(normalized, key);
+  }
+  return null;
+}
+
+async function resumePreparedPlayback(plugin, prepared, outcome, options = {}) {
+  if (!prepared?.player?.control?.pausedByGoStudy) return false;
+  const settings = currentProductSettings(plugin);
+  const shouldResume = outcome === 'save' ? settings.videoResumeAfterSave : settings.videoResumeAfterCancel;
+  if (!shouldResume) return false;
+  await (options.nativeRequest || requestNativePotPlayer)('play', {
+    ...(options.nativeOptions || {}),
+    foregroundOnly: false
+  });
+  return true;
+}
+
+function resultTimeSuffix(action, result) {
+  if (!action?.time || !result?.position) return '';
+  return ` ${formatPositionClock(result.position)}`;
+}
+
+async function promptForPreparedNote(plugin, prepared, action, options = {}) {
+  return (options.showQuickNoteInput || showQuickNoteInput)(plugin, {
+    title: action.time
+      ? `${action.label} · ${formatPositionClock(prepared.position)}`
+      : action.label,
+    subtitle: '视频已暂停 · Enter 保存 · Shift+Enter 换行 · Esc 取消',
+    placeholder: '写下这一刻的笔记…',
+    ...(options.promptOptions || {})
+  });
+}
+
+async function runCaptureAction(plugin, actionValue, options = {}) {
+  if (!currentProductSettings(plugin).videoEnhancementEnabled) return null;
+  const action = typeof actionValue === 'string' ? CAPTURE_ACTIONS[actionValue] : actionValue;
+  if (!action) throw new Error('未知视频笔记动作。');
+  if (plugin?._goStudyImmersiveBusy) {
+    await successFeedback(plugin, 'Go Study：上一项记录还在处理中', options);
+    return null;
+  }
+  plugin._goStudyImmersiveBusy = true;
+  let prepared = null;
+  try {
+    let result;
+    if (action.image && action.note) {
+      prepared = await prepareCaptureLearningPosition(plugin, {
+        nativeOnly: true,
+        pause: true,
+        ...options.captureOptions
+      });
+      const note = await promptForPreparedNote(plugin, prepared, action, options);
+      if (!note) {
+        await resumePreparedPlayback(plugin, prepared, 'cancel', options);
+        await successFeedback(plugin, '已取消笔记', options);
+        return null;
+      }
+      result = action.time
+        ? await commitPreparedCaptureTypedNote(plugin, prepared, note)
+        : await commitPreparedPlainCaptureTypedNote(plugin, prepared, note);
+      await resumePreparedPlayback(plugin, prepared, 'save', options);
+    } else if (action.image) {
+      if (action.time) {
+        result = await captureFrameAndInsertLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
+      } else {
+        prepared = await prepareCaptureLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
+        result = await commitPreparedPlainCapture(plugin, prepared);
+      }
+    } else if (action.note) {
+      prepared = await prepareCurrentLearningPosition(plugin, {
+        nativeOnly: true,
+        pause: true,
+        ...options.captureOptions
+      });
+      const note = await promptForPreparedNote(plugin, prepared, action, options);
+      if (!note) {
+        await resumePreparedPlayback(plugin, prepared, 'cancel', options);
+        await successFeedback(plugin, '已取消笔记', options);
+        return null;
+      }
+      result = action.time
+        ? await commitPreparedTypedNote(plugin, prepared, note)
+        : await commitPreparedPlainTypedNote(plugin, prepared, note);
+      await resumePreparedPlayback(plugin, prepared, 'save', options);
+    } else if (action.time) {
+      result = await insertCurrentLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
+    } else {
+      throw new Error('当前动作没有任何采集内容。');
+    }
+
+    await successFeedback(plugin, `✓ ${action.label}${resultTimeSuffix(action, result)}`, options);
+    return result;
+  } catch (error) {
+    const message = compactError(error);
+    if (!/PotPlayer 当前不是前台窗口/.test(message)) {
+      await feedback(`⚠ ${message}`, { ...options, toastOptions: { ...(options.toastOptions || {}), durationMs: 2200 } });
+    }
+    throw error;
+  } finally {
+    plugin._goStudyImmersiveBusy = false;
+  }
+}
+
+async function runImmersiveAction(plugin, key, options = {}) {
+  const actionId = LEGACY_ACTION_MAP[key];
+  if (!actionId) throw new Error(`未知沉浸式操作：${String(key || '')}`);
+  return runCaptureAction(plugin, actionId, options);
+}
+
+function closeActionHudSession(plugin) {
+  const session = plugin?._goStudyActionHudSession;
+  if (!session) return;
+  try { session.close?.(); } catch {}
+  if (plugin) plugin._goStudyActionHudSession = null;
+}
+
+function beginActionHud(plugin, globalShortcut, options = {}) {
+  const settings = currentProductSettings(plugin);
+  if (!settings.videoEnhancementEnabled) return null;
+  closeActionHudSession(plugin);
+
+  const api = globalShortcut || plugin?._goStudyGlobalShortcut;
+  if (!api?.register || !api?.unregister) {
+    void feedback('⚠ Go Study 动作盘无法使用全局键盘接口', options);
+    return null;
+  }
+
+  const hud = createNativeActionHud(settings.actionHudSlots, options.hudOptions || {});
+  if (!hud) {
+    void feedback('⚠ Go Study 动作盘窗口接口不可用', options);
+    return null;
+  }
+  const temporary = [];
+  let visible = false;
+  let selected = '';
+  let closed = false;
+  let showTimer = null;
+  let expiryTimer = null;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (showTimer) clearTimeout(showTimer);
+    if (expiryTimer) clearTimeout(expiryTimer);
+    for (const accelerator of temporary) {
+      try { api.unregister(accelerator); } catch {}
+    }
+    try { hud?.close?.(); } catch {}
+    if (plugin?._goStudyActionHudSession?.close === cleanup) plugin._goStudyActionHudSession = null;
+  };
+
+  const execute = (slot) => {
+    const action = actionForSlot(settings.actionHudSlots, slot);
+    cleanup();
+    void runCaptureAction(plugin, action, options).catch(() => {});
+  };
+
+  const chooseDirection = (slot) => {
+    if (!visible) return execute(slot);
+    selected = slot;
+    void hud?.select?.(slot);
+  };
+
+  const handlers = {
+    Up: () => chooseDirection('up'),
+    Down: () => chooseDirection('down'),
+    Left: () => chooseDirection('left'),
+    Right: () => chooseDirection('right'),
+    Enter: () => execute(selected || 'center'),
+    Escape: () => cleanup()
+  };
+
+  const failures = [];
+  for (const [accelerator, handler] of Object.entries(handlers)) {
+    try {
+      const ok = api.register(accelerator, handler);
+      if (ok === false) failures.push(accelerator);
+      else temporary.push(accelerator);
+    } catch {
+      failures.push(accelerator);
+    }
+  }
+  if (failures.length) {
+    cleanup();
+    void feedback(`⚠ 动作盘无法临时接管：${failures.join('、')}`, options);
+    return null;
+  }
+
+  const delay = Number(settings.actionHudDelayMs || 0);
+  showTimer = setTimeout(() => {
+    if (closed) return;
+    visible = true;
+    void hud?.show?.();
+  }, delay);
+  expiryTimer = setTimeout(cleanup, Math.max(8000, delay + 5000));
+
+  plugin._goStudyActionHudSession = {
+    close: cleanup,
+    execute,
+    select: chooseDirection,
+    get visible() { return visible; }
+  };
+  return plugin._goStudyActionHudSession;
+}
+
+function unregisterImmersiveHotkeys(plugin, globalShortcut = null) {
+  closeActionHudSession(plugin);
+  const api = globalShortcut || plugin?._goStudyGlobalShortcut;
+  const accelerators = plugin?._goStudyRegisteredAccelerators || [];
+  for (const accelerator of accelerators) {
+    try { api?.unregister?.(accelerator); } catch {}
+  }
+  if (plugin) plugin._goStudyRegisteredAccelerators = [];
+}
+
+function registrationConflict(settings, shortcuts) {
+  const mode = settings.shortcutMode;
+  if (mode === 'legacy' || mode === 'mixed') {
+    const conflict = shortcutConflict(shortcuts);
+    if (conflict) {
+      return `${HOTKEY_ACTIONS[conflict[0]]} 与 ${HOTKEY_ACTIONS[conflict[1]]} 使用了同一个快捷键：${conflict[2]}`;
+    }
+  }
+  if (mode === 'mixed') {
+    const hud = normalizeShortcut(settings.actionHudShortcut).toLowerCase();
+    for (const [key, value] of Object.entries(shortcuts)) {
+      if (hud && normalizeShortcut(value).toLowerCase() === hud) {
+        return `动作盘快捷键与 ${HOTKEY_ACTIONS[key]} 重复：${settings.actionHudShortcut}`;
+      }
+    }
+  }
+  return '';
+}
+
+function registerImmersiveHotkeys(plugin, options = {}) {
+  const api = resolveElectronGlobalShortcut(options);
+  unregisterImmersiveHotkeys(plugin, api);
+  plugin._goStudyGlobalShortcut = api;
+  const shortcuts = immersiveShortcuts(plugin);
+  const settings = currentProductSettings(plugin);
+  const enabled = settings.videoEnhancementEnabled;
+
+  if (!enabled) {
+    return setImmersiveStatus(plugin, {
+      mode: 'disabled', registered: false, shortcuts, registeredAccelerators: [], error: ''
+    });
+  }
+  const conflict = registrationConflict(settings, shortcuts);
+  if (conflict) {
+    return setImmersiveStatus(plugin, {
+      mode: 'unavailable', registered: false, shortcuts, registeredAccelerators: [], error: conflict
+    });
+  }
+  if (process.platform !== 'win32' && !options.allowNonWindows) {
+    return setImmersiveStatus(plugin, {
+      mode: 'unavailable', registered: false, shortcuts, error: '原生沉浸式快捷键目前只支持 Windows。'
+    });
+  }
+  if (!api?.register) {
+    return setImmersiveStatus(plugin, {
+      mode: 'unavailable', registered: false, shortcuts, error: 'Electron 全局快捷键接口不可用。'
+    });
+  }
+
+  const registered = [];
+  const failures = [];
+  const registerOne = (accelerator, callback) => {
+    if (!accelerator) return;
+    try {
+      const ok = api.register(accelerator, callback);
+      if (ok === false) failures.push(`${accelerator} 已被其他程序占用`);
+      else registered.push(accelerator);
+    } catch (error) {
+      failures.push(`${accelerator}: ${compactError(error)}`);
+    }
+  };
+
+  if (settings.shortcutMode === 'legacy' || settings.shortcutMode === 'mixed') {
+    for (const key of Object.keys(HOTKEY_ACTIONS)) {
+      let accelerator;
+      try { accelerator = normalizeShortcut(shortcuts[key]); }
+      catch (error) { failures.push(`${key}: ${compactError(error)}`); continue; }
+      registerOne(accelerator, () => void runImmersiveAction(plugin, key, options).catch(() => {}));
+    }
+  }
+
+  if (settings.shortcutMode === 'hud' || settings.shortcutMode === 'mixed') {
+    let master = '';
+    try { master = normalizeShortcut(settings.actionHudShortcut); }
+    catch (error) { failures.push(`HUD: ${compactError(error)}`); }
+    registerOne(master, () => beginActionHud(plugin, api, options));
+  }
+
+  plugin._goStudyRegisteredAccelerators = registered;
+  if (!plugin._goStudyHotkeyUnloadRegistered) {
+    plugin._goStudyHotkeyUnloadRegistered = true;
+    plugin.register?.(() => unregisterImmersiveHotkeys(plugin, api));
+  }
+  return setImmersiveStatus(plugin, {
+    mode: registered.length ? 'native-windows' : 'unavailable',
+    registered: registered.length > 0,
+    shortcuts,
+    shortcutMode: settings.shortcutMode,
+    actionHudShortcut: settings.actionHudShortcut,
+    registeredAccelerators: registered,
+    error: failures.join('；')
+  });
+}
+
+async function updateImmersiveShortcut(plugin, key, value, options = {}) {
+  if (!Object.prototype.hasOwnProperty.call(HOTKEY_ACTIONS, key)) throw new Error('未知快捷键。');
+  const normalized = normalizeShortcut(value);
+  const next = {
+    ...immersiveShortcuts(plugin),
+    [key]: normalized
+  };
+  const conflict = shortcutConflict(next);
+  if (conflict) throw new Error(`${HOTKEY_ACTIONS[conflict[0]]} 与 ${HOTKEY_ACTIONS[conflict[1]]} 不能使用同一个快捷键。`);
+  const settings = currentProductSettings(plugin);
+  if (settings.shortcutMode === 'mixed' && normalized
+    && normalized.toLowerCase() === normalizeShortcut(settings.actionHudShortcut).toLowerCase()) {
+    throw new Error('独立快捷键不能与动作盘主快捷键重复。');
+  }
+  plugin.state.uiState.immersiveShortcuts = next;
+  await plugin.persist();
+  return registerImmersiveHotkeys(plugin, options);
+}
+
+async function resetImmersiveShortcuts(plugin, options = {}) {
+  plugin.state.uiState.immersiveShortcuts = { ...DEFAULT_IMMERSIVE_SHORTCUTS };
+  await plugin.persist();
+  return registerImmersiveHotkeys(plugin, options);
+}
+
+module.exports = {
+  HOTKEY_ACTIONS,
+  LEGACY_ACTION_MAP,
+  beginActionHud,
+  closeActionHudSession,
+  compactError,
+  feedback,
+  immersiveStatus,
+  registerImmersiveHotkeys,
+  registrationConflict,
+  resetImmersiveShortcuts,
+  resumePreparedPlayback,
+  runCaptureAction,
+  runImmersiveAction,
+  setImmersiveStatus,
+  shortcutConflict,
+  successFeedback,
+  unregisterImmersiveHotkeys,
+  updateImmersiveShortcut
+};
+
+},
 "learning-capture.cjs": (module, exports, require) => {
 'use strict';
 
 const { Notice, requestUrl } = require('obsidian');
 const { clipboard } = require('electron');
-const { resolveActiveMediaSession } = __rhLoad("media-session.cjs");
+const { resolveUniversalMediaSession } = __rhLoad("media-session.cjs");
+const {
+  registerRememberedNoteTarget,
+  resolveRememberedNoteTarget
+} = __rhLoad("note-target.cjs");
+const { requestNativePotPlayer } = __rhLoad("native-potplayer.cjs");
 const { requestPotPlayerBridge } = __rhLoad("potplayer-bridge.cjs");
+const { currentProductSettings, normalizeCaptureFolder } = __rhLoad("product-settings.cjs");
 const { updateResumePosition } = __rhLoad("resource-resolver.cjs");
 const {
-  buildCaptureMarkdown,
-  buildPositionMarkdown,
-  captureFileName
+  buildContextCaptureMarkdown,
+  buildContextCaptureNoteMarkdown,
+  buildContextNoteMarkdown,
+  buildContextPositionMarkdown,
+  buildPlainCaptureMarkdown,
+  buildPlainCaptureNoteMarkdown,
+  buildPlainNoteMarkdown,
+  captureFileName,
+  freeformMediaTitle
 } = __rhLoad("resource-note.cjs");
 
 const CAPTURE_FOLDER = 'GoStudy/Captures';
 
-function activeEditor(plugin) {
-  const editor = plugin?.app?.workspace?.activeEditor?.editor;
-  if (!editor || typeof editor.replaceSelection !== 'function') {
-    throw new Error('请先把光标放到一个可编辑的 Markdown 笔记中。');
-  }
-  return editor;
+function activeEditor(plugin, preferredEditor = null) {
+  if (preferredEditor && typeof preferredEditor.replaceSelection === 'function') return preferredEditor;
+  return resolveRememberedNoteTarget(plugin).editor;
 }
 
-function resolveLearningContext(plugin, bridgeMedia) {
-  return resolveActiveMediaSession(
+function resolveLearningContext(plugin, playerMedia) {
+  const settings = currentProductSettings(plugin);
+  return resolveUniversalMediaSession(
     plugin.state,
     plugin.activeMediaSession,
-    bridgeMedia,
-    (resource) => plugin.resourceActions(resource)
+    playerMedia,
+    (resource) => plugin.resourceActions(resource),
+    { allowFreeform: settings.freeformVideoNotesEnabled }
   );
 }
 
+function noteOutputOptions(plugin) {
+  const settings = currentProductSettings(plugin);
+  return {
+    timeFormat: settings.timeDisplayFormat,
+    backlinkTemplate: settings.backlinkTemplate,
+    noteTemplate: settings.noteTemplate,
+    captureTemplate: settings.captureTemplate,
+    captureNoteTemplate: settings.captureNoteTemplate,
+    plainNoteTemplate: settings.plainNoteTemplate,
+    plainCaptureTemplate: settings.plainCaptureTemplate,
+    plainCaptureNoteTemplate: settings.plainCaptureNoteTemplate
+  };
+}
+
 async function persistRecordedPosition(plugin, resource, position) {
+  if (!resource?.id || !plugin.state.resources?.[resource.id]) return false;
   updateResumePosition(plugin.state.resources[resource.id], position);
   plugin.activeMediaSession = {
     ...(plugin.activeMediaSession || {}),
@@ -480,61 +1205,150 @@ async function persistRecordedPosition(plugin, resource, position) {
   };
   await plugin.persist();
   await plugin.workbenchLeaf?.view?.render?.();
+  return true;
+}
+
+async function requestLearningPlayer(plugin, action, options = {}) {
+  if (typeof options.bridgeRequest === 'function') {
+    return options.bridgeRequest(options.requestUrl || requestUrl, action, options.bridgeOptions || {});
+  }
+
+  let nativeError = null;
+  if (options.native !== false && (process.platform === 'win32' || options.nativeOptions?.allowNonWindows)) {
+    try {
+      return await (options.nativeRequest || requestNativePotPlayer)(action, {
+        ...(options.nativeOptions || {}),
+        pause: Boolean(options.pause)
+      });
+    } catch (error) {
+      nativeError = error;
+      if (options.nativeOnly) throw error;
+    }
+  }
+
+  try {
+    return await requestPotPlayerBridge(options.requestUrl || requestUrl, action, options.bridgeOptions || {});
+  } catch (bridgeError) {
+    if (nativeError) {
+      const message = nativeError instanceof Error ? nativeError.message : String(nativeError);
+      throw new Error(`Go Study 原生视频控制失败：${message}`);
+    }
+    throw bridgeError;
+  }
+}
+
+async function prepareCurrentLearningPosition(plugin, options = {}) {
+  const editor = activeEditor(plugin, options.editor);
+  const response = await requestLearningPlayer(plugin, 'current', options);
+  const context = resolveLearningContext(plugin, response.media);
+  return { ...context, editor, player: response };
+}
+
+async function insertPreparedMarkdown(plugin, prepared, markdown) {
+  if (!prepared?.editor || typeof prepared.editor.replaceSelection !== 'function') {
+    throw new Error('最近的学习笔记已经关闭或不可编辑。');
+  }
+  prepared.editor.replaceSelection(markdown);
+  await persistRecordedPosition(plugin, prepared.resource, prepared.position);
+  return { ...prepared, markdown };
 }
 
 async function insertCurrentLearningPosition(plugin, options = {}) {
-  const bridgeRequest = options.bridgeRequest || requestPotPlayerBridge;
-  const response = await bridgeRequest(options.requestUrl || requestUrl, 'current', options.bridgeOptions || {});
-  const context = resolveLearningContext(plugin, response.media);
-  const markdown = buildPositionMarkdown(context.resource, context.position);
-  activeEditor(plugin).replaceSelection(markdown);
-  await persistRecordedPosition(plugin, context.resource, context.position);
-  return { ...context, markdown };
+  const prepared = await prepareCurrentLearningPosition(plugin, options);
+  return insertPreparedMarkdown(
+    plugin,
+    prepared,
+    buildContextPositionMarkdown(prepared, noteOutputOptions(plugin))
+  );
 }
 
 async function ensureVaultFolder(vault, folderPath = CAPTURE_FOLDER) {
   if (!vault || typeof vault.getAbstractFileByPath !== 'function' || typeof vault.createFolder !== 'function') {
     throw new Error('当前 Vault 不支持创建截图目录。');
   }
-  const parts = String(folderPath || '').split('/').filter(Boolean);
+  const safeFolder = normalizeCaptureFolder(folderPath);
+  if (!safeFolder) return '';
+  const parts = safeFolder.split('/').filter(Boolean);
   let current = '';
   for (const part of parts) {
     current = current ? `${current}/${part}` : part;
-    if (!vault.getAbstractFileByPath(current)) await vault.createFolder(current);
+    if (vault.getAbstractFileByPath(current)) continue;
+    try {
+      await vault.createFolder(current);
+    } catch (error) {
+      if (!vault.getAbstractFileByPath(current)) throw error;
+    }
   }
-  return folderPath;
+  return safeFolder;
 }
 
-function capturePathCandidate(resource, position, index = 1) {
+function capturePathCandidate(resource, position, index = 1, folderPath = CAPTURE_FOLDER) {
+  const folder = normalizeCaptureFolder(folderPath);
   const base = captureFileName(resource, position, 'png');
-  if (index <= 1) return `${CAPTURE_FOLDER}/${base}`;
+  const join = (name) => folder ? `${folder}/${name}` : name;
+  if (index <= 1) return join(base);
   const dot = base.lastIndexOf('.');
   const stem = dot >= 0 ? base.slice(0, dot) : base;
   const ext = dot >= 0 ? base.slice(dot) : '';
-  return `${CAPTURE_FOLDER}/${stem}-${index}${ext}`;
+  return join(`${stem}-${index}${ext}`);
 }
 
-function uniqueCapturePath(vault, resource, position) {
+function uniqueCapturePath(vault, resource, position, folderPath = CAPTURE_FOLDER) {
   for (let index = 1; index <= 999; index += 1) {
-    const candidate = capturePathCandidate(resource, position, index);
+    const candidate = capturePathCandidate(resource, position, index, folderPath);
     if (!vault.getAbstractFileByPath(candidate)) return candidate;
   }
   throw new Error('同一位置的截图文件过多，无法生成唯一文件名。');
 }
 
-function clipboardPngBuffer() {
-  if (!clipboard?.readImage) throw new Error('Electron 剪贴板图片接口不可用。');
-  const image = clipboard.readImage();
-  if (!image || image.isEmpty?.()) throw new Error('Bridge 没有把有效截图写入剪贴板。');
+function clipboardPngBuffer(clipboardImpl = clipboard) {
+  if (!clipboardImpl?.readImage) throw new Error('Electron 剪贴板图片接口不可用。');
+  const image = clipboardImpl.readImage();
+  if (!image || image.isEmpty?.()) throw new Error('播放器没有把有效截图写入剪贴板。');
   const png = image.toPNG?.();
-  if (!png || !png.length) throw new Error('无法把 Bridge 截图转换为 PNG。');
+  if (!png || !png.length) throw new Error('无法把播放器截图转换为 PNG。');
   return Buffer.from(png);
 }
 
-async function saveCaptureToVault(plugin, resource, position, pngBuffer) {
+function learningNoteSourcePath(plugin) {
+  try { return String(resolveRememberedNoteTarget(plugin).filePath || ''); }
+  catch { return String(plugin?.app?.workspace?.getActiveFile?.()?.path || ''); }
+}
+
+async function systemAttachmentCapturePath(plugin, resource, position) {
   const vault = plugin?.app?.vault;
-  await ensureVaultFolder(vault);
-  const vaultPath = uniqueCapturePath(vault, resource, position);
+  const fileManager = plugin?.app?.fileManager;
+  const filename = captureFileName(resource, position, 'png');
+  const sourcePath = learningNoteSourcePath(plugin);
+  if (typeof fileManager?.getAvailablePathForAttachment === 'function') {
+    const resolved = String(await fileManager.getAvailablePathForAttachment(filename, sourcePath) || '')
+      .replace(/\\/g, '/')
+      .replace(/^\/+/, '');
+    if (resolved) {
+      const parent = resolved.includes('/') ? resolved.slice(0, resolved.lastIndexOf('/')) : '';
+      if (parent) await ensureVaultFolder(vault, parent);
+      return resolved;
+    }
+  }
+  return uniqueCapturePath(vault, resource, position, '');
+}
+
+function captureSubject(resource, context = {}) {
+  if (resource?.title) return resource;
+  return { title: freeformMediaTitle(context.bridgeMedia || context.freeform || {}) };
+}
+
+async function saveCaptureToVault(plugin, resource, position, pngBuffer, context = {}) {
+  const vault = plugin?.app?.vault;
+  const subject = captureSubject(resource, context);
+  const folder = currentProductSettings(plugin).captureFolder;
+  let vaultPath;
+  if (folder) {
+    await ensureVaultFolder(vault, folder);
+    vaultPath = uniqueCapturePath(vault, subject, position, folder);
+  } else {
+    vaultPath = await systemAttachmentCapturePath(plugin, subject, position);
+  }
   if (typeof vault.createBinary !== 'function') throw new Error('当前 Vault 不支持写入二进制截图。');
   const bytes = Buffer.from(pngBuffer || []);
   if (!bytes.length) throw new Error('截图数据为空。');
@@ -543,35 +1357,131 @@ async function saveCaptureToVault(plugin, resource, position, pngBuffer) {
   return vaultPath;
 }
 
-async function captureFrameAndInsertLearningPosition(plugin, options = {}) {
-  const bridgeRequest = options.bridgeRequest || requestPotPlayerBridge;
-  const response = await bridgeRequest(options.requestUrl || requestUrl, 'capture', options.bridgeOptions || {});
+async function prepareCaptureLearningPosition(plugin, options = {}) {
+  const editor = activeEditor(plugin, options.editor);
+  const response = await requestLearningPlayer(plugin, 'capture', options);
   const context = resolveLearningContext(plugin, response.media);
-  const png = options.readClipboardPng ? options.readClipboardPng() : clipboardPngBuffer();
-  const vaultPath = await saveCaptureToVault(plugin, context.resource, context.position, png);
-  const markdown = buildCaptureMarkdown(context.resource, context.position, vaultPath);
-  activeEditor(plugin).replaceSelection(markdown);
-  await persistRecordedPosition(plugin, context.resource, context.position);
-  return { ...context, markdown, vaultPath };
+  const png = options.readClipboardPng ? options.readClipboardPng() : clipboardPngBuffer(options.clipboard || clipboard);
+  return { ...context, editor, player: response, png };
+}
+
+async function commitPreparedCapture(plugin, prepared, markdownBuilder) {
+  const vaultPath = await saveCaptureToVault(plugin, prepared.resource, prepared.position, prepared.png, prepared);
+  const markdown = markdownBuilder(vaultPath);
+  const result = await insertPreparedMarkdown(plugin, prepared, markdown);
+  return { ...result, vaultPath };
+}
+
+async function captureFrameAndInsertLearningPosition(plugin, options = {}) {
+  const prepared = await prepareCaptureLearningPosition(plugin, options);
+  return commitPreparedCapture(
+    plugin,
+    prepared,
+    (vaultPath) => buildContextCaptureMarkdown(prepared, vaultPath, noteOutputOptions(plugin))
+  );
+}
+
+async function commitPreparedTypedNote(plugin, prepared, noteText) {
+  return insertPreparedMarkdown(
+    plugin,
+    prepared,
+    buildContextNoteMarkdown(prepared, noteText, noteOutputOptions(plugin))
+  );
+}
+
+async function commitPreparedCaptureTypedNote(plugin, prepared, noteText) {
+  return commitPreparedCapture(
+    plugin,
+    prepared,
+    (vaultPath) => buildContextCaptureNoteMarkdown(
+      prepared,
+      vaultPath,
+      noteText,
+      noteOutputOptions(plugin)
+    )
+  );
+}
+
+async function insertPlainTypedNote(plugin, noteText, options = {}) {
+  const editor = activeEditor(plugin, options.editor);
+  const markdown = buildPlainNoteMarkdown(noteText, noteOutputOptions(plugin));
+  editor.replaceSelection(markdown);
+  return { mode: 'plain', editor, markdown };
+}
+async function commitPreparedPlainTypedNote(plugin, prepared, noteText) {
+  return insertPreparedMarkdown(
+    plugin,
+    prepared,
+    buildPlainNoteMarkdown(noteText, noteOutputOptions(plugin))
+  );
+}
+
+
+async function commitPreparedPlainCapture(plugin, prepared) {
+  return commitPreparedCapture(
+    plugin,
+    prepared,
+    (vaultPath) => buildPlainCaptureMarkdown(vaultPath, noteOutputOptions(plugin))
+  );
+}
+
+async function commitPreparedPlainCaptureTypedNote(plugin, prepared, noteText) {
+  return commitPreparedCapture(
+    plugin,
+    prepared,
+    (vaultPath) => buildPlainCaptureNoteMarkdown(vaultPath, noteText, noteOutputOptions(plugin))
+  );
+}
+
+async function checkPotPlayerBridge(options = {}) {
+  if (typeof options.bridgeRequest === 'function') {
+    return options.bridgeRequest(options.requestUrl || requestUrl, 'ping', options.bridgeOptions || {});
+  }
+  if (options.native !== false && (process.platform === 'win32' || options.nativeOptions?.allowNonWindows)) {
+    try { return await (options.nativeRequest || requestNativePotPlayer)('ping', options.nativeOptions || {}); }
+    catch (error) { if (options.nativeOnly) throw error; }
+  }
+  return requestPotPlayerBridge(options.requestUrl || requestUrl, 'ping', options.bridgeOptions || {});
+}
+
+function commandErrorText(prefix, error) {
+  return `${prefix}：${error instanceof Error ? error.message : String(error)}`;
 }
 
 function registerLearningCaptureCommands(plugin) {
+  registerRememberedNoteTarget(plugin);
+
+  plugin.addCommand({
+    id: 'check-potplayer-bridge',
+    name: '检查视频笔记增强状态',
+    callback: () => {
+      new Notice('正在检查视频笔记增强…', 1500);
+      void checkPotPlayerBridge()
+        .then((result) => new Notice(`视频笔记增强已连接 · ${result.transport || `协议 v${result.version}`}`))
+        .catch((error) => new Notice(commandErrorText('视频笔记增强不可用', error), 6000));
+    }
+  });
   plugin.addCommand({
     id: 'insert-current-learning-position',
     name: '插入当前学习位置',
     callback: () => {
+      new Notice('正在读取 PotPlayer 当前学习位置…', 1500);
       void insertCurrentLearningPosition(plugin)
-        .then((result) => new Notice(`已记录：${result.resource.title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`))
-        .catch((error) => new Notice(`记录学习位置失败：${error instanceof Error ? error.message : String(error)}`, 6000));
+        .then((result) => {
+          const title = result.resource?.title || freeformMediaTitle(result.bridgeMedia || result.freeform || {});
+          new Notice(`已记录：${title} · ${result.markdown.match(/\d{2}:\d{2}(?::\d{2})?/)?.[0] || ''}`);
+        })
+        .catch((error) => new Notice(commandErrorText('记录学习位置失败', error), 6000));
     }
   });
   plugin.addCommand({
     id: 'capture-frame-and-insert-learning-position',
     name: '截图并插入当前学习位置',
     callback: () => {
+      new Notice('正在读取 PotPlayer 当前帧…', 1500);
       void captureFrameAndInsertLearningPosition(plugin)
         .then((result) => new Notice(`截图已保存：${result.vaultPath}`))
-        .catch((error) => new Notice(`截图记录失败：${error instanceof Error ? error.message : String(error)}`, 6000));
+        .catch((error) => new Notice(commandErrorText('截图记录失败', error), 6000));
     }
   });
 }
@@ -581,14 +1491,190 @@ module.exports = {
   activeEditor,
   captureFrameAndInsertLearningPosition,
   capturePathCandidate,
+  checkPotPlayerBridge,
   clipboardPngBuffer,
+  commandErrorText,
+  commitPreparedCapture,
+  commitPreparedCaptureTypedNote,
+  commitPreparedPlainCapture,
+  commitPreparedPlainCaptureTypedNote,
+  commitPreparedPlainTypedNote,
+  commitPreparedTypedNote,
   ensureVaultFolder,
   insertCurrentLearningPosition,
+  insertPlainTypedNote,
+  insertPreparedMarkdown,
+  noteOutputOptions,
   persistRecordedPosition,
+  prepareCaptureLearningPosition,
+  prepareCurrentLearningPosition,
   registerLearningCaptureCommands,
+  requestLearningPlayer,
   resolveLearningContext,
   saveCaptureToVault,
+  captureSubject,
+  systemAttachmentCapturePath,
   uniqueCapturePath
+};
+
+},
+"learning-controls-ui.cjs": (module, exports, require) => {
+'use strict';
+
+const { Menu, Notice } = require('obsidian');
+const { immersiveStatus } = __rhLoad("immersive-hotkeys.cjs");
+const { currentProductSettings } = __rhLoad("product-settings.cjs");
+const {
+  OpenListFolderRemapModal,
+  OpenListResourceRelinkModal
+} = __rhLoad("resource-relink-ui.cjs");
+
+function safePluginId(value) {
+  const id = String(value || '').trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('无法为沉浸式控件生成安全作用域。');
+  return id;
+}
+
+function controlScope(pluginId) {
+  return `.workspace-leaf-content[data-type="${safePluginId(pluginId)}-workbench"]`;
+}
+
+function learningControlsCss(pluginId) {
+  const scope = controlScope(pluginId);
+  return `${scope} .rh-next-immersive-status {
+  width: 24px;
+  height: 24px;
+  min-width: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 24px;
+  text-align: center;
+  cursor: default;
+}
+${scope} .rh-next-immersive-status.is-ready { color: var(--text-success); }
+${scope} .rh-next-immersive-status.is-error { color: var(--text-error); }
+.go-study-settings-heading {
+  margin-top: 1.6em;
+  margin-bottom: .35em;
+}
+`;
+}
+
+function statusText(plugin) {
+  const settings = currentProductSettings(plugin);
+  if (!settings.videoEnhancementEnabled) return '视频笔记增强已关闭。';
+  const status = immersiveStatus(plugin);
+  if (status.registered) {
+    const count = status.registeredAccelerators?.length || 0;
+    return `Windows 视频笔记增强已就绪 · ${count || 4} 个全局快捷键`;
+  }
+  return status.error || '视频笔记增强尚未就绪。';
+}
+
+function renderImmersiveStatus(plugin, root, doc = globalThis.document) {
+  const actions = root?.querySelector?.('.rh-next-header-actions');
+  if (!actions) return null;
+  const existing = actions.querySelector?.('[data-go-study-immersive-status]');
+  if (!currentProductSettings(plugin).videoEnhancementEnabled) {
+    existing?.remove?.();
+    return null;
+  }
+  const status = immersiveStatus(plugin);
+  if (existing) {
+    existing.className = `rh-next-immersive-status ${status.registered ? 'is-ready' : 'is-error'}`;
+    existing.textContent = status.registered ? '●' : '○';
+    existing.title = statusText(plugin);
+    existing.setAttribute('aria-label', statusText(plugin));
+    return existing;
+  }
+  const button = doc.createElement('button');
+  button.type = 'button';
+  button.className = `rh-next-immersive-status ${status.registered ? 'is-ready' : 'is-error'}`;
+  button.setAttribute('data-go-study-immersive-status', 'true');
+  button.setAttribute('aria-label', statusText(plugin));
+  button.title = statusText(plugin);
+  button.textContent = status.registered ? '●' : '○';
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    new Notice(statusText(plugin), 3500);
+  });
+  actions.prepend(button);
+  return button;
+}
+
+function showCourseManagementMenu(plugin, event) {
+  const menu = new Menu();
+  menu.addItem((item) => item
+    .setTitle('重新关联 OpenList 课程目录')
+    .setIcon('folder-sync')
+    .onClick(() => new OpenListFolderRemapModal(plugin.app, plugin).open()));
+  menu.addItem((item) => item
+    .setTitle('重新关联单个 OpenList 文件（高级）')
+    .setIcon('file-cog')
+    .onClick(() => new OpenListResourceRelinkModal(plugin.app, plugin).open()));
+  menu.showAtMouseEvent(event);
+  return menu;
+}
+
+function bindProjectCourseMenu(plugin, root) {
+  const heading = root?.querySelector?.('.rh-next-project-heading');
+  if (!heading || heading.dataset.goStudyCourseMenuBound === 'true') return false;
+  heading.dataset.goStudyCourseMenuBound = 'true';
+  heading.title = heading.title || '右键打开课程管理';
+  heading.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    showCourseManagementMenu(plugin, event);
+  });
+  return true;
+}
+
+function installLearningControls(plugin, doc = globalThis.document) {
+  if (!plugin?.manifest?.id || !doc?.querySelectorAll || !doc?.createElement) return null;
+  const scope = controlScope(plugin.manifest.id);
+  const inject = () => {
+    for (const leaf of doc.querySelectorAll(scope)) {
+      const root = leaf.querySelector?.('.rh-next-workbench');
+      if (!root) continue;
+      renderImmersiveStatus(plugin, root, doc);
+      bindProjectCourseMenu(plugin, root);
+    }
+  };
+
+  const style = doc.createElement('style');
+  style.setAttribute('data-go-study-learning-controls-style', safePluginId(plugin.manifest.id));
+  style.textContent = learningControlsCss(plugin.manifest.id);
+  doc.head?.appendChild?.(style);
+
+  inject();
+  const Observer = doc.defaultView?.MutationObserver || globalThis.MutationObserver;
+  const observer = Observer ? new Observer(() => inject()) : null;
+  observer?.observe?.(doc.body, { childList: true, subtree: true });
+  const statusListener = () => inject();
+  doc.addEventListener?.('go-study-immersive-status', statusListener);
+
+  plugin.register?.(() => {
+    observer?.disconnect?.();
+    doc.removeEventListener?.('go-study-immersive-status', statusListener);
+    style.remove?.();
+  });
+  return { observer, style, inject };
+}
+
+module.exports = {
+  bindProjectCourseMenu,
+  controlScope,
+  installLearningControls,
+  learningControlsCss,
+  renderImmersiveStatus,
+  safePluginId,
+  showCourseManagementMenu,
+  statusText
 };
 
 },
@@ -4503,32 +5589,81 @@ function targetMatchesBridgeMedia(state, resource, target, mediaPath) {
   return normalizeLocalMediaPath(expected) === normalizeLocalMediaPath(mediaPath);
 }
 
+function validatedBridgePosition(bridgeMedia) {
+  if (!bridgeMedia?.path) throw new Error('PotPlayer 当前媒体无法识别。');
+  const seconds = Number(bridgeMedia.positionSeconds);
+  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('PotPlayer 当前播放位置无效。');
+  return { type: 'time', seconds };
+}
+
+function matchingManagedResource(state, mediaPath, resolveActions, preferredResourceId = '') {
+  if (typeof resolveActions !== 'function') throw new Error('资源启动解析器不可用。');
+  const resources = Object.values(state?.resources || {}).filter((resource) => resource && !resource.deletedAt);
+  const matches = (resource) => {
+    try {
+      const actions = resolveActions(resource) || {};
+      return Boolean(actions.playTarget && targetMatchesBridgeMedia(state, resource, actions.playTarget, mediaPath));
+    } catch {
+      return false;
+    }
+  };
+  if (preferredResourceId) {
+    const preferred = state?.resources?.[preferredResourceId];
+    if (preferred && !preferred.deletedAt && matches(preferred)) return preferred;
+  }
+  return resources.find((resource) => resource.id !== preferredResourceId && matches(resource)) || null;
+}
+
+function resolveUniversalMediaSession(state, activeSession, bridgeMedia, resolveActions, options = {}) {
+  const position = validatedBridgePosition(bridgeMedia);
+  const preferredResourceId = String(activeSession?.resourceId || '');
+  const resource = matchingManagedResource(state, bridgeMedia.path, resolveActions, preferredResourceId);
+  if (resource) {
+    return {
+      mode: 'managed',
+      resource,
+      position,
+      bridgeMedia
+    };
+  }
+  if (options.allowFreeform === false) {
+    throw new Error('PotPlayer 当前媒体没有匹配到 Go Study 资源；请先从 Go Study 启动或收录该视频。');
+  }
+  return {
+    mode: 'freeform',
+    resource: null,
+    position,
+    bridgeMedia,
+    freeform: {
+      path: String(bridgeMedia.path || '').trim(),
+      title: String(bridgeMedia.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '').trim()
+    }
+  };
+}
+
 function resolveActiveMediaSession(state, activeSession, bridgeMedia, resolveActions) {
   const resourceId = String(activeSession?.resourceId || '');
   const resource = state?.resources?.[resourceId];
   if (!resource || resource.deletedAt) throw new Error('当前没有有效的 Go Study 学习会话，请先从 Go Study 启动资源。');
-  if (!bridgeMedia?.path) throw new Error('PotPlayer 当前媒体无法识别。');
+  const position = validatedBridgePosition(bridgeMedia);
   if (typeof resolveActions !== 'function') throw new Error('资源启动解析器不可用。');
   const actions = resolveActions(resource) || {};
   if (!actions.playTarget) throw new Error('当前学习资源没有可验证的视频播放目标。');
   if (!targetMatchesBridgeMedia(state, resource, actions.playTarget, bridgeMedia.path)) {
     throw new Error('PotPlayer 当前媒体与 Go Study 最近启动的资源不一致；为避免把笔记记到错误课程，已停止插入。');
   }
-  const seconds = Number(bridgeMedia.positionSeconds);
-  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('PotPlayer 当前播放位置无效。');
-  return {
-    resource,
-    position: { type: 'time', seconds },
-    bridgeMedia
-  };
+  return { resource, position, bridgeMedia };
 }
 
 module.exports = {
   comparableWebUrl,
   normalizeLocalMediaPath,
   openListMediaMatches,
+  matchingManagedResource,
   resolveActiveMediaSession,
+  resolveUniversalMediaSession,
   targetMatchesBridgeMedia,
+  validatedBridgePosition,
   tryUrl
 };
 
@@ -6825,14 +7960,380 @@ module.exports = {
 };
 
 },
+"native-potplayer.cjs": (module, exports, require) => {
+'use strict';
+
+const { execFile } = require('node:child_process');
+const { clipboard } = require('electron');
+
+const DEFAULT_IMMERSIVE_SHORTCUTS = Object.freeze({
+  position: 'Alt+1',
+  capture: 'Alt+2',
+  note: 'Alt+3',
+  captureNote: 'Alt+4'
+});
+
+const POTPLAYER_PROCESS_NAMES = ['PotPlayerMini64', 'PotPlayerMini'];
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function immersiveShortcuts(plugin) {
+  const saved = plugin?.state?.uiState?.immersiveShortcuts;
+  return {
+    ...DEFAULT_IMMERSIVE_SHORTCUTS,
+    ...(saved && typeof saved === 'object' ? saved : {})
+  };
+}
+
+function normalizeShortcut(value, fallback = '') {
+  const shortcut = String(value || '').trim();
+  if (!shortcut) return fallback;
+  if (shortcut.length > 40 || /[\r\n\t]/.test(shortcut)) throw new Error('快捷键格式无效。');
+  return shortcut;
+}
+
+function powershellExecutable(env = process.env) {
+  const root = String(env.SystemRoot || env.WINDIR || 'C:\\Windows');
+  return `${root}\\System32\\WindowsPowerShell\\v1.0\\powershell.exe`;
+}
+
+function runPowerShell(script, options = {}) {
+  const exec = options.execFile || execFile;
+  const executable = options.executable || powershellExecutable(options.env || process.env);
+  return new Promise((resolve, reject) => {
+    exec(executable, [
+      '-NoLogo',
+      '-NoProfile',
+      '-NonInteractive',
+      '-ExecutionPolicy', 'Bypass',
+      '-Command', script
+    ], {
+      windowsHide: true,
+      timeout: Number(options.timeoutMs || 4000),
+      maxBuffer: 64 * 1024,
+      encoding: 'utf8'
+    }, (error, stdout, stderr) => {
+      if (error) {
+        const detail = String(stderr || error.message || error).trim();
+        reject(new Error(detail || 'Windows PotPlayer 控制失败。'));
+        return;
+      }
+      const raw = String(stdout || '').trim().split(/\r?\n/).filter(Boolean).pop() || '';
+      if (!raw) return reject(new Error('PotPlayer 没有返回状态。'));
+      try { resolve(JSON.parse(raw)); }
+      catch { reject(new Error(`PotPlayer 返回了无法解析的状态：${raw.slice(0, 160)}`)); }
+    });
+  });
+}
+
+function potPlayerProbeScript(options = {}) {
+  const pause = options.pause ? '$true' : '$false';
+  const play = options.play ? '$true' : '$false';
+  const foregroundOnly = options.foregroundOnly === false ? '$false' : '$true';
+  const copyPath = options.copyPath ? '$true' : '$false';
+  const capture = options.capture ? '$true' : '$false';
+  const names = POTPLAYER_PROCESS_NAMES.map((name) => `'${name.replace(/'/g, "''")}'`).join(',');
+  return `
+$ErrorActionPreference = 'Stop'
+Add-Type @'
+using System;
+using System.Runtime.InteropServices;
+public static class GoStudyWin32 {
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern IntPtr SendMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern bool PostMessage(IntPtr hWnd, UInt32 Msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+'@
+$names = @(${names})
+$proc = Get-Process | Where-Object { $names -contains $_.ProcessName -and $_.MainWindowHandle -ne 0 } | Select-Object -First 1
+if (-not $proc) { throw 'PotPlayer 当前没有运行。' }
+$hwnd = [IntPtr]$proc.MainWindowHandle
+$foreground = [GoStudyWin32]::GetForegroundWindow()
+if (${foregroundOnly} -and $foreground -ne $hwnd) { throw 'PotPlayer 当前不是前台窗口。' }
+$positionMs = [GoStudyWin32]::SendMessage($hwnd, 1024, [IntPtr]20484, [IntPtr]0).ToInt64()
+$status = [GoStudyWin32]::SendMessage($hwnd, 1024, [IntPtr]20486, [IntPtr]0).ToInt64()
+$initialStatus = $status
+$pausedByGoStudy = $false
+if (${pause} -and $status -eq 2) {
+  [void][GoStudyWin32]::PostMessage($hwnd, 273, [IntPtr]20000, [IntPtr]0)
+  Start-Sleep -Milliseconds 45
+  $status = [GoStudyWin32]::SendMessage($hwnd, 1024, [IntPtr]20486, [IntPtr]0).ToInt64()
+  $pausedByGoStudy = $true
+}
+if (${play} -and $status -ne 2) {
+  [void][GoStudyWin32]::PostMessage($hwnd, 273, [IntPtr]20000, [IntPtr]0)
+  Start-Sleep -Milliseconds 45
+  $status = [GoStudyWin32]::SendMessage($hwnd, 1024, [IntPtr]20486, [IntPtr]0).ToInt64()
+}
+if (${copyPath}) {
+  [void][GoStudyWin32]::PostMessage($hwnd, 273, [IntPtr]10928, [IntPtr]0)
+  Start-Sleep -Milliseconds 140
+}
+if (${capture}) {
+  [void][GoStudyWin32]::SendMessage($hwnd, 273, [IntPtr]10223, [IntPtr]0)
+  Start-Sleep -Milliseconds 120
+}
+[pscustomobject]@{
+  ok = $true
+  process = $proc.ProcessName
+  title = $proc.MainWindowTitle
+  positionMs = $positionMs
+  status = $status
+  initialStatus = $initialStatus
+  pausedByGoStudy = $pausedByGoStudy
+  foreground = ($foreground -eq $hwnd)
+} | ConvertTo-Json -Compress
+`;
+}
+
+function validateNativeProbe(probe) {
+  if (!probe?.ok) throw new Error('PotPlayer 原生控制不可用。');
+  const ms = Number(probe.positionMs);
+  if (!Number.isFinite(ms) || ms < 0) throw new Error('PotPlayer 当前播放位置无效。');
+  return { ...probe, positionMs: ms, positionSeconds: ms / 1000 };
+}
+
+async function nativeCurrent(options = {}) {
+  if (process.platform !== 'win32' && !options.allowNonWindows) throw new Error('原生 PotPlayer 控制目前只支持 Windows。');
+  const clip = options.clipboard || clipboard;
+  const probe = validateNativeProbe(await (options.runPowerShell || runPowerShell)(
+    potPlayerProbeScript({ pause: options.pause, copyPath: true, foregroundOnly: options.foregroundOnly !== false }),
+    options
+  ));
+  await (options.sleep || sleep)(Number(options.clipboardDelayMs || 40));
+  const mediaPath = String(clip?.readText?.() || '').trim();
+  if (!mediaPath) throw new Error('无法从 PotPlayer 读取当前媒体路径。');
+  return {
+    ok: true,
+    version: 3,
+    bridge: 'go-study-native-windows',
+    player: 'potplayer',
+    transport: 'native-windows',
+    control: {
+      initialStatus: Number(probe.initialStatus),
+      status: Number(probe.status),
+      pausedByGoStudy: Boolean(probe.pausedByGoStudy)
+    },
+    media: {
+      path: mediaPath,
+      positionSeconds: probe.positionSeconds,
+      status: probe.status,
+      title: String(probe.title || '')
+    }
+  };
+}
+
+async function nativeCapture(options = {}) {
+  const current = await nativeCurrent(options);
+  const clip = options.clipboard || clipboard;
+  await (options.runPowerShell || runPowerShell)(
+    potPlayerProbeScript({ capture: true, foregroundOnly: options.foregroundOnly !== false }),
+    options
+  );
+  await (options.sleep || sleep)(Number(options.captureDelayMs || 50));
+  const image = clip?.readImage?.();
+  if (!image || image.isEmpty?.()) throw new Error('无法从 PotPlayer 获取当前视频帧。');
+  return { ...current, capture: { transport: 'clipboard', cropped: false } };
+}
+
+async function nativePlay(options = {}) {
+  const probe = validateNativeProbe(await (options.runPowerShell || runPowerShell)(
+    potPlayerProbeScript({ play: true, foregroundOnly: false }),
+    options
+  ));
+  return {
+    ok: true,
+    version: 3,
+    bridge: 'go-study-native-windows',
+    player: 'potplayer',
+    transport: 'native-windows',
+    status: probe.status
+  };
+}
+
+async function requestNativePotPlayer(action, options = {}) {
+  if (action === 'ping') {
+    const probe = validateNativeProbe(await (options.runPowerShell || runPowerShell)(
+      potPlayerProbeScript({ foregroundOnly: false }),
+      options
+    ));
+    return {
+      ok: true,
+      version: 3,
+      bridge: 'go-study-native-windows',
+      player: 'potplayer',
+      transport: 'native-windows',
+      status: probe.status
+    };
+  }
+  if (action === 'current') return nativeCurrent(options);
+  if (action === 'capture') return nativeCapture(options);
+  if (action === 'play') return nativePlay(options);
+  throw new Error(`不支持的原生 PotPlayer 操作：${String(action || '')}`);
+}
+
+function resolveElectronGlobalShortcut(options = {}) {
+  if (options.globalShortcut) return options.globalShortcut;
+  try {
+    const electron = require('electron');
+    if (electron.globalShortcut?.register) return electron.globalShortcut;
+  } catch {}
+  try {
+    const remote = require('@electron/remote');
+    const mainElectron = remote.require('electron');
+    if (mainElectron?.globalShortcut?.register) return mainElectron.globalShortcut;
+  } catch {}
+  return null;
+}
+
+module.exports = {
+  DEFAULT_IMMERSIVE_SHORTCUTS,
+  POTPLAYER_PROCESS_NAMES,
+  immersiveShortcuts,
+  nativeCapture,
+  nativeCurrent,
+  nativePlay,
+  normalizeShortcut,
+  potPlayerProbeScript,
+  powershellExecutable,
+  requestNativePotPlayer,
+  resolveElectronGlobalShortcut,
+  runPowerShell,
+  sleep,
+  validateNativeProbe
+};
+
+},
+"note-target.cjs": (module, exports, require) => {
+'use strict';
+
+function isEditableMarkdownEditor(editor) {
+  return !!editor && typeof editor.replaceSelection === 'function';
+}
+
+function normalizeFilePath(file) {
+  return String(file?.path || '').trim();
+}
+
+function rememberNoteTarget(plugin, editor, file) {
+  if (!plugin || !isEditableMarkdownEditor(editor)) return false;
+  const filePath = normalizeFilePath(file);
+  if (!filePath) return false;
+  plugin._goStudyNoteTarget = {
+    editor,
+    filePath,
+    rememberedAt: Date.now()
+  };
+  return true;
+}
+
+function captureActiveNoteTarget(plugin) {
+  const workspace = plugin?.app?.workspace;
+  const active = workspace?.activeEditor;
+  const editor = active?.editor;
+  const file = active?.file || workspace?.getActiveFile?.();
+  return rememberNoteTarget(plugin, editor, file);
+}
+
+function markdownLeaves(workspace) {
+  if (!workspace?.getLeavesOfType) return [];
+  try { return workspace.getLeavesOfType('markdown') || []; }
+  catch { return []; }
+}
+
+function targetLeaf(workspace, target) {
+  if (!target?.filePath || !target?.editor) return null;
+  return markdownLeaves(workspace).find((leaf) => {
+    const view = leaf?.view;
+    return String(view?.file?.path || '') === target.filePath
+      && view?.editor === target.editor
+      && isEditableMarkdownEditor(view.editor);
+  }) || null;
+}
+
+function resolveRememberedNoteTarget(plugin) {
+  const workspace = plugin?.app?.workspace;
+  const active = workspace?.activeEditor;
+  if (isEditableMarkdownEditor(active?.editor) && normalizeFilePath(active?.file || workspace?.getActiveFile?.())) {
+    rememberNoteTarget(plugin, active.editor, active.file || workspace.getActiveFile?.());
+    return {
+      editor: active.editor,
+      filePath: normalizeFilePath(active.file || workspace.getActiveFile?.()),
+      source: 'active'
+    };
+  }
+
+  const target = plugin?._goStudyNoteTarget;
+  const leaf = targetLeaf(workspace, target);
+  if (!leaf) {
+    if (plugin) plugin._goStudyNoteTarget = null;
+    throw new Error('最近的学习笔记已经关闭或不可编辑，请先打开一个可编辑的 Markdown 笔记，并把光标放到目标正文中。');
+  }
+  return {
+    editor: target.editor,
+    filePath: target.filePath,
+    source: 'remembered'
+  };
+}
+
+function registerRememberedNoteTarget(plugin) {
+  const workspace = plugin?.app?.workspace;
+  if (!workspace?.on) return false;
+
+  captureActiveNoteTarget(plugin);
+
+  const onActiveLeafChange = () => {
+    captureActiveNoteTarget(plugin);
+  };
+  const onEditorChange = (editor, info) => {
+    const file = info?.file || workspace.activeEditor?.file || workspace.getActiveFile?.();
+    rememberNoteTarget(plugin, editor, file);
+  };
+  const onFileOpen = () => {
+    captureActiveNoteTarget(plugin);
+  };
+
+  for (const [event, handler] of [
+    ['active-leaf-change', onActiveLeafChange],
+    ['editor-change', onEditorChange],
+    ['file-open', onFileOpen]
+  ]) {
+    try {
+      const ref = workspace.on(event, handler);
+      if (ref && typeof plugin.registerEvent === 'function') plugin.registerEvent(ref);
+    } catch {
+      // Older Obsidian versions may not expose every workspace event.
+    }
+  }
+  return true;
+}
+
+module.exports = {
+  captureActiveNoteTarget,
+  isEditableMarkdownEditor,
+  markdownLeaves,
+  normalizeFilePath,
+  registerRememberedNoteTarget,
+  rememberNoteTarget,
+  resolveRememberedNoteTarget,
+  targetLeaf
+};
+
+},
 "potplayer-bridge.cjs": (module, exports, require) => {
 'use strict';
 
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const path = require('node:path');
 
 const BRIDGE_BASE_URL = 'http://127.0.0.1:33661';
-const BRIDGE_VERSION = 1;
+const BRIDGE_VERSION = 2;
+const BRIDGE_HTTP_VERSION = 1;
+const BRIDGE_REQUEST_TIMEOUT_MS = 5000;
+const BRIDGE_FILE_POLL_MS = 50;
 const BRIDGE_TOKEN_PATTERN = /^[0-9a-f]{64}$/i;
 const ROUTES = new Map([
   ['ping', { method: 'GET', path: '/v1/ping' }],
@@ -6840,10 +8341,22 @@ const ROUTES = new Map([
   ['capture', { method: 'POST', path: '/v1/capture' }]
 ]);
 
-function bridgeTokenPath(env = process.env) {
+function bridgeDataDir(env = process.env) {
   const localAppData = String(env?.LOCALAPPDATA || '').trim();
-  if (!localAppData) throw new Error('找不到 Windows LOCALAPPDATA，无法读取 Go Study Bridge 配对令牌。');
-  return path.join(localAppData, 'GoStudy', 'bridge-token.txt');
+  if (!localAppData) throw new Error('找不到 Windows LOCALAPPDATA，无法访问 Go Study Bridge。');
+  return path.join(localAppData, 'GoStudy');
+}
+
+function bridgeTokenPath(env = process.env) {
+  return path.join(bridgeDataDir(env), 'bridge-token.txt');
+}
+
+function bridgeRequestDir(env = process.env) {
+  return path.join(bridgeDataDir(env), 'requests');
+}
+
+function bridgeResponseDir(env = process.env) {
+  return path.join(bridgeDataDir(env), 'responses');
 }
 
 function normalizeBridgeToken(value) {
@@ -6876,50 +8389,2135 @@ function normalizeBridgeMedia(value) {
   };
 }
 
-async function requestPotPlayerBridge(requestUrl, route, options = {}) {
-  if (typeof requestUrl !== 'function') throw new Error('Obsidian requestUrl 不可用。');
-  const spec = ROUTES.get(String(route || ''));
-  if (!spec) throw new Error('不允许的 Go Study Bridge 操作。');
-  const token = normalizeBridgeToken(options.token || readBridgeToken(options));
-  const response = await requestUrl({
-    url: `${BRIDGE_BASE_URL}${spec.path}`,
-    method: spec.method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      Accept: 'application/json'
-    },
-    throw: false
-  });
-  const status = Number(response?.status || 0);
-  const payload = response?.json && typeof response.json === 'object' ? response.json : {};
-  if (status === 401) throw new Error('Go Study Bridge 配对失败：本机令牌不匹配，请重启 Bridge 后重试。');
-  if (status < 200 || status >= 300 || payload.ok !== true) {
-    throw new Error(`Go Study Bridge 请求失败：${String(payload.error || `HTTP ${status || '未知'}`)}`);
+function bridgePayloadOk(value) {
+  return value === true || value === 1 || value === '1';
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function safeUnlink(filePath, unlinkSync = fs.unlinkSync) {
+  try { unlinkSync(filePath); }
+  catch {}
+}
+
+function parseBridgeJsonText(value) {
+  const text = String(value ?? '').replace(/^\uFEFF/, '');
+  return JSON.parse(text);
+}
+
+function normalizeBridgePayload(payload, route, version = BRIDGE_VERSION) {
+  const body = payload && typeof payload === 'object' ? payload : {};
+  if (!bridgePayloadOk(body.ok)) {
+    const error = String(body.error || 'unknown_error');
+    if (error === 'invalid_token') throw new Error('Go Study Bridge 配对失败：本机令牌不匹配，请重启 Bridge 后重试。');
+    if (error === 'version_mismatch') throw new Error(`Go Study Bridge 版本不兼容，需要协议 v${version}。`);
+    throw new Error(`Go Study Bridge 请求失败：${error}`);
   }
+  if (Number(body.version) !== version) throw new Error(`Go Study Bridge 版本不兼容：${String(body.version || '未知')}。`);
 
   if (route === 'ping') {
-    if (Number(payload.version) !== BRIDGE_VERSION) throw new Error(`Go Study Bridge 版本不兼容：${String(payload.version || '未知')}。`);
-    return { ok: true, version: BRIDGE_VERSION, bridge: String(payload.bridge || ''), player: String(payload.player || '') };
+    return {
+      ok: true,
+      version,
+      bridge: String(body.bridge || ''),
+      player: String(body.player || ''),
+      transport: String(body.transport || '')
+    };
   }
 
-  const media = normalizeBridgeMedia(payload.media);
+  const media = normalizeBridgeMedia(body.media);
   if (route === 'capture') {
-    if (payload.capture?.transport !== 'clipboard') throw new Error('Go Study Bridge 截图传输方式不受支持。');
-    return { ok: true, media, capture: { transport: 'clipboard', cropped: payload.capture?.cropped !== false } };
+    if (body.capture?.transport !== 'clipboard') throw new Error('Go Study Bridge 截图传输方式不受支持。');
+    return { ok: true, media, capture: { transport: 'clipboard', cropped: body.capture?.cropped !== false } };
   }
   return { ok: true, media };
 }
 
+async function requestPotPlayerBridgeFile(route, options = {}) {
+  if (!ROUTES.has(String(route || ''))) throw new Error('不允许的 Go Study Bridge 操作。');
+  const env = options.env || process.env;
+  const token = normalizeBridgeToken(options.token || readBridgeToken({ ...options, env }));
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
+    ? Number(options.timeoutMs)
+    : BRIDGE_REQUEST_TIMEOUT_MS;
+  const pollMs = Number.isFinite(Number(options.pollMs)) && Number(options.pollMs) > 0
+    ? Number(options.pollMs)
+    : BRIDGE_FILE_POLL_MS;
+  const mkdirSync = options.mkdirSync || fs.mkdirSync;
+  const writeFileSync = options.writeFileSync || fs.writeFileSync;
+  const renameSync = options.renameSync || fs.renameSync;
+  const readFileSync = options.readFileSync || fs.readFileSync;
+  const existsSync = options.existsSync || fs.existsSync;
+  const unlinkSync = options.unlinkSync || fs.unlinkSync;
+  const requests = options.requestDir || bridgeRequestDir(env);
+  const responses = options.responseDir || bridgeResponseDir(env);
+  mkdirSync(requests, { recursive: true });
+  mkdirSync(responses, { recursive: true });
+
+  const requestId = String(options.requestId || crypto.randomBytes(12).toString('hex')).toLowerCase();
+  if (!/^[0-9a-f]{24}$/.test(requestId)) throw new Error('Go Study Bridge 请求 ID 无效。');
+  const requestPath = path.join(requests, `${requestId}.json`);
+  const tempPath = path.join(requests, `${requestId}.tmp-${process.pid}-${Date.now()}`);
+  const responsePath = path.join(responses, `${requestId}.json`);
+  const requestBody = {
+    id: requestId,
+    version: BRIDGE_VERSION,
+    token,
+    action: String(route),
+    createdAt: Date.now()
+  };
+
+  safeUnlink(requestPath, unlinkSync);
+  safeUnlink(responsePath, unlinkSync);
+  try {
+    writeFileSync(tempPath, JSON.stringify(requestBody), { encoding: 'utf8', flag: 'wx' });
+    renameSync(tempPath, requestPath);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (existsSync(responsePath)) {
+        let payload;
+        try { payload = parseBridgeJsonText(readFileSync(responsePath, 'utf8')); }
+        catch { throw new Error('Go Study Bridge 返回了损坏的响应文件。'); }
+        if (String(payload?.id || '') !== requestId) throw new Error('Go Study Bridge 响应 ID 不匹配。');
+        return normalizeBridgePayload(payload, route, BRIDGE_VERSION);
+      }
+      await sleep(pollMs);
+    }
+    throw new Error(`Go Study Bridge 请求超时（${Math.ceil(timeoutMs / 1000)} 秒）。File Bridge 没有返回响应，请确认新版 markdown2potplayer 正在运行。`);
+  } finally {
+    safeUnlink(tempPath, unlinkSync);
+    safeUnlink(requestPath, unlinkSync);
+    safeUnlink(responsePath, unlinkSync);
+  }
+}
+
+async function requestWithTimeout(requestPromise, timeoutMs) {
+  let timer = null;
+  try {
+    return await Promise.race([
+      requestPromise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`Go Study HTTP Bridge 请求超时（${Math.ceil(timeoutMs / 1000)} 秒）。`)), timeoutMs);
+      })
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+async function requestPotPlayerBridgeHttp(requestUrl, route, options = {}) {
+  if (typeof requestUrl !== 'function') throw new Error('Obsidian requestUrl 不可用。');
+  const spec = ROUTES.get(String(route || ''));
+  if (!spec) throw new Error('不允许的 Go Study Bridge 操作。');
+  const token = normalizeBridgeToken(options.token || readBridgeToken(options));
+  const timeoutMs = Number.isFinite(Number(options.timeoutMs)) && Number(options.timeoutMs) > 0
+    ? Number(options.timeoutMs)
+    : BRIDGE_REQUEST_TIMEOUT_MS;
+  const response = await requestWithTimeout(requestUrl({
+    url: `${BRIDGE_BASE_URL}${spec.path}`,
+    method: spec.method,
+    headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+    throw: false
+  }), timeoutMs);
+  const status = Number(response?.status || 0);
+  const payload = response?.json && typeof response.json === 'object' ? response.json : {};
+  if (status < 200 || status >= 300) throw new Error(`Go Study HTTP Bridge 请求失败：HTTP ${status || '未知'}`);
+  return normalizeBridgePayload(payload, route, BRIDGE_HTTP_VERSION);
+}
+
+async function requestPotPlayerBridge(_requestUrl, route, options = {}) {
+  if (options.transport === 'http') return requestPotPlayerBridgeHttp(_requestUrl, route, options);
+  return requestPotPlayerBridgeFile(route, options);
+}
+
 module.exports = {
   BRIDGE_BASE_URL,
+  BRIDGE_FILE_POLL_MS,
+  BRIDGE_HTTP_VERSION,
+  BRIDGE_REQUEST_TIMEOUT_MS,
   BRIDGE_TOKEN_PATTERN,
   BRIDGE_VERSION,
   ROUTES,
+  bridgeDataDir,
+  bridgePayloadOk,
+  bridgeRequestDir,
+  bridgeResponseDir,
   bridgeTokenPath,
   normalizeBridgeMedia,
+  normalizeBridgePayload,
   normalizeBridgeToken,
+  parseBridgeJsonText,
   readBridgeToken,
-  requestPotPlayerBridge
+  requestPotPlayerBridge,
+  requestPotPlayerBridgeFile,
+  requestPotPlayerBridgeHttp,
+  requestWithTimeout,
+  safeUnlink,
+  sleep
+};
+
+},
+"product-settings-tab.cjs": (module, exports, require) => {
+'use strict';
+
+const {
+  Notice,
+  PluginSettingTab = class {},
+  Setting = class {}
+} = require('obsidian');
+const {
+  captureFrameAndInsertLearningPosition,
+  checkPotPlayerBridge,
+  commandErrorText
+} = __rhLoad("learning-capture.cjs");
+const { CAPTURE_ACTIONS, HUD_SLOT_LABELS, HUD_SLOT_ORDER } = __rhLoad("capture-actions.cjs");
+const {
+  HOTKEY_ACTIONS,
+  immersiveStatus,
+  registerImmersiveHotkeys,
+  resetImmersiveShortcuts,
+  updateImmersiveShortcut
+} = __rhLoad("immersive-hotkeys.cjs");
+const { immersiveShortcuts } = __rhLoad("native-potplayer.cjs");
+const {
+  DEFAULT_PRODUCT_SETTINGS,
+  currentProductSettings,
+  resetOutputTemplates,
+  updateProductSetting
+} = __rhLoad("product-settings.cjs");
+const {
+  buildCaptureMarkdown,
+  buildCaptureNoteMarkdown,
+  buildNotePositionMarkdown,
+  buildPlainCaptureMarkdown,
+  buildPlainCaptureNoteMarkdown,
+  buildPlainNoteMarkdown,
+  buildPositionMarkdown
+} = __rhLoad("resource-note.cjs");
+
+function section(containerEl, title, description = '') {
+  const heading = containerEl.createEl('h3', { text: title });
+  heading.addClass?.('go-study-settings-heading');
+  if (description) containerEl.createEl('p', { text: description, cls: 'setting-item-description' });
+}
+
+function videoStatusText(plugin) {
+  const settings = currentProductSettings(plugin);
+  if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会注册视频笔记快捷键，也不会显示视频增强状态点。';
+  const status = immersiveStatus(plugin);
+  if (status.registered) return `已就绪 · ${status.registeredAccelerators?.length || 0} 个全局快捷键已注册。`;
+  return status.error || '已开启，但当前没有成功注册全局快捷键。';
+}
+
+async function setInterfaceTips(plugin, value) {
+  plugin.state.uiState ||= {};
+  plugin.state.uiState.showInterfaceTips = Boolean(value);
+  await plugin.persist();
+  await plugin.workbenchLeaf?.view?.render?.();
+}
+
+function noteOutputOptions(settings) {
+  return {
+    timeFormat: settings.timeDisplayFormat,
+    backlinkTemplate: settings.backlinkTemplate,
+    noteTemplate: settings.noteTemplate,
+    captureTemplate: settings.captureTemplate,
+    captureNoteTemplate: settings.captureNoteTemplate,
+    plainNoteTemplate: settings.plainNoteTemplate,
+    plainCaptureTemplate: settings.plainCaptureTemplate,
+    plainCaptureNoteTemplate: settings.plainCaptureNoteTemplate
+  };
+}
+
+function noteOutputPreview(settings) {
+  const resource = { id: 'preview-resource', title: '高等数学' };
+  const position = { type: 'time', seconds: 754 };
+  const options = noteOutputOptions(settings);
+  return [
+    `Alt+1 · 仅回链\n${buildPositionMarkdown(resource, position, options)}`,
+    `Alt+2 · 截图回链\n${buildCaptureMarkdown(resource, position, 'GoStudy/Captures/example.png', options)}`,
+    `Alt+3 · 快速笔记\n${buildNotePositionMarkdown(resource, position, '这里老师讲的是极限存在的必要条件。', options)}`,
+    `Alt+4 · 截图笔记\n${buildCaptureNoteMarkdown(resource, position, 'GoStudy/Captures/example.png', '这一帧的公式需要重新推导一次。', options)}`,
+    `HUD · 纯笔记（不记录时间）\n${buildPlainNoteMarkdown('这是不带时间戳的随手记录。', options)}`,
+    `HUD · 仅截图（不记录时间）\n${buildPlainCaptureMarkdown('GoStudy/Captures/example.png', options)}`,
+    `HUD · 截图 + 评论（不记录时间）\n${buildPlainCaptureNoteMarkdown('GoStudy/Captures/example.png', '只保存画面和评论。', options)}`
+  ].join('\n\n');
+}
+
+class GoStudySettingsTab extends PluginSettingTab {
+  constructor(app, plugin) {
+    super(app, plugin);
+    this.plugin = plugin;
+    this.outputPreviewEl = null;
+  }
+
+  display() {
+    const { containerEl } = this;
+    containerEl.empty();
+    containerEl.createEl('h2', { text: 'Go Study' });
+    containerEl.createEl('p', {
+      text: '资源管理保持轻量；视频笔记增强和笔记输出格式都可以按需定制。',
+      cls: 'setting-item-description'
+    });
+
+    this.renderWorkbenchSettings(containerEl);
+    this.renderVideoSettings(containerEl);
+    this.renderNoteOutputSettings(containerEl);
+    this.renderDataSettings(containerEl);
+  }
+
+  refreshOutputPreview() {
+    if (!this.outputPreviewEl) return;
+    try {
+      this.outputPreviewEl.setText?.(noteOutputPreview(currentProductSettings(this.plugin)));
+      if (!this.outputPreviewEl.setText) this.outputPreviewEl.textContent = noteOutputPreview(currentProductSettings(this.plugin));
+    } catch (error) {
+      const message = commandErrorText('模板预览失败', error);
+      this.outputPreviewEl.setText?.(message);
+      if (!this.outputPreviewEl.setText) this.outputPreviewEl.textContent = message;
+    }
+  }
+
+  renderWorkbenchSettings(containerEl) {
+    const settings = currentProductSettings(this.plugin);
+    section(containerEl, '工作台', '控制 Go Study 自身界面行为，不影响资源数据。');
+
+    new Setting(containerEl)
+      .setName('显示界面说明')
+      .setDesc('在工作台中保留辅助说明文字。关闭后界面更紧凑。')
+      .addToggle((toggle) => toggle
+        .setValue(this.plugin.state.uiState?.showInterfaceTips !== false)
+        .onChange(async (value) => {
+          await setInterfaceTips(this.plugin, value);
+        }));
+
+    new Setting(containerEl)
+      .setName('进入工作台时自动收起左侧栏')
+      .setDesc('为 Go Study 腾出更大的横向空间；离开插件时仍会恢复原来的侧栏状态。')
+      .addToggle((toggle) => toggle
+        .setValue(settings.autoCollapseSidebar)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'autoCollapseSidebar', value);
+          if (!value) await this.plugin.restoreSidebar?.();
+        }));
+
+    new Setting(containerEl)
+      .setName('学习时把光标定位到笔记末尾')
+      .setDesc('开始学习或继续学习并打开一篇项目笔记时，自动进入编辑状态并把光标放到文件最后一行；关闭后只打开笔记，不改变光标位置。')
+      .addToggle((toggle) => toggle
+        .setValue(settings.focusStudyNoteAtEnd)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'focusStudyNoteAtEnd', value);
+        }));
+  }
+
+  renderVideoSettings(containerEl) {
+    const settings = currentProductSettings(this.plugin);
+    const enabled = settings.videoEnhancementEnabled;
+    const shortcuts = immersiveShortcuts(this.plugin);
+
+    section(containerEl, '视频笔记增强', 'Windows + PotPlayer 原生增强。关闭时 Go Study 仍然可以作为普通资源管理器完整使用。');
+
+    new Setting(containerEl)
+      .setName('启用视频笔记增强')
+      .setDesc('开启后注册全局快捷键，并启用 PotPlayer 时间点、截图和快速笔记能力。无需 markdown2potplayer / AutoHotkey。')
+      .addToggle((toggle) => toggle
+        .setValue(enabled)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'videoEnhancementEnabled', value);
+          registerImmersiveHotkeys(this.plugin);
+          this.display();
+        }));
+
+    new Setting(containerEl)
+      .setName('未收录视频也启用增强')
+      .setDesc('开启后，自己打开的 PotPlayer 视频也能记录；匹配到已收录资源时自动使用 Managed 回链，否则生成可回到当前媒体位置的 Freeform 回链。')
+      .addToggle((toggle) => {
+        toggle.setValue(settings.freeformVideoNotesEnabled);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'freeformVideoNotesEnabled', value);
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('快捷键操作方式')
+      .setDesc('“混合”保留 Alt+1～Alt+4，同时启用动作盘；也可以只保留其中一种。')
+      .addDropdown((dropdown) => {
+        dropdown
+          .addOption('mixed', '混合 · 动作盘 + 独立快捷键')
+          .addOption('hud', '仅动作盘')
+          .addOption('legacy', '仅独立快捷键')
+          .setValue(settings.shortcutMode);
+        dropdown.setDisabled?.(!enabled);
+        dropdown.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'shortcutMode', value);
+          registerImmersiveHotkeys(this.plugin);
+          this.display();
+        });
+      });
+
+    if (settings.shortcutMode === 'hud' || settings.shortcutMode === 'mixed') {
+      new Setting(containerEl)
+        .setName('动作盘主快捷键')
+        .setDesc('默认 Alt+S。按下后短暂停顿会显示 HUD；在显示延迟内直接按方向键可跳过 HUD 执行动作。')
+        .addText((text) => {
+          text.setValue(settings.actionHudShortcut);
+          text.setPlaceholder('Alt+S');
+          text.setDisabled?.(!enabled);
+          const commit = async () => {
+            try {
+              await updateProductSetting(this.plugin, 'actionHudShortcut', text.getValue());
+              registerImmersiveHotkeys(this.plugin);
+              this.display();
+            } catch (error) {
+              text.setValue(currentProductSettings(this.plugin).actionHudShortcut);
+              new Notice(commandErrorText('动作盘快捷键更新失败', error), 5000);
+            }
+          };
+          text.inputEl?.addEventListener('change', () => void commit());
+        });
+
+      new Setting(containerEl)
+        .setName('动作盘显示延迟')
+        .setDesc('熟练时可在 HUD 出现前直接按方向执行；停顿超过这个时间才显示提示。')
+        .addDropdown((dropdown) => {
+          dropdown
+            .addOption('0', '立即显示')
+            .addOption('200', '200 ms')
+            .addOption('300', '300 ms · 推荐')
+            .addOption('500', '500 ms')
+            .setValue(String(settings.actionHudDelayMs));
+          dropdown.setDisabled?.(!enabled);
+          dropdown.onChange(async (value) => {
+            await updateProductSetting(this.plugin, 'actionHudDelayMs', Number(value));
+          });
+        });
+
+      for (const slot of HUD_SLOT_ORDER) {
+        new Setting(containerEl)
+          .setName(`动作盘 · ${HUD_SLOT_LABELS[slot]}`)
+          .setDesc('为这个方向选择要采集的组合；最终 Markdown 仍由对应模板决定。')
+          .addDropdown((dropdown) => {
+            for (const action of Object.values(CAPTURE_ACTIONS)) dropdown.addOption(action.id, action.label);
+            dropdown.setValue(settings.actionHudSlots[slot]);
+            dropdown.setDisabled?.(!enabled);
+            dropdown.onChange(async (value) => {
+              const next = { ...currentProductSettings(this.plugin).actionHudSlots, [slot]: value };
+              await updateProductSetting(this.plugin, 'actionHudSlots', next);
+            });
+          });
+      }
+    }
+
+    const status = new Setting(containerEl)
+      .setName('当前状态')
+      .setDesc(videoStatusText(this.plugin));
+    status.addButton((button) => button
+      .setButtonText('检查状态')
+      .setDisabled(!enabled)
+      .onClick(async () => {
+        button.setDisabled(true);
+        try {
+          const result = await checkPotPlayerBridge({ nativeOnly: true });
+          new Notice(`视频笔记增强可用 · ${result.transport || 'native-windows'}`);
+        } catch (error) {
+          new Notice(commandErrorText('视频笔记增强不可用', error), 6000);
+        } finally {
+          button.setDisabled(false);
+          this.display();
+        }
+      }));
+
+    if (settings.shortcutMode === 'legacy' || settings.shortcutMode === 'mixed') {
+      const shortcutKeys = ['position', 'capture', 'note', 'captureNote'];
+      for (const key of shortcutKeys) {
+        new Setting(containerEl)
+          .setName(HOTKEY_ACTIONS[key])
+          .setDesc('留空可禁用这一动作；重复快捷键会被拒绝。')
+          .addText((text) => {
+            text.setValue(shortcuts[key] || '');
+            text.setPlaceholder('例如 Alt+1');
+            text.setDisabled?.(!enabled);
+            const commit = async () => {
+              try {
+                await updateImmersiveShortcut(this.plugin, key, text.getValue());
+                new Notice(`快捷键已更新：${HOTKEY_ACTIONS[key]}`);
+              } catch (error) {
+                text.setValue(immersiveShortcuts(this.plugin)[key] || '');
+                new Notice(commandErrorText('快捷键更新失败', error), 5000);
+              }
+              this.display();
+            };
+            text.inputEl?.addEventListener('change', () => void commit());
+            text.inputEl?.addEventListener('keydown', (event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                text.inputEl.blur();
+              }
+            });
+          });
+      }
+
+      new Setting(containerEl)
+        .setName('恢复默认快捷键')
+        .setDesc('恢复为 Alt+1、Alt+2、Alt+3、Alt+4。')
+        .addButton((button) => button
+          .setButtonText('恢复默认')
+          .setDisabled(!enabled)
+          .onClick(async () => {
+            await resetImmersiveShortcuts(this.plugin);
+            new Notice('已恢复默认视频快捷键。');
+            this.display();
+          }));
+    }
+
+    new Setting(containerEl)
+      .setName('保存笔记后继续播放')
+      .setDesc('Alt+3 / Alt+4 按 Enter 保存后，自动让 PotPlayer 继续播放。')
+      .addToggle((toggle) => {
+        toggle.setValue(settings.videoResumeAfterSave);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'videoResumeAfterSave', value);
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('取消笔记后继续播放')
+      .setDesc('Alt+3 / Alt+4 按 Esc 取消后，自动让 PotPlayer 继续播放。')
+      .addToggle((toggle) => {
+        toggle.setValue(settings.videoResumeAfterCancel);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'videoResumeAfterCancel', value);
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('显示成功提示')
+      .setDesc('成功记录后在屏幕角落短暂显示轻量提示；错误提示始终保留。')
+      .addToggle((toggle) => {
+        toggle.setValue(settings.videoSuccessFeedback);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'videoSuccessFeedback', value);
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('截图保存目录')
+      .setDesc('留空时跟随 Obsidian 当前附件设置；填写 Vault 相对路径时由 Go Study 固定保存到该目录。这样也更容易与自定义附件位置插件共存。')
+      .addText((text) => {
+        text.setValue(settings.captureFolder);
+        text.setPlaceholder('留空 = 跟随 Obsidian 附件设置');
+        text.setDisabled?.(!enabled);
+        const commit = async () => {
+          try {
+            const next = await updateProductSetting(this.plugin, 'captureFolder', text.getValue());
+            text.setValue(next.captureFolder);
+            new Notice(next.captureFolder ? `截图目录已更新：${next.captureFolder}` : '截图保存已改为跟随 Obsidian 附件设置。');
+          } catch (error) {
+            text.setValue(currentProductSettings(this.plugin).captureFolder);
+            new Notice(commandErrorText('截图目录更新失败', error), 5000);
+          }
+        };
+        text.inputEl?.addEventListener('change', () => void commit());
+      });
+
+    new Setting(containerEl)
+      .setName('截图记录测试')
+      .setDesc('用于确认当前 PotPlayer 帧、Vault 截图写入和永久回链是否正常。')
+      .addButton((button) => button
+        .setButtonText('执行截图记录')
+        .setDisabled(!enabled)
+        .onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const result = await captureFrameAndInsertLearningPosition(this.plugin, { nativeOnly: true });
+            new Notice(`截图已保存：${result.vaultPath}`);
+          } catch (error) {
+            new Notice(commandErrorText('截图记录失败', error), 6000);
+          } finally {
+            button.setDisabled(false);
+          }
+        }));
+  }
+
+  renderNoteOutputSettings(containerEl) {
+    const settings = currentProductSettings(this.plugin);
+    section(containerEl, '笔记输出格式', '只改变写进 Markdown 的显示形式；永久 Resource ID 回链本身不会被改成临时路径。');
+
+    new Setting(containerEl)
+      .setName('时间显示格式')
+      .setDesc('“自动”在不足 1 小时时显示 MM:SS；“固定”始终显示 HH:MM:SS。')
+      .addDropdown((dropdown) => dropdown
+        .addOption('smart', '自动 · 12:34 / 01:12:34')
+        .addOption('hms', '固定 · 00:12:34')
+        .setValue(settings.timeDisplayFormat)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'timeDisplayFormat', value);
+          this.refreshOutputPreview();
+        }));
+
+    this.addTemplateSetting(
+      containerEl,
+      'backlinkTemplate',
+      '回链模板',
+      '可用变量：{title}、{time}、{uri}。必须保留 {uri}，否则会失去回到课程的能力。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'noteTemplate',
+      'Alt+3 快速笔记模板',
+      '可用变量：{note}、{backlink}。两者都必须保留。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'captureTemplate',
+      'Alt+2 截图模板',
+      '可用变量：{image}、{backlink}。两者都必须保留。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'captureNoteTemplate',
+      'Alt+4 截图笔记模板',
+      '可用变量：{image}、{note}、{backlink}。三者都必须保留。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'plainNoteTemplate',
+      '无时间 · 纯笔记模板',
+      '可用变量：{note}。用于 HUD 中不记录时间戳的评论动作。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'plainCaptureTemplate',
+      '无时间 · 仅截图模板',
+      '可用变量：{image}。用于只保存截图、不生成时间回链的动作。'
+    );
+    this.addTemplateSetting(
+      containerEl,
+      'plainCaptureNoteTemplate',
+      '无时间 · 截图评论模板',
+      '可用变量：{image}、{note}。用于截图 + 评论但不记录时间戳。'
+    );
+
+    new Setting(containerEl)
+      .setName('恢复默认输出格式')
+      .setDesc('恢复 Go Study 默认的时间显示和四种 Markdown 输出模板。')
+      .addButton((button) => button
+        .setButtonText('恢复默认')
+        .onClick(async () => {
+          await resetOutputTemplates(this.plugin);
+          new Notice('已恢复默认笔记输出格式。');
+          this.display();
+        }));
+
+    containerEl.createEl('h4', { text: '实时示例' });
+    containerEl.createEl('p', {
+      text: '下面只展示最终 Markdown 文本。真实回链中的 Resource ID 与位置仍由 Go Study 自动生成。',
+      cls: 'setting-item-description'
+    });
+    this.outputPreviewEl = containerEl.createEl('pre', { cls: 'go-study-note-output-preview' });
+    this.refreshOutputPreview();
+  }
+
+  addTemplateSetting(containerEl, key, name, description) {
+    const settings = currentProductSettings(this.plugin);
+    new Setting(containerEl)
+      .setName(name)
+      .setDesc(description)
+      .addTextArea((text) => {
+        text.setValue(settings[key]);
+        text.setPlaceholder(DEFAULT_PRODUCT_SETTINGS[key]);
+        if (text.inputEl) text.inputEl.rows = Math.min(7, Math.max(2, settings[key].split('\n').length + 1));
+        const commit = async () => {
+          try {
+            const next = await updateProductSetting(this.plugin, key, text.getValue());
+            text.setValue(next[key]);
+            this.refreshOutputPreview();
+            new Notice(`${name}已更新。`);
+          } catch (error) {
+            text.setValue(currentProductSettings(this.plugin)[key]);
+            new Notice(commandErrorText(`${name}无效`, error), 6000);
+          }
+        };
+        text.inputEl?.addEventListener('change', () => void commit());
+      });
+  }
+
+  renderDataSettings(containerEl) {
+    const settings = currentProductSettings(this.plugin);
+    section(containerEl, '数据与安全', '只影响 Go Study 自己的状态备份，不会删除 Vault、OpenList、B站或 Anki 原始资料。');
+
+    new Setting(containerEl)
+      .setName('自动备份保留数量')
+      .setDesc('保留最近 3～10 份 Go Study 状态备份。')
+      .addDropdown((dropdown) => {
+        for (let value = 3; value <= 10; value += 1) dropdown.addOption(String(value), `${value} 份`);
+        dropdown.setValue(String(settings.backupRetention));
+        dropdown.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'backupRetention', Number(value));
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('当前插件版本')
+      .setDesc(this.plugin.manifest?.version || '未知版本');
+  }
+}
+
+module.exports = {
+  GoStudySettingsTab,
+  noteOutputOptions,
+  noteOutputPreview,
+  section,
+  setInterfaceTips,
+  videoStatusText
+};
+
+},
+"product-settings.cjs": (module, exports, require) => {
+'use strict';
+
+const { DEFAULT_HUD_SLOTS, normalizeHudSlots } = __rhLoad("capture-actions.cjs");
+
+const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
+  autoCollapseSidebar: true,
+  videoEnhancementEnabled: false,
+  videoResumeAfterSave: true,
+  videoResumeAfterCancel: true,
+  videoSuccessFeedback: true,
+  focusStudyNoteAtEnd: true,
+  freeformVideoNotesEnabled: true,
+  shortcutMode: 'mixed',
+  actionHudShortcut: 'Alt+S',
+  actionHudDelayMs: 300,
+  actionHudSlots: { ...DEFAULT_HUD_SLOTS },
+  captureFolder: 'GoStudy/Captures',
+  backupRetention: 10,
+  timeDisplayFormat: 'smart',
+  backlinkTemplate: '[↗ {title} · {time}]({uri})',
+  noteTemplate: '{note}\n\n{backlink}',
+  captureTemplate: '{image}\n\n{backlink}',
+  captureNoteTemplate: '{image}\n\n{note}\n\n{backlink}',
+  plainNoteTemplate: '{note}',
+  plainCaptureTemplate: '{image}',
+  plainCaptureNoteTemplate: '{image}\n\n{note}'
+});
+
+const TEMPLATE_RULES = Object.freeze({
+  backlinkTemplate: Object.freeze({
+    allowed: Object.freeze(['title', 'time', 'uri']),
+    required: Object.freeze(['uri'])
+  }),
+  noteTemplate: Object.freeze({
+    allowed: Object.freeze(['note', 'backlink']),
+    required: Object.freeze(['note', 'backlink'])
+  }),
+  captureTemplate: Object.freeze({
+    allowed: Object.freeze(['image', 'backlink']),
+    required: Object.freeze(['image', 'backlink'])
+  }),
+  captureNoteTemplate: Object.freeze({
+    allowed: Object.freeze(['image', 'note', 'backlink']),
+    required: Object.freeze(['image', 'note', 'backlink'])
+  }),
+  plainNoteTemplate: Object.freeze({
+    allowed: Object.freeze(['note']),
+    required: Object.freeze(['note'])
+  }),
+  plainCaptureTemplate: Object.freeze({
+    allowed: Object.freeze(['image']),
+    required: Object.freeze(['image'])
+  }),
+  plainCaptureNoteTemplate: Object.freeze({
+    allowed: Object.freeze(['image', 'note']),
+    required: Object.freeze(['image', 'note'])
+  })
+});
+
+function boolOr(value, fallback) {
+  return typeof value === 'boolean' ? value : fallback;
+}
+
+function clampInteger(value, min, max, fallback) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, parsed));
+}
+
+function normalizeCaptureFolder(value) {
+  const raw = String(value ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!raw) return '';
+  const parts = raw.split('/').filter(Boolean);
+  if (parts.some((part) => part === '.' || part === '..' || /[<>:"|?*\x00-\x1F]/.test(part))) {
+    throw new Error('截图目录必须是 Vault 内的安全相对路径。');
+  }
+  return parts.join('/');
+}
+
+function normalizeTimeDisplayFormat(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'smart' || normalized === 'hms') return normalized;
+  return DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat;
+}
+function normalizeShortcutMode(value) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return ['mixed', 'hud', 'legacy'].includes(normalized) ? normalized : DEFAULT_PRODUCT_SETTINGS.shortcutMode;
+}
+
+function normalizeActionHudShortcut(value) {
+  const shortcut = String(value || '').trim();
+  if (!shortcut) return DEFAULT_PRODUCT_SETTINGS.actionHudShortcut;
+  if (shortcut.length > 40 || /[\r\n\t]/.test(shortcut)) throw new Error('动作盘快捷键格式无效。');
+  return shortcut;
+}
+
+function normalizeActionHudDelayMs(value) {
+  const parsed = Number.parseInt(String(value ?? ''), 10);
+  if (!Number.isFinite(parsed)) return DEFAULT_PRODUCT_SETTINGS.actionHudDelayMs;
+  return Math.min(1000, Math.max(0, parsed));
+}
+
+
+function outputTemplateTokens(value) {
+  return [...String(value || '').matchAll(/\{([A-Za-z][A-Za-z0-9_-]*)\}/g)].map((match) => match[1]);
+}
+
+function normalizeOutputTemplate(key, value) {
+  const rule = TEMPLATE_RULES[key];
+  if (!rule) throw new Error('未知笔记模板。');
+  const normalized = String(value ?? '').replace(/\r\n/g, '\n');
+  if (!normalized.trim()) throw new Error('模板不能为空。');
+  if (normalized.length > 4000) throw new Error('模板过长，请控制在 4000 个字符以内。');
+  const tokens = outputTemplateTokens(normalized);
+  const unknown = [...new Set(tokens.filter((token) => !rule.allowed.includes(token)))];
+  if (unknown.length) throw new Error(`模板包含未知变量：${unknown.map((token) => `{${token}}`).join('、')}。`);
+  const missing = rule.required.filter((token) => !tokens.includes(token));
+  if (missing.length) throw new Error(`模板必须保留：${missing.map((token) => `{${token}}`).join('、')}。`);
+  return normalized;
+}
+
+function safeOutputTemplate(key, value) {
+  try { return normalizeOutputTemplate(key, value); }
+  catch { return DEFAULT_PRODUCT_SETTINGS[key]; }
+}
+
+function currentProductSettings(plugin) {
+  const ui = plugin?.state?.uiState || {};
+  let captureFolder = DEFAULT_PRODUCT_SETTINGS.captureFolder;
+  try {
+    captureFolder = Object.prototype.hasOwnProperty.call(ui, 'captureFolder')
+      ? normalizeCaptureFolder(ui.captureFolder)
+      : DEFAULT_PRODUCT_SETTINGS.captureFolder;
+  } catch {}
+  return {
+    autoCollapseSidebar: boolOr(ui.autoCollapseSidebar, DEFAULT_PRODUCT_SETTINGS.autoCollapseSidebar),
+    videoEnhancementEnabled: boolOr(ui.videoEnhancementEnabled, DEFAULT_PRODUCT_SETTINGS.videoEnhancementEnabled),
+    videoResumeAfterSave: boolOr(ui.videoResumeAfterSave, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterSave),
+    videoResumeAfterCancel: boolOr(ui.videoResumeAfterCancel, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterCancel),
+    videoSuccessFeedback: boolOr(ui.videoSuccessFeedback, DEFAULT_PRODUCT_SETTINGS.videoSuccessFeedback),
+    focusStudyNoteAtEnd: boolOr(ui.focusStudyNoteAtEnd, DEFAULT_PRODUCT_SETTINGS.focusStudyNoteAtEnd),
+    freeformVideoNotesEnabled: boolOr(ui.freeformVideoNotesEnabled, DEFAULT_PRODUCT_SETTINGS.freeformVideoNotesEnabled),
+    shortcutMode: normalizeShortcutMode(ui.shortcutMode),
+    actionHudShortcut: (() => {
+      try { return normalizeActionHudShortcut(ui.actionHudShortcut); }
+      catch { return DEFAULT_PRODUCT_SETTINGS.actionHudShortcut; }
+    })(),
+    actionHudDelayMs: normalizeActionHudDelayMs(ui.actionHudDelayMs),
+    actionHudSlots: normalizeHudSlots(ui.actionHudSlots),
+    captureFolder,
+    backupRetention: clampInteger(ui.backupRetention, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention),
+    timeDisplayFormat: normalizeTimeDisplayFormat(ui.timeDisplayFormat),
+    backlinkTemplate: safeOutputTemplate('backlinkTemplate', ui.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate),
+    noteTemplate: safeOutputTemplate('noteTemplate', ui.noteTemplate ?? DEFAULT_PRODUCT_SETTINGS.noteTemplate),
+    captureTemplate: safeOutputTemplate('captureTemplate', ui.captureTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureTemplate),
+    captureNoteTemplate: safeOutputTemplate('captureNoteTemplate', ui.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate),
+    plainNoteTemplate: safeOutputTemplate('plainNoteTemplate', ui.plainNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainNoteTemplate),
+    plainCaptureTemplate: safeOutputTemplate('plainCaptureTemplate', ui.plainCaptureTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainCaptureTemplate),
+    plainCaptureNoteTemplate: safeOutputTemplate('plainCaptureNoteTemplate', ui.plainCaptureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainCaptureNoteTemplate)
+  };
+}
+
+function ensureProductSettings(plugin) {
+  if (!plugin?.state) return { changed: false, settings: { ...DEFAULT_PRODUCT_SETTINGS } };
+  plugin.state.uiState ||= {};
+  const normalized = currentProductSettings(plugin);
+  let changed = false;
+  for (const [key, value] of Object.entries(normalized)) {
+    const current = plugin.state.uiState[key];
+    const same = value && typeof value === 'object'
+      ? JSON.stringify(current) === JSON.stringify(value)
+      : current === value;
+    if (!same) {
+      plugin.state.uiState[key] = value;
+      changed = true;
+    }
+  }
+  return { changed, settings: normalized };
+}
+
+async function updateProductSetting(plugin, key, value) {
+  if (!Object.prototype.hasOwnProperty.call(DEFAULT_PRODUCT_SETTINGS, key)) throw new Error('未知设置项。');
+  plugin.state.uiState ||= {};
+  let next = value;
+  if (key === 'captureFolder') next = normalizeCaptureFolder(value);
+  else if (key === 'backupRetention') next = clampInteger(value, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention);
+  else if (key === 'timeDisplayFormat') next = normalizeTimeDisplayFormat(value);
+  else if (key === 'shortcutMode') next = normalizeShortcutMode(value);
+  else if (key === 'actionHudShortcut') next = normalizeActionHudShortcut(value);
+  else if (key === 'actionHudDelayMs') next = normalizeActionHudDelayMs(value);
+  else if (key === 'actionHudSlots') next = normalizeHudSlots(value);
+  else if (TEMPLATE_RULES[key]) next = normalizeOutputTemplate(key, value);
+  else if (typeof DEFAULT_PRODUCT_SETTINGS[key] === 'boolean') next = Boolean(value);
+  plugin.state.uiState[key] = next;
+  await plugin.persist();
+  return currentProductSettings(plugin);
+}
+
+async function resetOutputTemplates(plugin) {
+  plugin.state.uiState ||= {};
+  for (const key of ['timeDisplayFormat', ...Object.keys(TEMPLATE_RULES)]) {
+    plugin.state.uiState[key] = DEFAULT_PRODUCT_SETTINGS[key];
+  }
+  await plugin.persist();
+  return currentProductSettings(plugin);
+}
+
+module.exports = {
+  DEFAULT_PRODUCT_SETTINGS,
+  TEMPLATE_RULES,
+  clampInteger,
+  currentProductSettings,
+  ensureProductSettings,
+  normalizeActionHudDelayMs,
+  normalizeActionHudShortcut,
+  normalizeCaptureFolder,
+  normalizeOutputTemplate,
+  normalizeShortcutMode,
+  normalizeTimeDisplayFormat,
+  outputTemplateTokens,
+  resetOutputTemplates,
+  updateProductSetting
+};
+
+},
+"project-notes-ui.cjs": (module, exports, require) => {
+'use strict';
+
+const {
+  Modal = class {},
+  Notice = class {},
+  setIcon = () => {}
+} = require('obsidian');
+const {
+  findProjectNoteByPath,
+  linkProjectNote,
+  normalizeNoteFolder,
+  projectNoteFolder,
+  projectNotes,
+  recentProjectNote,
+  recentStudy,
+  setProjectNoteFolder,
+  setRecentProjectNote,
+  unlinkProjectNote
+} = __rhLoad("project-notes.cjs");
+const { currentProductSettings } = __rhLoad("product-settings.cjs");
+const { rememberNoteTarget } = __rhLoad("note-target.cjs");
+
+function markdownFiles(plugin) {
+  const vault = plugin?.app?.vault;
+  const files = typeof vault?.getMarkdownFiles === 'function'
+    ? vault.getMarkdownFiles()
+    : (vault?.getFiles?.() || []).filter((file) => String(file.extension || '').toLowerCase() === 'md');
+  return [...files].sort((a, b) => String(a.basename || a.name || a.path).localeCompare(String(b.basename || b.name || b.path), 'zh-CN'));
+}
+
+function noteDisplayName(noteOrFile) {
+  const path = String(noteOrFile?.path || '');
+  return String(noteOrFile?.basename || noteOrFile?.name || path.split('/').pop() || '未命名笔记').replace(/\.md$/i, '');
+}
+
+function resolveNoteFile(plugin, note) {
+  if (!note?.path) return null;
+  const file = plugin.app.vault.getAbstractFileByPath?.(note.path) || null;
+  if (!file || Array.isArray(file.children) || String(file.extension || '').toLowerCase() !== 'md') return null;
+  return file;
+}
+
+function markdownLeafForFile(plugin, file) {
+  const leaves = plugin?.app?.workspace?.getLeavesOfType?.('markdown') || [];
+  return leaves.find((leaf) => String(leaf?.view?.file?.path || '') === String(file?.path || '')) || null;
+}
+
+async function focusProjectNoteAtEnd(plugin, file) {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  const leaf = markdownLeafForFile(plugin, file);
+  const editor = leaf?.view?.editor;
+  if (!editor || typeof editor.setCursor !== 'function') return false;
+  const lastLine = Math.max(0, Number(typeof editor.lastLine === 'function' ? editor.lastLine() : 0));
+  const lineText = typeof editor.getLine === 'function' ? String(editor.getLine(lastLine) || '') : '';
+  editor.setCursor({ line: lastLine, ch: lineText.length });
+  rememberNoteTarget(plugin, editor, file);
+  editor.focus?.();
+  return true;
+}
+
+async function openProjectNote(plugin, note, options = {}) {
+  const file = resolveNoteFile(plugin, note);
+  if (!file) {
+    if (note) note.missingAt ||= new Date().toISOString();
+    await plugin.persist?.();
+    new Notice('这篇项目笔记已经移动或删除。', 4500);
+    return false;
+  }
+  note.missingAt = '';
+  setRecentProjectNote(plugin.state, note.projectId, note.id);
+  await plugin.persist?.();
+  await plugin.openVaultEntry(file, { newLeaf: Boolean(options.newLeaf) });
+  if (options.prepareForStudy && currentProductSettings(plugin).focusStudyNoteAtEnd) {
+    await focusProjectNoteAtEnd(plugin, file);
+  }
+  return true;
+}
+
+function safeNewNoteTitle(value) {
+  const title = String(value || '').trim().replace(/[\\/:*?"<>|\x00-\x1F]/g, '-').replace(/[. ]+$/g, '');
+  if (!title) throw new Error('请输入笔记名称。');
+  return title.slice(0, 120);
+}
+
+function newNoteParentPath(plugin) {
+  try {
+    const parent = plugin.app.fileManager?.getNewFileParent?.('');
+    const path = String(parent?.path || '').trim().replace(/^\/+|\/+$/g, '');
+    return path === '/' ? '' : path;
+  } catch {
+    return '';
+  }
+}
+
+function uniqueNewNotePath(plugin, title, folderOverride = undefined) {
+  const parent = folderOverride === undefined ? newNoteParentPath(plugin) : normalizeNoteFolder(folderOverride);
+  const stem = safeNewNoteTitle(title);
+  for (let index = 1; index <= 999; index += 1) {
+    const name = index === 1 ? `${stem}.md` : `${stem} ${index}.md`;
+    const path = parent ? `${parent}/${name}` : name;
+    if (!plugin.app.vault.getAbstractFileByPath?.(path)) return path;
+  }
+  throw new Error('同名笔记过多，无法创建新笔记。');
+}
+
+async function createProjectNote(plugin, projectId, title, options = {}) {
+  const projectFolder = projectNoteFolder(plugin.state, projectId);
+  const folder = Object.prototype.hasOwnProperty.call(options, 'folder') ? options.folder : (projectFolder || undefined);
+  const path = uniqueNewNotePath(plugin, title, folder);
+  const heading = safeNewNoteTitle(title);
+  const file = await plugin.app.vault.create(path, `# ${heading}\n\n`);
+  const result = linkProjectNote(plugin.state, projectId, file.path);
+  setRecentProjectNote(plugin.state, projectId, result.note.id);
+  await plugin.persist?.();
+  await plugin.openVaultEntry(file);
+  await plugin.workbenchLeaf?.view?.render?.();
+  return result.note;
+}
+
+function vaultFolders(plugin) {
+  const root = plugin?.app?.vault?.getRoot?.();
+  const result = [];
+  const visit = (folder) => {
+    for (const child of Array.isArray(folder?.children) ? folder.children : []) {
+      if (!Array.isArray(child?.children)) continue;
+      const path = String(child.path || '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+      if (path) result.push({ path, name: String(child.name || path.split('/').pop() || path) });
+      visit(child);
+    }
+  };
+  visit(root);
+  return result.sort((a, b) => a.path.localeCompare(b.path, 'zh-CN', { numeric: true }));
+}
+
+class ProjectNoteFolderPickerModal extends Modal {
+  constructor(app, plugin, options = {}) {
+    super(app);
+    this.plugin = plugin;
+    this.options = options;
+    this.settled = false;
+    this.currentPath = normalizeNoteFolder(options.initialPath || '');
+  }
+
+  onOpen() {
+    this.modalEl.addClass?.('rh-next-modal', 'go-study-project-note-folder-modal');
+    this.render();
+  }
+
+  choose(path) {
+    if (this.settled) return;
+    this.settled = true;
+    this.options.onChoose?.(path);
+    this.close();
+  }
+
+  directChildren(all, currentPath) {
+    const prefix = currentPath ? `${currentPath}/` : '';
+    return all.filter((folder) => {
+      if (!folder.path.startsWith(prefix)) return false;
+      const rest = folder.path.slice(prefix.length);
+      return rest && !rest.includes('/');
+    });
+  }
+
+  breadcrumbPaths() {
+    const parts = this.currentPath.split('/').filter(Boolean);
+    const result = [{ label: 'Vault', path: '' }];
+    let path = '';
+    for (const part of parts) {
+      path = path ? `${path}/${part}` : part;
+      result.push({ label: part, path });
+    }
+    return result;
+  }
+
+  render() {
+    this.contentEl.empty();
+    const ui = createPickerShell(this.contentEl, {
+      title: this.options.title || '选择笔记文件夹',
+      description: this.options.description || '逐层进入 Vault 文件夹，或搜索完整路径；只决定新建笔记保存位置，不会自动收录整个文件夹。',
+      searchLabel: '搜索 Vault 文件夹',
+      placeholder: '搜索任意层级文件夹…'
+    });
+    const all = vaultFolders(this.plugin);
+
+    let paint = () => {
+      ui.body.empty();
+      const query = String(ui.search.value || '').trim().toLocaleLowerCase('zh-CN');
+      const section = ui.body.createDiv({ cls: 'go-study-picker-section' });
+      if (!query) {
+        const crumbs = section.createDiv({ cls: 'go-study-folder-breadcrumbs' });
+        for (const [index, crumb] of this.breadcrumbPaths().entries()) {
+          if (index) crumbs.createSpan({ text: '›', cls: 'go-study-folder-breadcrumb-sep' });
+          const button = crumbs.createEl('button', { cls: 'go-study-folder-breadcrumb' });
+          button.textContent = crumb.label;
+          button.addEventListener('click', () => {
+            this.currentPath = crumb.path;
+            paint();
+          });
+        }
+      } else {
+        section.createEl('strong', { cls: 'go-study-picker-section-title', text: '搜索结果 · 点击进入文件夹' });
+      }
+
+      const list = section.createDiv({ cls: 'rh-next-picker-list' });
+      const folders = query
+        ? all.filter((item) => item.path.toLocaleLowerCase('zh-CN').includes(query)).slice(0, 160)
+        : this.directChildren(all, this.currentPath);
+
+      if (!folders.length) {
+        list.createEl('p', {
+          cls: 'rh-next-empty-inline',
+          text: query ? '没有找到匹配文件夹。' : '当前文件夹没有子文件夹，可以直接选择当前文件夹。'
+        });
+      }
+
+      for (const folder of folders) {
+        const row = list.createEl('button', { cls: 'rh-next-picker-row go-study-folder-row' });
+        setIcon(row.createSpan(), 'folder');
+        const copy = row.createDiv();
+        copy.createEl('strong', { text: folder.name });
+        copy.createEl('small', { text: folder.path });
+        row.addEventListener('click', () => {
+          this.currentPath = folder.path;
+          ui.search.value = '';
+          paint();
+        });
+      }
+    };
+
+    ui.search.addEventListener('input', paint);
+
+    const system = ui.footer.createEl('button', { cls: 'rh-next-button' });
+    system.textContent = '跟随 Obsidian 默认位置';
+    system.addEventListener('click', () => this.choose(''));
+
+    const current = ui.footer.createEl('button', { cls: 'rh-next-button is-primary' });
+    const updateCurrentButton = () => {
+      current.textContent = this.currentPath ? `选择：${this.currentPath}` : '请进入要使用的文件夹';
+      current.title = this.currentPath || '项目默认文件夹留空时由 Obsidian 决定';
+      current.disabled = !this.currentPath;
+    };
+    current.addEventListener('click', () => this.choose(this.currentPath));
+
+    const cancel = ui.footer.createEl('button', { cls: 'rh-next-button' });
+    cancel.textContent = '取消';
+    cancel.addEventListener('click', () => this.close());
+
+    const originalPaint = paint;
+    const wrappedPaint = () => { originalPaint(); updateCurrentButton(); };
+    ui.search.removeEventListener?.('input', paint);
+    ui.search.addEventListener('input', wrappedPaint);
+    paint = wrappedPaint;
+    paint();
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    if (!this.settled) {
+      this.settled = true;
+      this.options.onCancel?.();
+    }
+  }
+}
+
+function chooseProjectNoteFolder(plugin, options = {}) {
+  return new Promise((resolve) => new ProjectNoteFolderPickerModal(plugin.app, plugin, {
+    ...options,
+    onChoose: (path) => resolve({ cancelled: false, path }),
+    onCancel: () => resolve({ cancelled: true, path: '' })
+  }).open());
+}
+
+function createActionButton(doc, label, icon, className = '') {
+  const button = doc.createElement('button');
+  button.type = 'button';
+  button.className = `rh-next-button ${className}`.trim();
+  if (icon) {
+    const iconHost = doc.createElement('span');
+    iconHost.className = 'rh-next-button-icon';
+    try { setIcon(iconHost, icon); } catch {}
+    button.appendChild(iconHost);
+  }
+  const text = doc.createElement('span');
+  text.textContent = label;
+  button.appendChild(text);
+  return button;
+}
+
+function rowButton(container, file, secondary, onClick) {
+  const row = container.createEl('button', { cls: 'rh-next-picker-row' });
+  setIcon(row.createSpan(), 'file-text');
+  const body = row.createDiv();
+  body.createEl('strong', { text: noteDisplayName(file) });
+  body.createEl('small', { text: secondary || file.path });
+  row.addEventListener('click', () => void onClick());
+  return row;
+}
+
+function pickerHeading(container, title, description) {
+  const heading = container.createDiv({ cls: 'rh-next-modal-heading go-study-picker-heading' });
+  const copy = heading.createDiv();
+  copy.createEl('h2', { text: title });
+  if (description) copy.createEl('p', { text: description });
+  return heading;
+}
+
+function createPickerShell(contentEl, options = {}) {
+  const shell = contentEl.createDiv({ cls: 'go-study-picker-shell' });
+  pickerHeading(shell, options.title || '选择', options.description || '');
+  const searchWrap = shell.createDiv({ cls: 'go-study-picker-search' });
+  if (options.searchLabel) searchWrap.createEl('span', { text: options.searchLabel, cls: 'go-study-picker-label' });
+  const search = searchWrap.createEl('input', {
+    cls: 'rh-next-input',
+    attr: { type: 'search', placeholder: options.placeholder || '搜索…' }
+  });
+  const body = shell.createDiv({ cls: 'go-study-picker-body' });
+  const footer = shell.createDiv({ cls: 'go-study-picker-footer' });
+  return { shell, search, body, footer };
+}
+
+function installPickerUxStyles(plugin, doc = globalThis.document) {
+  if (!doc?.createElement) return null;
+  const styleId = `go-study-picker-ux-${String(plugin?.manifest?.id || 'plugin')}`;
+  const existing = doc.getElementById?.(styleId);
+  if (existing) return existing;
+  const style = doc.createElement('style');
+  style.id = styleId;
+  style.textContent = `
+.modal.go-study-project-note-box-modal,
+.modal.go-study-study-note-picker-modal,
+.modal.go-study-project-note-folder-modal,
+.modal.rh-next-vault-picker-modal {
+  width: min(760px, 92vw);
+  height: min(680px, 84vh);
+}
+.modal.go-study-project-note-box-modal .modal-content,
+.modal.go-study-study-note-picker-modal .modal-content,
+.modal.go-study-project-note-folder-modal .modal-content,
+.modal.rh-next-vault-picker-modal .modal-content {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+}
+.go-study-picker-shell {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+.go-study-picker-heading { min-width: 0; }
+.go-study-picker-search { display: grid; gap: 6px; }
+.go-study-picker-label { color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.go-study-picker-body {
+  min-height: 0;
+  overflow: auto;
+  scrollbar-gutter: stable;
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 12px;
+}
+.go-study-picker-section + .go-study-picker-section { border-top: 1px solid var(--background-modifier-border); }
+.go-study-picker-section-title { display: block; padding: 10px 12px 4px; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.go-study-picker-body .rh-next-picker-list {
+  min-height: 0;
+  max-height: none;
+  margin-top: 0;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+}
+.go-study-picker-footer { display: flex; align-items: center; justify-content: flex-end; gap: 8px; min-height: 38px; }
+.go-study-picker-footer.is-note-box-footer { display: grid; grid-template-columns: 1fr; align-items: stretch; }
+.go-study-note-folder-default { display: flex; align-items: center; gap: 8px; color: var(--text-muted); font-size: var(--font-ui-smaller); }
+.go-study-note-folder-default > span { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.go-study-picker-footer .go-study-note-create-row { display: flex; min-width: 0; flex: 1; gap: 8px; }
+.go-study-picker-footer .go-study-note-create-row .rh-next-input { min-width: 0; flex: 1; }
+.go-study-note-create-location { flex: 0 1 220px; min-width: 130px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.go-study-picker-body .rh-next-picker-row { width: 100%; box-sizing: border-box; }
+.go-study-note-management-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 0; border: 0; border-bottom: 1px solid var(--background-modifier-border); background: transparent; }
+.go-study-note-management-row:last-child { border-bottom: 0; }
+.go-study-note-management-row:hover { background: var(--background-modifier-hover); }
+.go-study-note-management-row > div:nth-child(2) { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.go-study-note-management-row > div:nth-child(2) strong,
+.go-study-note-management-row > div:nth-child(2) small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.go-study-note-management-row .rh-next-resource-actions { justify-self: end; }
+.go-study-folder-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; text-align: left; }
+.go-study-folder-breadcrumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 9px 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.go-study-folder-breadcrumb { border: 0; background: transparent; color: var(--text-accent); padding: 2px 4px; border-radius: 5px; cursor: pointer; }
+.go-study-folder-breadcrumb:hover { background: var(--background-modifier-hover); }
+.go-study-folder-breadcrumb-sep { color: var(--text-faint); }
+.rh-next-vault-picker-modal .rh-next-picker-list {
+  min-height: 0;
+  max-height: none;
+  flex: 1 1 auto;
+  overflow: auto;
+  scrollbar-gutter: stable;
+}
+.rh-next-vault-picker-modal .rh-next-vault-path-quick { max-height: 86px; overflow: auto; scrollbar-gutter: stable; }
+@media (max-width: 620px) {
+  .modal.go-study-project-note-box-modal,
+  .modal.go-study-study-note-picker-modal,
+  .modal.go-study-project-note-folder-modal,
+  .modal.rh-next-vault-picker-modal { width: 96vw; height: min(720px, 90vh); }
+  .go-study-picker-footer { align-items: stretch; flex-direction: column; }
+  .go-study-picker-footer > .rh-next-button { width: 100%; }
+}
+`;
+  doc.head?.appendChild?.(style);
+  plugin?.register?.(() => style.remove?.());
+  return style;
+}
+
+class ProjectNoteBoxModal extends Modal {
+  constructor(app, plugin, projectId) {
+    super(app);
+    this.plugin = plugin;
+    this.projectId = projectId;
+    this.query = '';
+    this.bodyEl = null;
+    this.createFolderOverride = null;
+  }
+
+  onOpen() {
+    this.modalEl.addClass?.('rh-next-modal', 'go-study-project-note-box-modal');
+    this.render();
+  }
+
+  render() {
+    const project = this.plugin.state.projects?.[this.projectId];
+    this.contentEl.empty();
+    const ui = createPickerShell(this.contentEl, {
+      title: `${project?.title || '项目'} · 笔记`,
+      description: '这里只保存项目与 Markdown 的关联，不会移动或复制原文件。',
+      searchLabel: '关联已有笔记',
+      placeholder: '搜索整个 Vault 的 Markdown…'
+    });
+    this.bodyEl = ui.body;
+    ui.search.value = this.query;
+    ui.search.addEventListener('input', () => {
+      this.query = ui.search.value;
+      this.renderBody();
+    });
+
+    ui.footer.addClass?.('is-note-box-footer');
+    const projectFolder = projectNoteFolder(this.plugin.state, this.projectId);
+    const folderDefault = ui.footer.createDiv({ cls: 'go-study-note-folder-default' });
+    const folderText = folderDefault.createSpan({ text: projectFolder ? `项目笔记文件夹：${projectFolder}` : '项目笔记文件夹：未设置 · 新建时跟随 Obsidian' });
+    folderText.title = projectFolder || '跟随 Obsidian 默认新建位置';
+    const folderButton = folderDefault.createEl('button', { cls: 'rh-next-button' });
+    folderButton.textContent = projectFolder ? '更改项目默认' : '设置项目默认';
+    folderButton.addEventListener('click', async () => {
+      const choice = await chooseProjectNoteFolder(this.plugin, { title: '设置项目笔记文件夹', initialPath: projectNoteFolder(this.plugin.state, this.projectId) });
+      if (!choice || choice.cancelled) return;
+      setProjectNoteFolder(this.plugin.state, this.projectId, choice.path);
+      await this.plugin.persist();
+      await this.plugin.workbenchLeaf?.view?.render?.();
+      this.createFolderOverride = null;
+      this.render();
+    });
+
+    const createRow = ui.footer.createDiv({ cls: 'go-study-note-create-row' });
+    const name = createRow.createEl('input', { cls: 'rh-next-input', attr: { placeholder: '新建项目笔记，例如：高等数学课堂笔记' } });
+    const location = createRow.createEl('button', { cls: 'rh-next-button go-study-note-create-location' });
+    const refreshLocationLabel = () => {
+      const effective = this.createFolderOverride === null ? projectNoteFolder(this.plugin.state, this.projectId) : this.createFolderOverride;
+      location.textContent = effective ? `位置：${effective}` : '位置：跟随 Obsidian';
+      location.title = this.createFolderOverride === null ? '默认使用项目设置；点击可仅修改本次位置' : '仅修改本次新建位置';
+    };
+    location.addEventListener('click', async () => {
+      const choice = await chooseProjectNoteFolder(this.plugin, { title: '选择本次新建位置', initialPath: this.createFolderOverride === null ? projectNoteFolder(this.plugin.state, this.projectId) : this.createFolderOverride });
+      if (!choice || choice.cancelled) return;
+      this.createFolderOverride = choice.path;
+      refreshLocationLabel();
+    });
+    refreshLocationLabel();
+    const create = createRow.createEl('button', { cls: 'rh-next-button is-primary' });
+    create.textContent = '新建并打开';
+    const submit = async () => {
+      try {
+        create.disabled = true;
+        const options = this.createFolderOverride === null ? {} : { folder: this.createFolderOverride };
+        await createProjectNote(this.plugin, this.projectId, name.value, options);
+        this.close();
+      } catch (error) {
+        new Notice(`创建笔记失败：${error instanceof Error ? error.message : String(error)}`, 5000);
+        create.disabled = false;
+      }
+    };
+    create.addEventListener('click', () => void submit());
+    name.addEventListener('keydown', (event) => { if (event.key === 'Enter') { event.preventDefault(); void submit(); } });
+    this.renderBody();
+  }
+
+  renderBody() {
+    const container = this.bodyEl;
+    if (!container) return;
+    container.empty();
+    const query = String(this.query || '').trim().toLocaleLowerCase('zh-CN');
+    if (query) return this.renderSearchResults(container, query);
+
+    const recent = recentProjectNote(this.plugin.state, this.projectId);
+    const notes = projectNotes(this.plugin.state, this.projectId);
+    const section = container.createDiv({ cls: 'go-study-picker-section' });
+    section.createEl('strong', { cls: 'go-study-picker-section-title', text: `项目笔记 · ${notes.length}` });
+    const list = section.createDiv({ cls: 'rh-next-picker-list' });
+    if (!notes.length) {
+      list.createEl('p', { cls: 'rh-next-empty-inline', text: '还没有项目笔记。直接在上方搜索 Vault，或在下方新建项目笔记。' });
+      return;
+    }
+    for (const note of notes) {
+      const file = resolveNoteFile(this.plugin, note);
+      const row = list.createDiv({ cls: `rh-next-picker-row go-study-note-management-row ${note.missingAt || !file ? 'is-missing' : ''}`.trim() });
+      setIcon(row.createSpan(), file ? 'file-text' : 'file-warning');
+      const body = row.createDiv();
+      const name = body.createEl('strong', { text: noteDisplayName(file || note) });
+      if (recent?.id === note.id) name.appendText?.(' · 最近使用');
+      body.createEl('small', { text: file ? note.path : `${note.path} · 已丢失` });
+      const actions = row.createDiv({ cls: 'rh-next-resource-actions' });
+      if (file) {
+        const open = actions.createEl('button', { cls: 'rh-next-icon-button', attr: { 'aria-label': '打开笔记', title: '打开笔记' } });
+        setIcon(open, 'external-link');
+        open.addEventListener('click', (event) => { event.stopPropagation(); void openProjectNote(this.plugin, note).then(() => this.close()); });
+      }
+      const remove = actions.createEl('button', { cls: 'rh-next-icon-button', attr: { 'aria-label': '从项目移除', title: '从项目移除；不会删除文件' } });
+      setIcon(remove, 'unlink');
+      remove.addEventListener('click', async (event) => {
+        event.stopPropagation();
+        unlinkProjectNote(this.plugin.state, this.projectId, note.id);
+        await this.plugin.persist();
+        await this.plugin.workbenchLeaf?.view?.render?.();
+        this.renderBody();
+      });
+      if (file) row.addEventListener('click', () => void openProjectNote(this.plugin, note).then(() => this.close()));
+    }
+  }
+
+  renderSearchResults(container, query = String(this.query || '').trim().toLocaleLowerCase('zh-CN')) {
+    const section = container.createDiv({ cls: 'go-study-picker-section' });
+    section.createEl('strong', { cls: 'go-study-picker-section-title', text: '搜索 Vault' });
+    const list = section.createDiv({ cls: 'rh-next-picker-list go-study-note-search-results' });
+    const linked = new Set(projectNotes(this.plugin.state, this.projectId).map((note) => note.path.toLowerCase()));
+    const matches = markdownFiles(this.plugin)
+      .filter((file) => `${file.basename || ''}\n${file.path}`.toLocaleLowerCase('zh-CN').includes(query))
+      .slice(0, 80);
+    if (!matches.length) {
+      list.createEl('p', { cls: 'rh-next-empty-inline', text: '没有找到匹配的 Markdown。' });
+      return;
+    }
+    for (const file of matches) {
+      const already = linked.has(file.path.toLowerCase());
+      rowButton(list, file, already ? `${file.path} · 已在笔记盒` : `${file.path} · 点击关联`, async () => {
+        const result = linkProjectNote(this.plugin.state, this.projectId, file.path);
+        setRecentProjectNote(this.plugin.state, this.projectId, result.note.id);
+        await this.plugin.persist();
+        await this.plugin.openVaultEntry(file);
+        await this.plugin.workbenchLeaf?.view?.render?.();
+        this.close();
+      });
+    }
+  }
+
+  onClose() { this.contentEl.empty(); }
+}
+
+class StudyNotePickerModal extends Modal {
+  constructor(app, plugin, projectId, resource, resolve) {
+    super(app);
+    this.plugin = plugin;
+    this.projectId = projectId;
+    this.resource = resource;
+    this.resolveChoice = resolve;
+    this.query = '';
+    this.settled = false;
+    this.bodyEl = null;
+  }
+
+  onOpen() {
+    this.modalEl.addClass?.('rh-next-modal', 'go-study-study-note-picker-modal');
+    this.render();
+  }
+
+  finish(choice) {
+    if (this.settled) return;
+    this.settled = true;
+    this.resolveChoice(choice);
+    this.close();
+  }
+
+  async chooseNote(note, file = null) {
+    try {
+      let selected = note;
+      if (!selected && file) selected = linkProjectNote(this.plugin.state, this.projectId, file.path).note;
+      if (!selected) return this.finish({ cancelled: false, note: null });
+      const opened = await openProjectNote(this.plugin, selected, { prepareForStudy: true });
+      if (!opened) return;
+      await this.plugin.workbenchLeaf?.view?.render?.();
+      this.finish({ cancelled: false, note: selected });
+    } catch (error) {
+      new Notice(`打开学习笔记失败：${error instanceof Error ? error.message : String(error)}`, 5000);
+    }
+  }
+
+  render() {
+    const project = this.plugin.state.projects?.[this.projectId];
+    this.contentEl.empty();
+    const ui = createPickerShell(this.contentEl, {
+      title: '开始学习',
+      description: `${project?.title || '项目'} · ${this.resource?.title || '学习资源'} · 选择这次学习要带上的笔记，不会建立永久的资源绑定。`,
+      searchLabel: '搜索 Vault',
+      placeholder: '搜索 Markdown…'
+    });
+    this.bodyEl = ui.body;
+    ui.search.value = this.query;
+    ui.search.addEventListener('input', () => {
+      this.query = ui.search.value;
+      this.renderBody();
+    });
+
+    const manage = ui.footer.createEl('button', { cls: 'rh-next-button' }); manage.textContent = '管理笔记盒';
+    manage.addEventListener('click', () => { new ProjectNoteBoxModal(this.app, this.plugin, this.projectId).open(); });
+    const none = ui.footer.createEl('button', { cls: 'rh-next-button' }); none.textContent = '这次不使用笔记';
+    none.addEventListener('click', () => this.finish({ cancelled: false, note: null }));
+    const cancel = ui.footer.createEl('button', { cls: 'rh-next-button' }); cancel.textContent = '取消';
+    cancel.addEventListener('click', () => this.finish({ cancelled: true, note: null }));
+    this.renderBody();
+  }
+
+  renderBody() {
+    const container = this.bodyEl;
+    if (!container) return;
+    container.empty();
+    const query = String(this.query || '').trim().toLocaleLowerCase('zh-CN');
+    if (query) return this.renderSearchResults(container, query);
+
+    const recent = recentProjectNote(this.plugin.state, this.projectId);
+    const notes = projectNotes(this.plugin.state, this.projectId).filter((note) => !note.missingAt && resolveNoteFile(this.plugin, note));
+    if (recent && !recent.missingAt) {
+      const recentSection = container.createDiv({ cls: 'go-study-picker-section' });
+      recentSection.createEl('strong', { cls: 'go-study-picker-section-title', text: '最近使用' });
+      const list = recentSection.createDiv({ cls: 'rh-next-picker-list' });
+      const file = resolveNoteFile(this.plugin, recent);
+      if (file) rowButton(list, file, `${recent.path} · 上次使用`, () => this.chooseNote(recent));
+    }
+
+    const projectSection = container.createDiv({ cls: 'go-study-picker-section' });
+    projectSection.createEl('strong', { cls: 'go-study-picker-section-title', text: '项目笔记盒' });
+    const list = projectSection.createDiv({ cls: 'rh-next-picker-list' });
+    const visible = notes.filter((note) => note.id !== recent?.id);
+    if (!visible.length) list.createEl('p', { cls: 'rh-next-empty-inline', text: recent ? '没有其他项目笔记。输入上方搜索框可从整个 Vault 选择。' : '笔记盒还是空的。输入上方搜索框可从整个 Vault 选择。' });
+    for (const note of visible) {
+      const file = resolveNoteFile(this.plugin, note);
+      if (file) rowButton(list, file, note.path, () => this.chooseNote(note));
+    }
+  }
+
+  renderSearchResults(container, query) {
+    const section = container.createDiv({ cls: 'go-study-picker-section' });
+    section.createEl('strong', { cls: 'go-study-picker-section-title', text: '搜索 Vault' });
+    const results = section.createDiv({ cls: 'rh-next-picker-list' });
+    const matches = markdownFiles(this.plugin)
+      .filter((file) => `${file.basename || ''}\n${file.path}`.toLocaleLowerCase('zh-CN').includes(query))
+      .slice(0, 80);
+    if (!matches.length) {
+      results.createEl('p', { cls: 'rh-next-empty-inline', text: '没有找到匹配笔记。' });
+      return;
+    }
+    for (const file of matches) {
+      const linked = findProjectNoteByPath(this.plugin.state, this.projectId, file.path);
+      rowButton(results, file, linked ? `${file.path} · 已在笔记盒` : `${file.path} · 选择后加入笔记盒`, () => this.chooseNote(linked, file));
+    }
+  }
+
+  onClose() {
+    this.contentEl.empty();
+    if (!this.settled) {
+      this.settled = true;
+      this.resolveChoice({ cancelled: true, note: null });
+    }
+  }
+}
+
+function chooseStudyNote(plugin, projectId, resource) {
+  return new Promise((resolve) => new StudyNotePickerModal(plugin.app, plugin, projectId, resource, resolve).open());
+}
+
+function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
+  if (!doc?.querySelectorAll || !plugin?.manifest?.id) return null;
+  installPickerUxStyles(plugin, doc);
+  const selector = `.workspace-leaf-content[data-type="${plugin.manifest.id}-workbench"]`;
+  const inject = () => {
+    const projectId = String(plugin.state?.uiState?.currentProjectId || '');
+    if (plugin.state?.uiState?.route !== 'project' || !plugin.state?.projects?.[projectId]) return;
+    const study = recentStudy(plugin.state, projectId);
+    const noteCount = projectNotes(plugin.state, projectId).length;
+    for (const leaf of doc.querySelectorAll(selector)) {
+      const actions = leaf.querySelector?.('.rh-next-project-heading .rh-next-section-actions');
+      if (!actions || actions.querySelector?.('[data-go-study-project-notes]')) continue;
+      const noteButton = createActionButton(doc, noteCount ? `笔记 ${noteCount}` : '笔记', 'notebook-tabs');
+      noteButton.setAttribute('data-go-study-project-notes', 'true');
+      noteButton.addEventListener('click', () => new ProjectNoteBoxModal(plugin.app, plugin, projectId).open());
+      actions.appendChild(noteButton);
+      if (study) {
+        const continueButton = createActionButton(doc, '继续学习', 'play', 'is-primary');
+        continueButton.setAttribute('data-go-study-continue-study', 'true');
+        continueButton.title = `${study.resource?.title || '上次资源'}${study.note ? ` + ${noteDisplayName(study.note)}` : ''}`;
+        continueButton.addEventListener('click', () => void plugin.continueRecentProjectStudy?.(projectId));
+        actions.insertBefore(continueButton, noteButton);
+      }
+    }
+  };
+  inject();
+  const Observer = doc.defaultView?.MutationObserver || globalThis.MutationObserver;
+  const observer = Observer ? new Observer(inject) : null;
+  observer?.observe?.(doc.body, { childList: true, subtree: true });
+  plugin.register?.(() => observer?.disconnect?.());
+  return { inject, observer };
+}
+
+module.exports = {
+  ProjectNoteBoxModal,
+  ProjectNoteFolderPickerModal,
+  StudyNotePickerModal,
+  chooseProjectNoteFolder,
+  chooseStudyNote,
+  createPickerShell,
+  createProjectNote,
+  installPickerUxStyles,
+  focusProjectNoteAtEnd,
+  installProjectNoteEntryPoints,
+  markdownFiles,
+  newNoteParentPath,
+  noteDisplayName,
+  openProjectNote,
+  resolveNoteFile,
+  safeNewNoteTitle,
+  uniqueNewNotePath,
+  vaultFolders
+};
+
+},
+"project-notes.cjs": (module, exports, require) => {
+'use strict';
+
+function objectOr(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function createId(prefix = 'note-ref') {
+  const random = Math.random().toString(36).slice(2, 9);
+  return `${prefix}-${Date.now().toString(36)}-${random}`;
+}
+
+function normalizeNoteFolder(rawPath) {
+  const raw = String(rawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!raw) return '';
+  const parts = raw.split('/').filter(Boolean);
+  if (parts.some((part) => part === '.' || part === '..' || /[<>:"|?*\x00-\x1F]/.test(part))) {
+    throw new Error('项目笔记文件夹必须是 Vault 内的安全相对路径。');
+  }
+  return parts.join('/').normalize('NFC');
+}
+
+function normalizeNotePath(rawPath) {
+  const parts = String(rawPath || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter((part) => part && part !== '.');
+  if (!parts.length || parts.some((part) => part === '..')) throw new Error('笔记路径无效。');
+  const normalized = parts.join('/').normalize('NFC');
+  if (!/\.md$/i.test(normalized)) throw new Error('项目笔记必须是 Markdown 文件。');
+  return normalized;
+}
+
+function ensureProjectNotesState(state) {
+  if (!state || typeof state !== 'object') throw new Error('Go Study 状态不可用。');
+  state.projectNotes = objectOr(state.projectNotes);
+  state.uiState = objectOr(state.uiState);
+  state.uiState.recentProjectNoteIds = objectOr(state.uiState.recentProjectNoteIds);
+  state.uiState.recentStudyByProject = objectOr(state.uiState.recentStudyByProject);
+  for (const project of Object.values(objectOr(state.projects))) {
+    try { project.noteFolder = normalizeNoteFolder(project.noteFolder); }
+    catch { project.noteFolder = ''; }
+  }
+
+  const normalized = {};
+  const seen = new Set();
+  for (const [id, raw] of Object.entries(state.projectNotes)) {
+    const item = objectOr(raw);
+    if (!state.projects?.[item.projectId] || state.projects[item.projectId].deletedAt) continue;
+    try {
+      const path = normalizeNotePath(item.path);
+      const key = `${item.projectId}\u0000${path.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      // Normalize the existing object in place. Runtime code may still hold a
+      // reference to the selected project note while Vault lifecycle events
+      // update its path, so replacing every object during normalization would
+      // leave that reference stale even though state.projectNotes was correct.
+      item.id = id;
+      item.projectId = String(item.projectId);
+      item.path = path;
+      item.missingAt = String(item.missingAt || '');
+      item.createdAt = String(item.createdAt || '');
+      item.updatedAt = String(item.updatedAt || '');
+      normalized[id] = item;
+    } catch {}
+  }
+  state.projectNotes = normalized;
+
+  for (const [projectId, noteId] of Object.entries(state.uiState.recentProjectNoteIds)) {
+    if (!state.projects?.[projectId] || !normalized[noteId] || normalized[noteId].projectId !== projectId) {
+      delete state.uiState.recentProjectNoteIds[projectId];
+    }
+  }
+  for (const [projectId, rawStudy] of Object.entries(state.uiState.recentStudyByProject)) {
+    const study = objectOr(rawStudy);
+    if (!state.projects?.[projectId] || !state.resources?.[study.resourceId]) {
+      delete state.uiState.recentStudyByProject[projectId];
+      continue;
+    }
+    const noteId = String(study.noteId || '');
+    if (noteId && (!normalized[noteId] || normalized[noteId].projectId !== projectId)) study.noteId = '';
+    state.uiState.recentStudyByProject[projectId] = {
+      projectId,
+      resourceId: String(study.resourceId),
+      noteId: String(study.noteId || ''),
+      updatedAt: String(study.updatedAt || '')
+    };
+  }
+  return state;
+}
+
+function projectNoteFolder(state, projectId) {
+  ensureProjectNotesState(state);
+  return String(state.projects?.[projectId]?.noteFolder || '');
+}
+
+function setProjectNoteFolder(state, projectId, rawFolder, at = new Date()) {
+  ensureProjectNotesState(state);
+  const project = state.projects?.[projectId];
+  if (!project || project.deletedAt) throw new Error('找不到项目。');
+  project.noteFolder = normalizeNoteFolder(rawFolder);
+  project.updatedAt = at.toISOString();
+  return project.noteFolder;
+}
+
+function projectNotes(state, projectId) {
+  ensureProjectNotesState(state);
+  return Object.values(state.projectNotes)
+    .filter((note) => note.projectId === projectId)
+    .sort((a, b) => Number(Boolean(a.missingAt)) - Number(Boolean(b.missingAt))
+      || String(b.updatedAt || '').localeCompare(String(a.updatedAt || ''))
+      || String(a.path).localeCompare(String(b.path), 'zh-CN'));
+}
+
+function findProjectNoteByPath(state, projectId, rawPath) {
+  const path = normalizeNotePath(rawPath);
+  return projectNotes(state, projectId).find((note) => note.path.toLowerCase() === path.toLowerCase()) || null;
+}
+
+function linkProjectNote(state, projectId, rawPath, at = new Date()) {
+  ensureProjectNotesState(state);
+  const project = state.projects?.[projectId];
+  if (!project || project.deletedAt) throw new Error('找不到项目。');
+  const path = normalizeNotePath(rawPath);
+  const existing = findProjectNoteByPath(state, projectId, path);
+  const timestamp = at.toISOString();
+  if (existing) {
+    existing.missingAt = '';
+    existing.updatedAt = timestamp;
+    return { note: existing, reused: true };
+  }
+  const id = createId('project-note');
+  const note = {
+    id,
+    projectId,
+    path,
+    missingAt: '',
+    createdAt: timestamp,
+    updatedAt: timestamp
+  };
+  state.projectNotes[id] = note;
+  return { note, reused: false };
+}
+
+function unlinkProjectNote(state, projectId, noteId) {
+  ensureProjectNotesState(state);
+  const note = state.projectNotes?.[noteId];
+  if (!note || note.projectId !== projectId) return { removed: false, note: null };
+  delete state.projectNotes[noteId];
+  if (state.uiState.recentProjectNoteIds[projectId] === noteId) delete state.uiState.recentProjectNoteIds[projectId];
+  const study = state.uiState.recentStudyByProject[projectId];
+  if (study?.noteId === noteId) study.noteId = '';
+  return { removed: true, note };
+}
+
+function setRecentProjectNote(state, projectId, noteId, at = new Date()) {
+  ensureProjectNotesState(state);
+  const note = state.projectNotes?.[noteId];
+  if (!note || note.projectId !== projectId) throw new Error('找不到项目笔记。');
+  state.uiState.recentProjectNoteIds[projectId] = note.id;
+  note.updatedAt = at.toISOString();
+  return note;
+}
+
+function recentProjectNote(state, projectId) {
+  ensureProjectNotesState(state);
+  const noteId = String(state.uiState.recentProjectNoteIds?.[projectId] || '');
+  const note = noteId ? state.projectNotes?.[noteId] : null;
+  return note && note.projectId === projectId ? note : null;
+}
+
+function projectIdForResource(state, resourceId) {
+  const id = String(resourceId || '');
+  if (!id || !state.resources?.[id] || state.resources[id].deletedAt) return '';
+  const currentProjectId = String(state.uiState?.currentProjectId || '');
+  const memberships = Object.values(objectOr(state.modules))
+    .filter((module) => !module.deletedAt && (module.resourceIds || []).includes(id) && state.projects?.[module.projectId] && !state.projects[module.projectId].deletedAt);
+  if (!memberships.length) return '';
+  if (currentProjectId && memberships.some((module) => module.projectId === currentProjectId)) return currentProjectId;
+  memberships.sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || String(a.id).localeCompare(String(b.id)));
+  return String(memberships[0].projectId || '');
+}
+
+function recordRecentStudy(state, projectId, resourceId, noteId = '', at = new Date()) {
+  ensureProjectNotesState(state);
+  if (!state.projects?.[projectId] || state.projects[projectId].deletedAt) throw new Error('找不到项目。');
+  if (!state.resources?.[resourceId] || state.resources[resourceId].deletedAt) throw new Error('找不到学习资源。');
+  const safeNoteId = String(noteId || '');
+  if (safeNoteId) {
+    const note = state.projectNotes?.[safeNoteId];
+    if (!note || note.projectId !== projectId) throw new Error('学习笔记不属于当前项目。');
+    setRecentProjectNote(state, projectId, safeNoteId, at);
+  }
+  state.uiState.recentStudyByProject[projectId] = {
+    projectId,
+    resourceId,
+    noteId: safeNoteId,
+    updatedAt: at.toISOString()
+  };
+  return state.uiState.recentStudyByProject[projectId];
+}
+
+function recentStudy(state, projectId) {
+  ensureProjectNotesState(state);
+  const study = state.uiState.recentStudyByProject?.[projectId];
+  if (!study || !state.resources?.[study.resourceId] || state.resources[study.resourceId].deletedAt) return null;
+  const note = study.noteId ? state.projectNotes?.[study.noteId] || null : null;
+  return { ...study, resource: state.resources[study.resourceId], note };
+}
+
+function updateProjectNotePathsOnRename(state, oldRawPath, newRawPath, at = new Date()) {
+  ensureProjectNotesState(state);
+  const oldPath = String(oldRawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  const newPath = String(newRawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  if (!oldPath || !newPath) return 0;
+  let changed = 0;
+  for (const note of Object.values(state.projectNotes)) {
+    const current = note.path;
+    if (current !== oldPath && !current.startsWith(`${oldPath}/`)) continue;
+    const next = current === oldPath ? newPath : `${newPath}${current.slice(oldPath.length)}`;
+    try {
+      note.path = normalizeNotePath(next);
+      note.missingAt = '';
+      note.updatedAt = at.toISOString();
+      changed += 1;
+    } catch {
+      note.missingAt = at.toISOString();
+      note.updatedAt = at.toISOString();
+    }
+  }
+  return changed;
+}
+
+function updateProjectNoteFoldersOnRename(state, oldRawPath, newRawPath, at = new Date()) {
+  ensureProjectNotesState(state);
+  const oldPath = String(oldRawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  const newPath = String(newRawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  if (!oldPath || !newPath) return 0;
+  let changed = 0;
+  for (const project of Object.values(objectOr(state.projects))) {
+    const current = String(project.noteFolder || '');
+    if (!current || (current !== oldPath && !current.startsWith(`${oldPath}/`))) continue;
+    const next = current === oldPath ? newPath : `${newPath}${current.slice(oldPath.length)}`;
+    try { project.noteFolder = normalizeNoteFolder(next); }
+    catch { project.noteFolder = ''; }
+    project.updatedAt = at.toISOString();
+    changed += 1;
+  }
+  return changed;
+}
+
+function clearProjectNoteFoldersOnDelete(state, rawPath, at = new Date()) {
+  ensureProjectNotesState(state);
+  const path = String(rawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  if (!path) return 0;
+  let changed = 0;
+  for (const project of Object.values(objectOr(state.projects))) {
+    const current = String(project.noteFolder || '');
+    if (!current || (current !== path && !current.startsWith(`${path}/`))) continue;
+    project.noteFolder = '';
+    project.updatedAt = at.toISOString();
+    changed += 1;
+  }
+  return changed;
+}
+
+function markProjectNotesMissing(state, rawPath, at = new Date()) {
+  ensureProjectNotesState(state);
+  const path = String(rawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  if (!path) return 0;
+  let changed = 0;
+  for (const note of Object.values(state.projectNotes)) {
+    if (note.path !== path && !note.path.startsWith(`${path}/`)) continue;
+    if (!note.missingAt) note.missingAt = at.toISOString();
+    note.updatedAt = at.toISOString();
+    changed += 1;
+  }
+  return changed;
+}
+
+function restoreProjectNotePath(state, rawPath, at = new Date()) {
+  ensureProjectNotesState(state);
+  let path;
+  try { path = normalizeNotePath(rawPath); } catch { return 0; }
+  let changed = 0;
+  for (const note of Object.values(state.projectNotes)) {
+    if (note.path !== path || !note.missingAt) continue;
+    note.missingAt = '';
+    note.updatedAt = at.toISOString();
+    changed += 1;
+  }
+  return changed;
+}
+
+function playerTimeFromSeconds(value) {
+  const total = Math.max(0, Math.floor(Number(value || 0)));
+  const hours = Math.floor(total / 3600);
+  const minutes = Math.floor((total % 3600) / 60);
+  const seconds = total % 60;
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+module.exports = {
+  clearProjectNoteFoldersOnDelete,
+  ensureProjectNotesState,
+  findProjectNoteByPath,
+  linkProjectNote,
+  markProjectNotesMissing,
+  normalizeNoteFolder,
+  normalizeNotePath,
+  playerTimeFromSeconds,
+  projectNoteFolder,
+  projectIdForResource,
+  projectNotes,
+  recentProjectNote,
+  recentStudy,
+  recordRecentStudy,
+  restoreProjectNotePath,
+  setProjectNoteFolder,
+  setRecentProjectNote,
+  unlinkProjectNote,
+  updateProjectNoteFoldersOnRename,
+  updateProjectNotePathsOnRename
+};
+
+},
+"quick-note-window.cjs": (module, exports, require) => {
+'use strict';
+
+const { Modal } = require('obsidian');
+
+function resolveRemote(options = {}) {
+  if (options.remote) return options.remote;
+  try { return require('@electron/remote'); } catch { return null; }
+}
+
+function encodeTitlePayload(prefix, value = '') {
+  return `${prefix}:${Buffer.from(String(value), 'utf8').toString('base64')}`;
+}
+
+function decodeTitlePayload(title, prefix) {
+  const marker = `${prefix}:`;
+  if (!String(title || '').startsWith(marker)) return null;
+  try { return Buffer.from(String(title).slice(marker.length), 'base64').toString('utf8'); }
+  catch { return null; }
+}
+
+function promptHtml(options = {}) {
+  const title = String(options.title || '快速笔记');
+  const subtitle = String(options.subtitle || 'Enter 保存 · Shift+Enter 换行 · Esc 取消');
+  const placeholder = String(options.placeholder || '写下这一刻的笔记…');
+  const esc = (value) => String(value).replace(/[&<>"']/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+  return `<!doctype html><html><head><meta charset="utf-8"><style>
+  *{box-sizing:border-box} body{margin:0;font-family:Segoe UI,system-ui,sans-serif;background:#17191d;color:#f3f4f6;padding:16px}
+  .title{font-size:14px;font-weight:650;margin-bottom:4px}.sub{font-size:12px;color:#9ca3af;margin-bottom:10px}
+  textarea{width:100%;height:76px;resize:none;border:1px solid #3b4048;border-radius:9px;background:#22252b;color:#fff;padding:10px 12px;font:14px/1.45 Segoe UI,system-ui,sans-serif;outline:none}
+  textarea:focus{border-color:#6b7280}.hint{margin-top:8px;font-size:11px;color:#7f8793;text-align:right}
+  </style></head><body><div class="title">${esc(title)}</div><div class="sub">${esc(subtitle)}</div><textarea autofocus placeholder="${esc(placeholder)}"></textarea><div class="hint">Go Study</div><script>
+  const box=document.querySelector('textarea');
+  const submit=()=>{ const text=box.value.trim(); if(!text) return; document.title='GO_STUDY_SUBMIT:'+btoa(unescape(encodeURIComponent(text))); };
+  box.addEventListener('keydown',(event)=>{ if(event.key==='Escape'){event.preventDefault();document.title='GO_STUDY_CANCEL:';} else if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();submit();} });
+  window.addEventListener('load',()=>{box.focus();box.select();});
+  </script></body></html>`;
+}
+
+function showNativeQuickNote(options = {}) {
+  const remote = resolveRemote(options);
+  const BrowserWindow = options.BrowserWindow || remote?.BrowserWindow;
+  if (!BrowserWindow) return null;
+  const screen = options.screen || remote?.screen;
+  const point = screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+  const display = screen?.getDisplayNearestPoint?.(point);
+  const area = display?.workArea || { x: 0, y: 0, width: 1280, height: 720 };
+  const width = 520;
+  const height = 160;
+  const win = new BrowserWindow({
+    width,
+    height,
+    x: Math.round(area.x + (area.width - width) / 2),
+    y: Math.round(area.y + Math.max(60, area.height * 0.24)),
+    frame: false,
+    resizable: false,
+    minimizable: false,
+    maximizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+  });
+
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      try { if (!win.isDestroyed()) win.close(); } catch {}
+      resolve(value);
+    };
+    win.on('closed', () => finish(null));
+    win.webContents.on('page-title-updated', (event, title) => {
+      if (String(title).startsWith('GO_STUDY_CANCEL:')) { event.preventDefault(); finish(null); return; }
+      const text = decodeTitlePayload(title, 'GO_STUDY_SUBMIT');
+      if (text !== null) { event.preventDefault(); finish(text.trim() || null); }
+    });
+    win.once('ready-to-show', () => { win.show(); win.focus(); });
+    void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(promptHtml(options))}`);
+  });
+}
+
+class FallbackNoteModal extends Modal {
+  constructor(app, options, resolve) {
+    super(app); this.options = options; this.resolve = resolve; this.settled = false;
+  }
+  onOpen() {
+    this.contentEl.empty();
+    this.contentEl.createEl('h3', { text: this.options.title || '快速笔记' });
+    const input = this.contentEl.createEl('textarea', { attr: { placeholder: this.options.placeholder || '写下这一刻的笔记…' } });
+    input.style.width = '100%'; input.style.minHeight = '110px';
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); this.finish(null); }
+      else if (event.key === 'Enter' && !event.shiftKey) { event.preventDefault(); this.finish(input.value.trim() || null); }
+    });
+    setTimeout(() => input.focus(), 0);
+  }
+  finish(value) { if (this.settled) return; this.settled = true; this.resolve(value); this.close(); }
+  onClose() { if (!this.settled) { this.settled = true; this.resolve(null); } this.contentEl.empty(); }
+}
+
+function showQuickNoteInput(plugin, options = {}) {
+  const native = showNativeQuickNote(options);
+  if (native) return native;
+  return new Promise((resolve) => new FallbackNoteModal(plugin.app, options, resolve).open());
+}
+
+async function showNativeToast(message, options = {}) {
+  const remote = resolveRemote(options);
+  const BrowserWindow = options.BrowserWindow || remote?.BrowserWindow;
+  if (!BrowserWindow) return false;
+  const screen = options.screen || remote?.screen;
+  const point = screen?.getCursorScreenPoint?.() || { x: 0, y: 0 };
+  const display = screen?.getDisplayNearestPoint?.(point);
+  const area = display?.workArea || { x: 0, y: 0, width: 1280, height: 720 };
+  const width = 300; const height = 56;
+  const win = new BrowserWindow({
+    width, height,
+    x: Math.round(area.x + area.width - width - 28),
+    y: Math.round(area.y + area.height - height - 42),
+    frame: false, transparent: true, alwaysOnTop: true, skipTaskbar: true,
+    focusable: false, resizable: false, show: false,
+    webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
+  });
+  const safe = String(message || '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+  const html = `<!doctype html><html><body style="margin:0;background:rgba(20,22,26,.92);color:#fff;border-radius:10px;font:13px Segoe UI,system-ui,sans-serif;display:flex;align-items:center;padding:0 16px;height:56px">${safe}</body></html>`;
+  win.once('ready-to-show', () => win.showInactive?.() || win.show());
+  await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+  setTimeout(() => { try { if (!win.isDestroyed()) win.close(); } catch {} }, Number(options.durationMs || 1200));
+  return true;
+}
+
+module.exports = {
+  FallbackNoteModal,
+  decodeTitlePayload,
+  encodeTitlePayload,
+  promptHtml,
+  resolveRemote,
+  showNativeQuickNote,
+  showNativeToast,
+  showQuickNoteInput
 };
 
 },
@@ -7406,14 +11004,23 @@ module.exports = {
 "resource-note.cjs": (module, exports, require) => {
 'use strict';
 
-const { buildReferenceUri, normalizeReferencePosition } = __rhLoad("resource-reference.cjs");
+const { buildReferenceUri, normalizeFreeformLocator, normalizeReferencePosition } = __rhLoad("resource-reference.cjs");
+const {
+  DEFAULT_PRODUCT_SETTINGS,
+  normalizeOutputTemplate,
+  normalizeTimeDisplayFormat
+} = __rhLoad("product-settings.cjs");
 
-function formatPositionClock(position) {
+function formatPositionClock(position, mode = 'smart') {
   const normalized = normalizeReferencePosition(position);
   const total = Math.floor(normalized.seconds);
   const hours = Math.floor(total / 3600);
   const minutes = Math.floor((total % 3600) / 60);
   const seconds = total % 60;
+  const format = normalizeTimeDisplayFormat(mode);
+  if (format === 'hms') {
+    return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
   return hours > 0
     ? `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
     : `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
@@ -7428,21 +11035,191 @@ function escapeMarkdownLabel(value) {
     .trim();
 }
 
+function renderOutputTemplate(template, values = {}) {
+  return String(template || '').replace(/\{([A-Za-z][A-Za-z0-9_-]*)\}/g, (match, token) => {
+    if (!Object.prototype.hasOwnProperty.call(values, token)) return match;
+    return String(values[token] ?? '');
+  });
+}
+
 function buildPositionMarkdown(resource, position, options = {}) {
   if (!resource?.id) throw new Error('无法为缺少 Resource ID 的资源生成回链。');
   const normalized = normalizeReferencePosition(position);
   const uri = buildReferenceUri({ resourceId: resource.id, position: normalized, version: 1 });
-  const time = formatPositionClock(normalized);
+  const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
   const title = escapeMarkdownLabel(options.title || resource.title || '学习资源');
-  return `[↗ ${title} · ${time}](${uri})`;
+  const template = normalizeOutputTemplate(
+    'backlinkTemplate',
+    options.template ?? options.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate
+  );
+  return renderOutputTemplate(template, { title, time, uri });
 }
 
-function buildCaptureMarkdown(resource, position, vaultImagePath) {
+function freeformMediaTitle(media = {}) {
+  const explicit = String(media.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '').trim();
+  if (explicit && explicit.toLowerCase() !== 'potplayer') return explicit;
+  const raw = String(media.path || '').trim();
+  try {
+    const url = new URL(raw);
+    const tail = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || url.hostname || '临时视频');
+    return tail || url.hostname || '临时视频';
+  } catch {}
+  const parts = raw.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.pop() || '临时视频';
+}
+
+function freeformWebLocator(media = {}) {
+  const raw = String(media.web || media.path || '').trim();
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch { return ''; }
+}
+
+function buildFreeformPlaybackUri(media, position) {
+  const normalized = normalizeReferencePosition(position);
+  const locator = normalizeFreeformLocator(media?.path);
+  const playerTime = formatPositionClock(normalized, 'hms');
+  return `jv://open?path=${encodeURIComponent(locator)}&time=${encodeURIComponent(playerTime)}`;
+}
+
+function buildFreeformPositionMarkdown(media, position, options = {}) {
+  const normalized = normalizeReferencePosition(position);
+  const uri = buildFreeformPlaybackUri(media, normalized);
+  const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
+  const title = escapeMarkdownLabel(options.title || freeformMediaTitle(media));
+  const template = normalizeOutputTemplate(
+    'backlinkTemplate',
+    options.template ?? options.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate
+  );
+  return renderOutputTemplate(template, { title, time, uri });
+}
+
+function buildContextPositionMarkdown(context, options = {}) {
+  if (context?.mode === 'freeform') {
+    return buildFreeformPositionMarkdown(context.bridgeMedia || context.freeform || {}, context.position, options);
+  }
+  return buildPositionMarkdown(context?.resource, context?.position, options);
+}
+
+function normalizeUserNote(value) {
+  return String(value ?? '').replace(/\r\n/g, '\n').trim();
+}
+
+function buildNotePositionMarkdown(resource, position, noteText, options = {}) {
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const backlink = buildPositionMarkdown(resource, position, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate('noteTemplate', options.noteTemplate ?? DEFAULT_PRODUCT_SETTINGS.noteTemplate);
+  return renderOutputTemplate(template, { note, backlink });
+}
+
+function normalizeCaptureImage(vaultImagePath) {
   const imagePath = String(vaultImagePath || '').trim().replace(/\\/g, '/');
   if (!imagePath || imagePath.includes('..')) throw new Error('截图 Vault 路径无效。');
-  const backlink = buildPositionMarkdown(resource, position, { title: '回到课程' });
-  return `![[${imagePath}]]\n\n${backlink}`;
+  return `![[${imagePath}]]`;
 }
+function buildPlainNoteMarkdown(noteText, options = {}) {
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const template = normalizeOutputTemplate('plainNoteTemplate', options.plainNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainNoteTemplate);
+  return renderOutputTemplate(template, { note });
+}
+
+function buildPlainCaptureMarkdown(vaultImagePath, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const template = normalizeOutputTemplate('plainCaptureTemplate', options.plainCaptureTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainCaptureTemplate);
+  return renderOutputTemplate(template, { image });
+}
+
+function buildPlainCaptureNoteMarkdown(vaultImagePath, noteText, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const template = normalizeOutputTemplate(
+    'plainCaptureNoteTemplate',
+    options.plainCaptureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.plainCaptureNoteTemplate
+  );
+  return renderOutputTemplate(template, { image, note });
+}
+
+
+function buildCaptureMarkdown(resource, position, vaultImagePath, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const backlink = buildPositionMarkdown(resource, position, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate('captureTemplate', options.captureTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureTemplate);
+  return renderOutputTemplate(template, { image, backlink });
+}
+
+function buildCaptureNoteMarkdown(resource, position, vaultImagePath, noteText, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const backlink = buildPositionMarkdown(resource, position, {
+    title: options.backlinkTitle || '回到课程',
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate(
+    'captureNoteTemplate',
+    options.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate
+  );
+  return renderOutputTemplate(template, { image, note, backlink });
+}
+function contextBacklinkTitle(context, options = {}) {
+  if (options.backlinkTitle) return options.backlinkTitle;
+  return context?.mode === 'freeform'
+    ? freeformMediaTitle(context.bridgeMedia || context.freeform || {})
+    : '回到课程';
+}
+
+function buildContextNoteMarkdown(context, noteText, options = {}) {
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const backlink = buildContextPositionMarkdown(context, {
+    title: contextBacklinkTitle(context, options),
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate('noteTemplate', options.noteTemplate ?? DEFAULT_PRODUCT_SETTINGS.noteTemplate);
+  return renderOutputTemplate(template, { note, backlink });
+}
+
+function buildContextCaptureMarkdown(context, vaultImagePath, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const backlink = buildContextPositionMarkdown(context, {
+    title: contextBacklinkTitle(context, options),
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate('captureTemplate', options.captureTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureTemplate);
+  return renderOutputTemplate(template, { image, backlink });
+}
+
+function buildContextCaptureNoteMarkdown(context, vaultImagePath, noteText, options = {}) {
+  const image = normalizeCaptureImage(vaultImagePath);
+  const note = normalizeUserNote(noteText);
+  if (!note) throw new Error('笔记内容不能为空。');
+  const backlink = buildContextPositionMarkdown(context, {
+    title: contextBacklinkTitle(context, options),
+    timeFormat: options.timeFormat,
+    backlinkTemplate: options.backlinkTemplate
+  });
+  const template = normalizeOutputTemplate(
+    'captureNoteTemplate',
+    options.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate
+  );
+  return renderOutputTemplate(template, { image, note, backlink });
+}
+
 
 function sanitizeCaptureBaseName(value) {
   const cleaned = String(value || '学习资源')
@@ -7456,16 +11233,33 @@ function sanitizeCaptureBaseName(value) {
 function captureFileName(resource, position, extension = 'png') {
   const safeExtension = String(extension || 'png').toLowerCase();
   if (!/^[a-z0-9]{2,5}$/.test(safeExtension)) throw new Error('截图扩展名无效。');
-  const clock = formatPositionClock(position).replace(/:/g, '-');
+  const clock = formatPositionClock(position, 'smart').replace(/:/g, '-');
   return `${sanitizeCaptureBaseName(resource?.title)}-${clock}.${safeExtension}`;
 }
 
 module.exports = {
   buildCaptureMarkdown,
+  buildContextCaptureMarkdown,
+  buildContextCaptureNoteMarkdown,
+  buildContextNoteMarkdown,
+  buildContextPositionMarkdown,
+  buildCaptureNoteMarkdown,
+  buildNotePositionMarkdown,
   buildPositionMarkdown,
+  buildFreeformPlaybackUri,
+  buildFreeformPositionMarkdown,
+  buildPlainCaptureMarkdown,
+  buildPlainCaptureNoteMarkdown,
+  buildPlainNoteMarkdown,
   captureFileName,
+  contextBacklinkTitle,
+  freeformMediaTitle,
+  freeformWebLocator,
   escapeMarkdownLabel,
   formatPositionClock,
+  normalizeCaptureImage,
+  normalizeUserNote,
+  renderOutputTemplate,
   sanitizeCaptureBaseName
 };
 
@@ -7475,7 +11269,8 @@ module.exports = {
 
 const REFERENCE_ACTION = 'go-study';
 const REFERENCE_VERSION = 1;
-const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v']);
+const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v', 'mode', 'path', 'web']);
+const ALLOWED_PROTOCOL_META_KEYS = new Set(['action']);
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 
 function normalizeResourceId(value) {
@@ -7509,10 +11304,45 @@ function normalizeReferenceVersion(value) {
   return version;
 }
 
+function normalizeFreeformLocator(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 4096 || /[\x00-\x1F]/.test(raw)) throw new Error('Go Study 自由回链中的媒体地址无效。');
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
+    return url.toString();
+  } catch {
+    if (!/^[A-Za-z]:[\\/]/.test(raw) && !/^\\\\[^\\]+\\[^\\]+/.test(raw)) {
+      throw new Error('Go Study 自由回链只允许 Windows 本地路径或 HTTP(S) 地址。');
+    }
+    return raw;
+  }
+}
+
+function normalizeOptionalWebLocator(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  let url;
+  try { url = new URL(raw); } catch { throw new Error('Go Study 自由回链中的网页地址无效。'); }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('Go Study 自由回链网页地址只允许 HTTP(S)。');
+  return url.toString();
+}
+
 function validateReferenceData(input) {
   const source = input && typeof input === 'object' ? input : {};
   return {
     resourceId: normalizeResourceId(source.resourceId ?? source.resource),
+    position: normalizeReferencePosition(source.position),
+    version: normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION)
+  };
+}
+
+function validateFreeformReferenceData(input) {
+  const source = input && typeof input === 'object' ? input : {};
+  return {
+    mode: 'freeform',
+    path: normalizeFreeformLocator(source.path),
+    web: normalizeOptionalWebLocator(source.web),
     position: normalizeReferencePosition(source.position),
     version: normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION)
   };
@@ -7527,17 +11357,41 @@ function buildReferenceUri(input) {
   return url.toString();
 }
 
+function buildFreeformReferenceUri(input) {
+  const reference = validateFreeformReferenceData(input);
+  const url = new URL(`obsidian://${REFERENCE_ACTION}`);
+  url.searchParams.set('mode', 'freeform');
+  url.searchParams.set('path', reference.path);
+  if (reference.web) url.searchParams.set('web', reference.web);
+  url.searchParams.set('position', serializeReferencePosition(reference.position));
+  url.searchParams.set('v', String(reference.version));
+  return url.toString();
+}
+
 function parseQueryEntries(searchParams) {
   const keys = [...searchParams.keys()];
   for (const key of keys) {
     if (!ALLOWED_QUERY_KEYS.has(key)) throw new Error(`Go Study 回链包含不允许的参数：${key}。`);
     if (searchParams.getAll(key).length !== 1) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
   }
-  return {
+  if (searchParams.get('mode') === 'freeform') {
+    if (searchParams.has('resource')) throw new Error('Go Study 自由回链不能同时包含 Resource ID。');
+    return validateFreeformReferenceData({
+      mode: 'freeform',
+      path: searchParams.get('path'),
+      web: searchParams.get('web'),
+      position: searchParams.get('position'),
+      v: searchParams.get('v')
+    });
+  }
+  if (searchParams.has('mode') || searchParams.has('path') || searchParams.has('web')) {
+    throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
+  }
+  return validateReferenceData({
     resource: searchParams.get('resource'),
     position: searchParams.get('position'),
     v: searchParams.get('v')
-  };
+  });
 }
 
 function parseReferenceUri(rawUri) {
@@ -7549,15 +11403,29 @@ function parseReferenceUri(rawUri) {
   if ((url.pathname && url.pathname !== '/') || url.username || url.password || url.port || url.hash) {
     throw new Error('Go Study 回链包含不允许的地址结构。');
   }
-  return validateReferenceData(parseQueryEntries(url.searchParams));
+  return parseQueryEntries(url.searchParams);
 }
 
 function parseProtocolParams(params) {
   const source = params && typeof params === 'object' ? params : {};
   const keys = Object.keys(source);
   for (const key of keys) {
+    if (ALLOWED_PROTOCOL_META_KEYS.has(key)) {
+      if (Array.isArray(source[key])) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
+      if (key === 'action' && source[key] != null && String(source[key]) !== REFERENCE_ACTION) {
+        throw new Error('Go Study 回链的协议 action 不匹配。');
+      }
+      continue;
+    }
     if (!ALLOWED_QUERY_KEYS.has(key)) throw new Error(`Go Study 回链包含不允许的参数：${key}。`);
     if (Array.isArray(source[key])) throw new Error(`Go Study 回链参数 ${key} 不能重复。`);
+  }
+  if (String(source.mode || '') === 'freeform') {
+    if (source.resource != null) throw new Error('Go Study 自由回链不能同时包含 Resource ID。');
+    return validateFreeformReferenceData(source);
+  }
+  if (source.mode != null || source.path != null || source.web != null) {
+    throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
   }
   return validateReferenceData({
     resource: source.resource,
@@ -7567,16 +11435,21 @@ function parseProtocolParams(params) {
 }
 
 module.exports = {
+  ALLOWED_PROTOCOL_META_KEYS,
   ALLOWED_QUERY_KEYS,
   REFERENCE_ACTION,
   REFERENCE_VERSION,
+  buildFreeformReferenceUri,
   buildReferenceUri,
+  normalizeFreeformLocator,
+  normalizeOptionalWebLocator,
   normalizeReferencePosition,
   normalizeReferenceVersion,
   normalizeResourceId,
   parseProtocolParams,
   parseReferenceUri,
   serializeReferencePosition,
+  validateFreeformReferenceData,
   validateReferenceData
 };
 
@@ -7585,7 +11458,7 @@ module.exports = {
 'use strict';
 
 const { Modal, Notice } = require('obsidian');
-const { openListLocatorFromResource } = __rhLoad("resource-locator.cjs");
+const { normalizeOpenListPathCompat, openListLocatorFromResource, pathWithinPrefix } = __rhLoad("resource-locator.cjs");
 
 function activeOpenListResources(plugin) {
   return Object.values(plugin?.state?.resources || {})
@@ -7624,6 +11497,27 @@ function createButton(parent, label, handler, primary = false) {
   return button;
 }
 
+function parentOpenListPath(remotePath) {
+  const normalized = normalizeOpenListPathCompat(remotePath || '');
+  const parts = normalized.split('/').filter(Boolean);
+  parts.pop();
+  return parts.length ? `/${parts.join('/')}` : '/';
+}
+
+function suggestedCourseRoot(plugin, resource) {
+  const locator = openListLocatorFromResource(resource);
+  if (!locator) return '';
+  const resourceRoot = normalizeOpenListPathCompat(resource?.metadata?.rootPath || '');
+  if (resourceRoot && resourceRoot !== '/' && pathWithinPrefix(locator.remotePath, resourceRoot)) return resourceRoot;
+
+  for (const module of Object.values(plugin?.state?.modules || {})) {
+    if (!(module?.resourceIds || []).includes(resource.id)) continue;
+    const stored = normalizeOpenListPathCompat(module.resourceRoots?.[resource.id] || '');
+    if (stored && stored !== '/' && pathWithinPrefix(locator.remotePath, stored)) return stored;
+  }
+  return parentOpenListPath(locator.remotePath);
+}
+
 class OpenListResourceRelinkModal extends Modal {
   constructor(app, plugin) {
     super(app);
@@ -7643,10 +11537,10 @@ class OpenListResourceRelinkModal extends Modal {
     }
 
     this.contentEl.empty();
-    this.contentEl.createEl('h2', { text: '重新关联 OpenList 资源' });
+    this.contentEl.createEl('h2', { text: '重新关联单个 OpenList 文件' });
     this.contentEl.createEl('p', {
       cls: 'rh-next-interface-tip',
-      text: 'Resource ID 和已有笔记回链保持不变；仅更新这条资源当前指向的 OpenList 文件。'
+      text: '高级修复入口：只修改当前这一条资源。如果整个课程文件夹被移动或改名，请使用“重新关联 OpenList 课程目录”，不要逐个处理视频。'
     });
 
     if (!resources.length) {
@@ -7678,10 +11572,10 @@ class OpenListResourceRelinkModal extends Modal {
 
     const actions = createActions(this.contentEl);
     createButton(actions, '取消', () => this.close());
-    createButton(actions, '验证并重新关联', async () => {
+    createButton(actions, '验证并重新关联单文件', async () => {
       try {
         await this.plugin.relinkOpenListResourceToPath(this.resourceId, this.remotePath);
-        new Notice('OpenList 资源已重新关联；Resource ID 与旧笔记回链保持不变。', 5000);
+        new Notice('单个 OpenList 文件已重新关联；Resource ID 与旧笔记回链保持不变。', 5000);
         this.close();
       } catch (error) {
         new Notice(`重新关联失败：${error instanceof Error ? error.message : String(error)}`, 6000);
@@ -7694,6 +11588,7 @@ class OpenListFolderRemapModal extends Modal {
   constructor(app, plugin) {
     super(app);
     this.plugin = plugin;
+    this.resourceId = '';
     this.sourceId = '';
     this.oldPrefix = '';
     this.newPrefix = '';
@@ -7703,55 +11598,73 @@ class OpenListFolderRemapModal extends Modal {
   onOpen() { this.render(); }
   onClose() { this.contentEl.empty(); }
 
+  selectResource(resourceId, resources) {
+    const resource = resources.find((candidate) => candidate.id === resourceId) || resources[0] || null;
+    this.resourceId = resource?.id || '';
+    const locator = openListLocatorFromResource(resource);
+    this.sourceId = locator?.sourceId || '';
+    this.oldPrefix = resource ? suggestedCourseRoot(this.plugin, resource) : '';
+    this.preview = null;
+  }
+
   render() {
-    const sources = activeOpenListSources(this.plugin);
-    if (!this.sourceId || !sources.some((source) => source.id === this.sourceId)) this.sourceId = sources[0]?.id || '';
+    const resources = activeOpenListResources(this.plugin);
+    if (!this.resourceId || !resources.some((resource) => resource.id === this.resourceId)) this.selectResource('', resources);
 
     this.contentEl.empty();
-    this.contentEl.createEl('h2', { text: '迁移 OpenList 文件夹路径' });
+    this.contentEl.createEl('h2', { text: '重新关联 OpenList 课程目录' });
     this.contentEl.createEl('p', {
       cls: 'rh-next-interface-tip',
-      text: '适用于网盘中整个课程目录被移动/改名。必须先预览；根目录、冲突和过期预览都会被拒绝。'
+      text: '适用于整个课程目录被移动或改名。选择课程中的任意一个视频，Go Study 会识别旧目录并一次更新目录下全部已关联资源，同时同步模块展示根和路径分组。'
     });
 
-    if (!sources.length) {
-      this.contentEl.createEl('p', { text: '当前没有可用的 OpenList 来源。' });
+    if (!resources.length) {
+      this.contentEl.createEl('p', { text: '当前没有可用的 OpenList 资源。' });
       const actions = createActions(this.contentEl);
       createButton(actions, '关闭', () => this.close());
       return;
     }
 
-    const sourceSelect = createField(this.contentEl, 'OpenList 来源', '', { select: true });
-    for (const source of sources) {
-      const option = sourceSelect.createEl('option', { text: source.alias || source.baseUrl || source.id });
-      option.value = source.id;
+    const resourceSelect = createField(this.contentEl, '选择这个课程中的任意资源', '', { select: true });
+    for (const resource of resources) {
+      const locator = openListLocatorFromResource(resource);
+      const option = resourceSelect.createEl('option', { text: `${resource.title || resource.id} · ${locator.remotePath}` });
+      option.value = resource.id;
     }
-    sourceSelect.value = this.sourceId;
-    sourceSelect.addEventListener('change', () => {
-      this.sourceId = sourceSelect.value;
-      this.preview = null;
+    resourceSelect.value = this.resourceId;
+    resourceSelect.addEventListener('change', () => {
+      this.selectResource(resourceSelect.value, resources);
+      this.newPrefix = '';
+      this.render();
     });
 
-    const oldInput = createField(this.contentEl, '旧目录', this.oldPrefix, { placeholder: '/百度/课程/高数' });
-    const newInput = createField(this.contentEl, '新目录', this.newPrefix, { placeholder: '/百度/大学/数学/高数' });
+    const currentResource = this.plugin.state.resources[this.resourceId];
+    const currentLocator = openListLocatorFromResource(currentResource);
+    const source = this.plugin.state.sources?.[this.sourceId];
+    this.contentEl.createEl('small', {
+      text: `当前资源：${currentLocator?.remotePath || '未知'}${source ? ` · 来源：${source.alias || source.baseUrl || source.id}` : ''}`
+    });
+
+    const oldInput = createField(this.contentEl, '旧课程目录（已自动识别，可修改）', this.oldPrefix, { placeholder: '/百度/课程/高数' });
+    const newInput = createField(this.contentEl, '移动后的新课程目录', this.newPrefix, { placeholder: '/百度/大学/数学/高数' });
     oldInput.addEventListener('input', () => { this.oldPrefix = oldInput.value; this.preview = null; });
     newInput.addEventListener('input', () => { this.newPrefix = newInput.value; this.preview = null; });
 
     if (this.preview) {
       const summary = this.contentEl.createDiv({ cls: 'rh-next-card' });
-      summary.createEl('strong', { text: `预览：可更新 ${this.preview.readyCount} 条 · 冲突 ${this.preview.conflictCount} 条` });
+      summary.createEl('strong', { text: `预览：将更新 ${this.preview.readyCount} 条资源 · 冲突 ${this.preview.conflictCount} 条` });
       summary.createEl('small', { text: `${this.preview.oldPrefix} → ${this.preview.newPrefix}` });
       const list = summary.createEl('ul');
       for (const entry of this.preview.entries.slice(0, 20)) {
         const suffix = entry.status === 'conflict' ? ` ⚠ 与 ${entry.conflictTitle || entry.conflictResourceId} 冲突` : '';
         list.createEl('li', { text: `${entry.from.remotePath} → ${entry.to.remotePath}${suffix}` });
       }
-      if (this.preview.entries.length > 20) summary.createEl('small', { text: `另有 ${this.preview.entries.length - 20} 条未展开。` });
+      if (this.preview.entries.length > 20) summary.createEl('small', { text: `另有 ${this.preview.entries.length - 20} 条未展开；确认后会一次性迁移。` });
     }
 
     const actions = createActions(this.contentEl);
     createButton(actions, '取消', () => this.close());
-    createButton(actions, '生成预览', async () => {
+    createButton(actions, '预览整目录重新关联', async () => {
       try {
         this.preview = await this.plugin.previewOpenListFolderRemap({
           sourceId: this.sourceId,
@@ -7763,17 +11676,18 @@ class OpenListFolderRemapModal extends Modal {
         this.render();
       } catch (error) {
         this.preview = null;
-        new Notice(`无法生成迁移预览：${error instanceof Error ? error.message : String(error)}`, 6000);
+        new Notice(`无法生成目录重新关联预览：${error instanceof Error ? error.message : String(error)}`, 6000);
       }
     });
     if (this.preview) {
-      const apply = createButton(actions, '确认迁移', async () => {
+      const apply = createButton(actions, '确认重新关联整个目录', async () => {
         try {
           const result = await this.plugin.applyOpenListFolderRemap(this.preview);
-          new Notice(`已迁移 ${result.updatedResourceIds.length} 条资源路径；Resource ID 未改变。`, 6000);
+          const sync = result.associationSync || {};
+          new Notice(`已重新关联 ${result.updatedResourceIds.length} 条资源；同步 ${sync.moduleRootCount || 0} 条模块展示根，Resource ID 均未改变。`, 7000);
           this.close();
         } catch (error) {
-          new Notice(`迁移失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+          new Notice(`目录重新关联失败：${error instanceof Error ? error.message : String(error)}`, 6000);
         }
       }, true);
       apply.disabled = this.preview.conflictCount > 0 || this.preview.readyCount < 1;
@@ -7783,14 +11697,14 @@ class OpenListFolderRemapModal extends Modal {
 
 function registerResourceRelinkCommands(plugin) {
   plugin.addCommand({
-    id: 'relink-openlist-resource',
-    name: '重新关联 OpenList 资源',
-    callback: () => new OpenListResourceRelinkModal(plugin.app, plugin).open()
+    id: 'remap-openlist-folder-paths',
+    name: '重新关联 OpenList 课程目录',
+    callback: () => new OpenListFolderRemapModal(plugin.app, plugin).open()
   });
   plugin.addCommand({
-    id: 'remap-openlist-folder-paths',
-    name: '迁移 OpenList 文件夹路径',
-    callback: () => new OpenListFolderRemapModal(plugin.app, plugin).open()
+    id: 'relink-openlist-resource',
+    name: '重新关联单个 OpenList 文件（高级）',
+    callback: () => new OpenListResourceRelinkModal(plugin.app, plugin).open()
   });
 }
 
@@ -7799,7 +11713,9 @@ module.exports = {
   OpenListResourceRelinkModal,
   activeOpenListResources,
   activeOpenListSources,
-  registerResourceRelinkCommands
+  parentOpenListPath,
+  registerResourceRelinkCommands,
+  suggestedCourseRoot
 };
 
 },
@@ -7808,8 +11724,11 @@ module.exports = {
 
 const {
   applyOpenListPathRemap,
+  normalizeOpenListPathCompat,
   openListLocatorFromResource,
+  pathWithinPrefix,
   previewOpenListPathRemap,
+  remapPathPrefix,
   sameOpenListLocator,
   updateResourceLocator
 } = __rhLoad("resource-locator.cjs");
@@ -7847,6 +11766,96 @@ function requireOpenListSource(state, sourceId) {
   return source;
 }
 
+function changedAtIso(options = {}) {
+  return options.changedAt instanceof Date
+    ? options.changedAt.toISOString()
+    : String(options.changedAt || new Date().toISOString());
+}
+
+function parentOpenListPath(remotePath) {
+  const normalized = normalizeOpenListPathCompat(remotePath);
+  const parts = normalized.split('/').filter(Boolean);
+  parts.pop();
+  return parts.length ? `/${parts.join('/')}` : '/';
+}
+
+function inferMovedRoot(oldRoot, oldPath, newPath) {
+  const root = normalizeOpenListPathCompat(oldRoot || '');
+  const from = normalizeOpenListPathCompat(oldPath || '');
+  const to = normalizeOpenListPathCompat(newPath || '');
+  if (root && from && to && pathWithinPrefix(from, root)) {
+    const suffix = from.slice(root.length);
+    if (suffix && to.endsWith(suffix)) {
+      const candidate = to.slice(0, -suffix.length) || '/';
+      return normalizeOpenListPathCompat(candidate);
+    }
+  }
+  return parentOpenListPath(to);
+}
+
+function syncSingleResourceAssociationRoots(state, resourceId, fromLocator, toLocator, previousMetadataRoot, options = {}) {
+  const resource = objectOr(state?.resources)[resourceId];
+  if (!resource) return { moduleRootCount: 0 };
+  const timestamp = changedAtIso(options);
+  const resourceRoot = inferMovedRoot(previousMetadataRoot, fromLocator.remotePath, toLocator.remotePath);
+  resource.metadata = { ...(resource.metadata || {}), rootPath: resourceRoot };
+
+  let moduleRootCount = 0;
+  for (const module of Object.values(objectOr(state?.modules))) {
+    if (!(module?.resourceIds || []).includes(resourceId)) continue;
+    const storedRoot = module.resourceRoots?.[resourceId];
+    if (!storedRoot) continue;
+    const nextRoot = inferMovedRoot(storedRoot, fromLocator.remotePath, toLocator.remotePath);
+    module.resourceRoots = objectOr(module.resourceRoots);
+    if (module.resourceRoots[resourceId] !== nextRoot) {
+      module.resourceRoots[resourceId] = nextRoot;
+      module.updatedAt = timestamp;
+      if (state.projects?.[module.projectId]) state.projects[module.projectId].updatedAt = timestamp;
+      moduleRootCount += 1;
+    }
+  }
+  return { moduleRootCount };
+}
+
+function syncFolderAssociationPaths(state, preview, updatedResourceIds, options = {}) {
+  const updated = new Set(updatedResourceIds || []);
+  const timestamp = changedAtIso(options);
+  let moduleRootCount = 0;
+  let groupScopeCount = 0;
+
+  for (const module of Object.values(objectOr(state?.modules))) {
+    let touched = false;
+    module.resourceRoots = objectOr(module.resourceRoots);
+    for (const resourceId of module.resourceIds || []) {
+      if (!updated.has(resourceId)) continue;
+      const storedRoot = normalizeOpenListPathCompat(module.resourceRoots[resourceId] || '');
+      if (!storedRoot || !pathWithinPrefix(storedRoot, preview.oldPrefix)) continue;
+      const nextRoot = remapPathPrefix(storedRoot, preview.oldPrefix, preview.newPrefix);
+      if (!nextRoot || nextRoot === storedRoot) continue;
+      module.resourceRoots[resourceId] = nextRoot;
+      moduleRootCount += 1;
+      touched = true;
+    }
+    if (touched) {
+      module.updatedAt = timestamp;
+      if (state.projects?.[module.projectId]) state.projects[module.projectId].updatedAt = timestamp;
+    }
+  }
+
+  for (const group of Object.values(objectOr(state?.resourceGroups))) {
+    const scopePath = normalizeOpenListPathCompat(group?.scopePath || '');
+    if (!scopePath || !pathWithinPrefix(scopePath, preview.oldPrefix)) continue;
+    if (!(group.resourceIds || []).some((resourceId) => updated.has(resourceId))) continue;
+    const nextScope = remapPathPrefix(scopePath, preview.oldPrefix, preview.newPrefix);
+    if (!nextScope || nextScope === scopePath) continue;
+    group.scopePath = nextScope;
+    group.updatedAt = timestamp;
+    groupScopeCount += 1;
+  }
+
+  return { moduleRootCount, groupScopeCount };
+}
+
 function relinkOpenListResource(state, resourceId, input = {}, options = {}) {
   const resource = objectOr(state?.resources)[String(resourceId || '')];
   if (!resource || resource.deletedAt) throw new Error('找不到需要重新关联的学习资源。');
@@ -7859,11 +11868,22 @@ function relinkOpenListResource(state, resourceId, input = {}, options = {}) {
     throw new Error('v1 重新关联只允许在同一个 OpenList 来源内移动资源。');
   }
   const remotePath = normalizeStrictOpenListPath(input.remotePath);
+  const previousMetadataRoot = resource.metadata?.rootPath || '';
   const result = updateResourceLocator(state, resource.id, {
     type: 'openlist',
     sourceId,
     remotePath
   }, options);
+  if (result.changed) {
+    result.associationSync = syncSingleResourceAssociationRoots(
+      state,
+      resource.id,
+      current,
+      result.locator,
+      previousMetadataRoot,
+      options
+    );
+  }
   return result;
 }
 
@@ -7910,6 +11930,7 @@ function applySafeOpenListPathRemap(state, preview, options = {}) {
   if (result.skipped.length) {
     throw new Error('批量迁移未能完整应用，请重新生成迁移预览。');
   }
+  result.associationSync = syncFolderAssociationPaths(state, fresh, result.updatedResourceIds, options);
   return result;
 }
 
@@ -7919,12 +11940,15 @@ function isCurrentRelinkTarget(resource, locator) {
 
 module.exports = {
   applySafeOpenListPathRemap,
+  inferMovedRoot,
   isCurrentRelinkTarget,
   normalizeStrictOpenListPath,
   previewSafeOpenListPathRemap,
   relinkOpenListResource,
   remapFingerprint,
-  requireOpenListSource
+  requireOpenListSource,
+  syncFolderAssociationPaths,
+  syncSingleResourceAssociationRoots
 };
 
 },
@@ -7990,6 +12014,223 @@ module.exports = {
   requireReferenceResource,
   resolveReferencePlayback,
   updateResumePosition
+};
+
+},
+"runtime-entry.cjs": (module, exports, require) => {
+'use strict';
+
+const path = require('node:path');
+const ResourceHubNextPlugin = __rhLoad("entry.cjs");
+const { installScopedUiFixes } = __rhLoad("ui-fixes.cjs");
+const { registerRememberedNoteTarget } = __rhLoad("note-target.cjs");
+const { registerImmersiveHotkeys } = __rhLoad("immersive-hotkeys.cjs");
+const { installLearningControls } = __rhLoad("learning-controls-ui.cjs");
+const { installFreeformBrowserModifier } = __rhLoad("freeform-link-ui.cjs");
+const { GoStudySettingsTab } = __rhLoad("product-settings-tab.cjs");
+const { currentProductSettings, ensureProductSettings } = __rhLoad("product-settings.cjs");
+const { pruneStateBackups } = __rhLoad("release-hardening.cjs");
+const {
+  clearProjectNoteFoldersOnDelete,
+  ensureProjectNotesState,
+  markProjectNotesMissing,
+  playerTimeFromSeconds,
+  projectIdForResource,
+  recentStudy,
+  recordRecentStudy,
+  restoreProjectNotePath,
+  updateProjectNoteFoldersOnRename,
+  updateProjectNotePathsOnRename
+} = __rhLoad("project-notes.cjs");
+const {
+  chooseStudyNote,
+  installProjectNoteEntryPoints,
+  openProjectNote
+} = __rhLoad("project-notes-ui.cjs");
+
+class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
+  addSettingTab(tab) {
+    // main.cjs still creates the original one-option setting tab. Intercept that
+    // registration and replace it with the real product settings tab instead of
+    // trying to inject DOM into Obsidian's settings page after the fact.
+    if (!this._goStudySettingsTabRegistered) {
+      this._goStudySettingsTabRegistered = true;
+      return super.addSettingTab(new GoStudySettingsTab(this.app, this));
+    }
+    return super.addSettingTab(tab);
+  }
+
+  async onload() {
+    await super.onload();
+    const normalized = ensureProductSettings(this);
+    const hadProjectNotes = Boolean(this.state.projectNotes && this.state.uiState?.recentStudyByProject);
+    ensureProjectNotesState(this.state);
+    if (normalized.changed || !hadProjectNotes) await this.persist();
+    registerRememberedNoteTarget(this);
+    registerImmersiveHotkeys(this);
+    installScopedUiFixes(this);
+    installLearningControls(this);
+    installFreeformBrowserModifier(this);
+    installProjectNoteEntryPoints(this);
+  }
+
+  async openResourceAction(resource, actionType, target, options = {}) {
+    const storedResource = resource?.id && this.state.resources?.[resource.id] && !this.state.resources[resource.id].deletedAt;
+    const projectId = storedResource ? projectIdForResource(this.state, resource.id) : '';
+    const shouldChooseNote = !options.skipProjectNotePrompt
+      && actionType === 'play'
+      && resource?.kind === 'video'
+      && projectId;
+
+    if (!shouldChooseNote) return super.openResourceAction(resource, actionType, target, options);
+
+    const choice = await chooseStudyNote(this, projectId, resource);
+    if (choice?.cancelled) return false;
+    const opened = await super.openResourceAction(resource, actionType, target, options);
+    if (!opened) return false;
+
+    recordRecentStudy(this.state, projectId, resource.id, choice?.note?.id || '');
+    await this.persist();
+    await this.workbenchLeaf?.view?.render?.();
+    return true;
+  }
+
+  async continueRecentProjectStudy(projectId) {
+    const study = recentStudy(this.state, projectId);
+    if (!study) return false;
+
+    if (study.note) await openProjectNote(this, study.note, { prepareForStudy: true });
+
+    const resource = study.resource;
+    const actions = this.resourceActions(resource);
+    const resume = resource.resume?.position;
+    let opened = false;
+
+    if (actions.playTarget && resume?.type === 'time' && Number(resume.seconds) > 0) {
+      const playerTime = playerTimeFromSeconds(resume.seconds);
+      opened = await this.openPositionedPlayTarget(resource, actions.playTarget, playerTime);
+      if (opened) {
+        this.activeMediaSession = {
+          resourceId: resource.id,
+          startedAt: new Date().toISOString(),
+          lastKnownPosition: { type: 'time', seconds: Number(resume.seconds) }
+        };
+      }
+    } else if (actions.playTarget) {
+      opened = await super.openResourceAction(resource, 'play', actions.playTarget, { skipProjectNotePrompt: true });
+    } else if (actions.webTarget) {
+      opened = await super.openResourceAction(resource, 'web', actions.webTarget, { skipProjectNotePrompt: true });
+    } else if (actions.defaultTarget) {
+      opened = await super.openResourceAction(resource, 'default', actions.defaultTarget, { skipProjectNotePrompt: true });
+    }
+
+    if (!opened) return false;
+    recordRecentStudy(this.state, projectId, resource.id, study.note?.id || '');
+    await this.persist();
+    await this.workbenchLeaf?.view?.render?.();
+    return true;
+  }
+
+  async handleVaultRename(entry, oldPath) {
+    const result = await super.handleVaultRename(entry, oldPath);
+    const changedNotes = updateProjectNotePathsOnRename(this.state, oldPath, entry?.path);
+    const changedFolders = updateProjectNoteFoldersOnRename(this.state, oldPath, entry?.path);
+    if (changedNotes || changedFolders) {
+      await this.persist();
+      await this.workbenchLeaf?.view?.render?.();
+    }
+    return result;
+  }
+
+  async handleVaultDelete(entry) {
+    const result = await super.handleVaultDelete(entry);
+    const changedNotes = markProjectNotesMissing(this.state, entry?.path);
+    const changedFolders = clearProjectNoteFoldersOnDelete(this.state, entry?.path);
+    if (changedNotes || changedFolders) {
+      await this.persist();
+      await this.workbenchLeaf?.view?.render?.();
+    }
+    return result;
+  }
+
+  async handleVaultCreate(entry) {
+    const result = await super.handleVaultCreate(entry);
+    const changed = restoreProjectNotePath(this.state, entry?.path);
+    if (changed) {
+      await this.persist();
+      await this.workbenchLeaf?.view?.render?.();
+    }
+    return result;
+  }
+
+  async collapseSidebar() {
+    if (!currentProductSettings(this).autoCollapseSidebar) return false;
+    return super.collapseSidebar();
+  }
+
+  async createStateBackup(label = 'manual') {
+    const backupName = await super.createStateBackup(label);
+    const retention = currentProductSettings(this).backupRetention;
+    if (retention < 10) {
+      try {
+        pruneStateBackups(path.join(this.pluginStorageDir(), 'backups'), retention);
+      } catch (error) {
+        console.warn('Go Study: failed to apply custom backup retention.', error);
+      }
+    }
+    return backupName;
+  }
+}
+
+module.exports = ResourceHubNextRuntimePlugin;
+
+},
+"ui-fixes.cjs": (module, exports, require) => {
+'use strict';
+
+function safePluginId(value) {
+  const id = String(value || '').trim();
+  if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('无法为当前插件生成安全的 UI 修复作用域。');
+  return id;
+}
+
+function projectInteractionFixCss(pluginId) {
+  const viewType = `${safePluginId(pluginId)}-workbench`;
+  const scope = `.workspace-leaf-content[data-type="${viewType}"]`;
+  return `${scope} .rh-next-project-heading {
+  z-index: 4;
+  pointer-events: auto;
+}
+${scope} .rh-next-project-board {
+  z-index: 1;
+  pointer-events: none;
+}
+${scope} .rh-next-project-board-item {
+  pointer-events: auto;
+}
+${scope} .rh-next-project-board-slot {
+  pointer-events: none;
+}
+${scope} .rh-next-project-board.is-layout-dragging .rh-next-project-board-slot {
+  pointer-events: auto;
+}
+`;
+}
+
+function installScopedUiFixes(plugin, doc = globalThis.document) {
+  if (!plugin?.manifest?.id || !doc?.createElement || !doc?.head?.appendChild) return null;
+  const style = doc.createElement('style');
+  style.setAttribute('data-go-study-ui-fixes', safePluginId(plugin.manifest.id));
+  style.textContent = projectInteractionFixCss(plugin.manifest.id);
+  doc.head.appendChild(style);
+  plugin.register?.(() => style.remove());
+  return style;
+}
+
+module.exports = {
+  installScopedUiFixes,
+  projectInteractionFixCss,
+  safePluginId
 };
 
 },
@@ -8086,4 +12327,4 @@ function __rhLoad(id) {
   return bundledModule.exports;
 }
 
-module.exports = __rhLoad('entry.cjs');
+module.exports = __rhLoad("runtime-entry.cjs");
