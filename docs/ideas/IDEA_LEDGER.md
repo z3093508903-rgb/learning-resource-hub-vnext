@@ -103,11 +103,12 @@ Decision gate：**NEEDS USER ACCEPTANCE**
 
 当前验证候选（beta.17）：
 
-- 新未收录 / Freeform 视频直接生成 `jv://open?path=...&time=...`；
+- 新未收录 / Freeform 视频使用 Go Study 自有 `obsidian://go-study?...locator=...&v=2`；
 - Managed Resource 继续使用 Resource ID + Resolver；
 - 旧 beta.15 `obsidian://go-study?...&path=...` 增加点击拦截兼容；
-- 自动化与 Preview 打包已通过，等待 Windows 真人验收；
-- 真人验收通过前，本条状态保持 `PROPOSED`。
+- 自动化与 Preview 打包已通过；
+- Windows 真人功能链路已通过；
+- macOS / cross-device local path 尚未验收，因此本条仍保持 `PROPOSED`。
 
 背景：
 
@@ -156,3 +157,36 @@ beta.17 当前策略：
 - portable content fingerprint / media identity。
 
 在真实跨设备需求验证前，不直接加入 Roadmap。
+
+---
+
+## beta.17 Polish
+
+状态：**CONFIRMED**
+
+- HUD：同一方向键双击可直接执行，等价于方向 + Enter；
+- 笔记弹窗：弱化滚动条 / 滑块，支持位置调整与记忆；
+- 设置页：模板编辑器与实时实例预览相邻，并随输入实时更新；
+- 设置页：HUD 映射 / 模板 / 示例重新分组，减少长页面堆叠；
+- Freeform 可见标题乱码：统一为稳定的人类可读标签，不让 PotPlayer / Bridge title 污染笔记。
+
+---
+
+## Companion Note Window / 分屏小窗笔记
+
+状态：**PROPOSED — beta.18 candidate**
+
+用户目标：
+
+> 不依赖 Windows 系统分屏，能和 PotPlayer 边看边记，并让笔记结构更稳定。
+
+当前已知边界：
+
+- 必须编辑真实 Markdown Note，不创建第二套私有笔记格式；
+- 与 `Project → Notes Box → Recent Note` 模型兼容；
+- Capture 应明确写入“当前锁定的小窗笔记”，不能依赖哪个 Obsidian 窗口偶然获得焦点；
+- 小窗应可独立拖动 / 调整尺寸，并恢复 geometry；
+- 不新增专属“返回 Obsidian”快捷键；
+- 不第一步就扩成完整 Study Workspace。
+
+当前尚未恢复到旧对话中的具体规格：默认尺寸、是否置顶、Note 锁定/切换、小窗关闭后的 Capture 回退规则、多 Project / 多 Note 切换逻辑、是否使用 Obsidian popout/new window。
