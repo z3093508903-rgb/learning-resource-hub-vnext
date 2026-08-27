@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const { parseReferenceUri } = require('../src/resource-reference.cjs');
 const {
+  buildContextPositionMarkdown,
   buildCaptureMarkdown,
   buildCaptureNoteMarkdown,
   buildFreeformPositionMarkdown,
