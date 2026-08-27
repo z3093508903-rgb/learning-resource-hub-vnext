@@ -10,6 +10,7 @@ const { GoStudySettingsTab } = require('./product-settings-tab.cjs');
 const { currentProductSettings, ensureProductSettings } = require('./product-settings.cjs');
 const { pruneStateBackups } = require('./release-hardening.cjs');
 const {
+  clearProjectNoteFoldersOnDelete,
   ensureProjectNotesState,
   markProjectNotesMissing,
   playerTimeFromSeconds,
@@ -17,6 +18,7 @@ const {
   recentStudy,
   recordRecentStudy,
   restoreProjectNotePath,
+  updateProjectNoteFoldersOnRename,
   updateProjectNotePathsOnRename
 } = require('./project-notes.cjs');
 const {
@@ -75,7 +77,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     const study = recentStudy(this.state, projectId);
     if (!study) return false;
 
-    if (study.note) await openProjectNote(this, study.note);
+    if (study.note) await openProjectNote(this, study.note, { prepareForStudy: true });
 
     const resource = study.resource;
     const actions = this.resourceActions(resource);
@@ -109,8 +111,9 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
 
   async handleVaultRename(entry, oldPath) {
     const result = await super.handleVaultRename(entry, oldPath);
-    const changed = updateProjectNotePathsOnRename(this.state, oldPath, entry?.path);
-    if (changed) {
+    const changedNotes = updateProjectNotePathsOnRename(this.state, oldPath, entry?.path);
+    const changedFolders = updateProjectNoteFoldersOnRename(this.state, oldPath, entry?.path);
+    if (changedNotes || changedFolders) {
       await this.persist();
       await this.workbenchLeaf?.view?.render?.();
     }
@@ -119,8 +122,9 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
 
   async handleVaultDelete(entry) {
     const result = await super.handleVaultDelete(entry);
-    const changed = markProjectNotesMissing(this.state, entry?.path);
-    if (changed) {
+    const changedNotes = markProjectNotesMissing(this.state, entry?.path);
+    const changedFolders = clearProjectNoteFoldersOnDelete(this.state, entry?.path);
+    if (changedNotes || changedFolders) {
       await this.persist();
       await this.workbenchLeaf?.view?.render?.();
     }
