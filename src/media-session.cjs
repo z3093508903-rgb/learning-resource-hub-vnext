@@ -1,6 +1,7 @@
 'use strict';
 
 const { openListLocatorFromResource } = require('./resource-locator.cjs');
+const { freeformLocatorName, normalizePortableMediaName } = require('./resource-reference.cjs');
 
 function normalizeLocalMediaPath(value) {
   return String(value || '')
@@ -52,6 +53,34 @@ function targetMatchesBridgeMedia(state, resource, target, mediaPath) {
   const currentUrl = comparableWebUrl(mediaPath);
   if (expectedUrl || currentUrl) return Boolean(expectedUrl && currentUrl && expectedUrl === currentUrl);
   return normalizeLocalMediaPath(expected) === normalizeLocalMediaPath(mediaPath);
+}
+
+function playTargetPortableName(target) {
+  if (!target) return '';
+  const raw = target.type === 'openlist'
+    ? target.remotePath
+    : target.type === 'potplayer'
+      ? target.target
+      : target.type === 'uri'
+        ? target.uri
+        : '';
+  if (!raw) return '';
+  try { return freeformLocatorName(raw); } catch { return ''; }
+}
+
+function matchingManagedResourceByPortableName(state, mediaName, resolveActions) {
+  if (typeof resolveActions !== 'function') throw new Error('资源启动解析器不可用。');
+  const expected = normalizePortableMediaName(mediaName).toLocaleLowerCase();
+  const matches = Object.values(state?.resources || {})
+    .filter((resource) => resource && !resource.deletedAt)
+    .filter((resource) => {
+      try {
+        const actions = resolveActions(resource) || {};
+        const name = playTargetPortableName(actions.playTarget);
+        return Boolean(name && name.toLocaleLowerCase() === expected);
+      } catch { return false; }
+    });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function validatedBridgePosition(bridgeMedia) {
@@ -124,7 +153,9 @@ module.exports = {
   comparableWebUrl,
   normalizeLocalMediaPath,
   openListMediaMatches,
+  playTargetPortableName,
   matchingManagedResource,
+  matchingManagedResourceByPortableName,
   resolveActiveMediaSession,
   resolveUniversalMediaSession,
   targetMatchesBridgeMedia,
