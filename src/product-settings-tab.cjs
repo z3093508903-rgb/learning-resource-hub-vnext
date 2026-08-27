@@ -43,7 +43,7 @@ function section(containerEl, title, description = '') {
 
 function videoStatusText(plugin) {
   const settings = currentProductSettings(plugin);
-  if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会注册 Alt+1～Alt+4，也不会显示视频增强状态点。';
+  if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会注册视频笔记快捷键，也不会显示视频增强状态点。';
   const status = immersiveStatus(plugin);
   if (status.registered) return `已就绪 · ${status.registeredAccelerators?.length || 0} 个全局快捷键已注册。`;
   return status.error || '已开启，但当前没有成功注册全局快捷键。';
@@ -299,7 +299,7 @@ class GoStudySettingsTab extends PluginSettingTab {
       }
 
       new Setting(containerEl)
-        .setName('恢复默认独立快捷键')
+        .setName('恢复默认快捷键')
         .setDesc('恢复为 Alt+1、Alt+2、Alt+3、Alt+4。')
         .addButton((button) => button
           .setButtonText('恢复默认')
