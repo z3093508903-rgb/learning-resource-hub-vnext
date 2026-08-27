@@ -79,3 +79,49 @@ test('does not remember non-editable or pathless targets', () => {
   assert.equal(rememberNoteTarget(plugin, editor('x'), {}), false);
   assert.equal(plugin._goStudyNoteTarget, undefined);
 });
+
+
+test('locked companion note target wins over the active main-window editor', () => {
+  const { workspace } = workspaceFixture();
+  const companionEditor = editor('companion');
+  const mainEditor = editor('main');
+  const companionFile = { path: 'Notes/Locked.md' };
+  const companionLeaf = { view: { editor: companionEditor, file: companionFile } };
+  const plugin = {
+    app: { workspace },
+    _goStudyCompanionTarget: {
+      editor: companionEditor,
+      filePath: companionFile.path,
+      leaf: companionLeaf,
+      locked: true
+    }
+  };
+  workspace.activeEditor = { editor: mainEditor, file: { path: 'Notes/Main.md' } };
+
+  assert.deepEqual(resolveRememberedNoteTarget(plugin), {
+    editor: companionEditor,
+    filePath: 'Notes/Locked.md',
+    source: 'companion'
+  });
+});
+
+test('unlocked or stale companion target falls back to the normal active editor', () => {
+  const { workspace } = workspaceFixture();
+  const companionEditor = editor('companion');
+  const mainEditor = editor('main');
+  const plugin = {
+    app: { workspace },
+    _goStudyCompanionTarget: {
+      editor: companionEditor,
+      filePath: 'Notes/Locked.md',
+      leaf: { view: { editor: companionEditor, file: { path: 'Notes/Other.md' } } },
+      locked: true
+    }
+  };
+  workspace.activeEditor = { editor: mainEditor, file: { path: 'Notes/Main.md' } };
+
+  const target = resolveRememberedNoteTarget(plugin);
+  assert.equal(target.source, 'active');
+  assert.equal(target.filePath, 'Notes/Main.md');
+  assert.equal(plugin._goStudyCompanionTarget, null);
+});
