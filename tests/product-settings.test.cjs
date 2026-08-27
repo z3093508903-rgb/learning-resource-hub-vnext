@@ -22,6 +22,17 @@ test('video enhancement is opt-in while workbench and note-output defaults stay 
   assert.equal(settings.videoResumeAfterCancel, true);
   assert.equal(settings.videoSuccessFeedback, true);
   assert.equal(settings.focusStudyNoteAtEnd, true);
+  assert.equal(settings.freeformVideoNotesEnabled, true);
+  assert.equal(settings.shortcutMode, 'mixed');
+  assert.equal(settings.actionHudShortcut, 'Alt+S');
+  assert.equal(settings.actionHudDelayMs, 300);
+  assert.deepEqual(settings.actionHudSlots, {
+    left: 'time',
+    up: 'timeNote',
+    right: 'timeImage',
+    down: 'note',
+    center: 'all'
+  });
   assert.equal(settings.captureFolder, 'GoStudy/Captures');
   assert.equal(settings.backupRetention, 10);
   assert.equal(settings.timeDisplayFormat, 'smart');
@@ -36,6 +47,10 @@ test('ensureProductSettings persists normalized defaults into legacy state', () 
   assert.equal(plugin.state.uiState.videoEnhancementEnabled, false);
   assert.equal(plugin.state.uiState.captureFolder, DEFAULT_PRODUCT_SETTINGS.captureFolder);
   assert.equal(plugin.state.uiState.backlinkTemplate, DEFAULT_PRODUCT_SETTINGS.backlinkTemplate);
+  assert.equal(plugin.state.uiState.actionHudShortcut, 'Alt+S');
+  assert.deepEqual(plugin.state.uiState.actionHudSlots, DEFAULT_PRODUCT_SETTINGS.actionHudSlots);
+  const stable = ensureProductSettings(plugin);
+  assert.equal(stable.changed, false);
 });
 
 test('capture folder can be cleared to hand attachment placement back to Obsidian', async () => {
@@ -71,6 +86,8 @@ test('output templates reject unknown variables and preserve required semantic s
   assert.throws(() => normalizeOutputTemplate('backlinkTemplate', '[{time}](https://example.com)'), /必须保留.*\{uri\}/);
   assert.throws(() => normalizeOutputTemplate('noteTemplate', '{note}\n{mystery}\n{backlink}'), /未知变量.*\{mystery\}/);
   assert.throws(() => normalizeOutputTemplate('captureNoteTemplate', '{note}\n{backlink}'), /必须保留.*\{image\}/);
+  assert.equal(normalizeOutputTemplate('plainNoteTemplate', '> {note}'), '> {note}');
+  assert.throws(() => normalizeOutputTemplate('plainNoteTemplate', '{note}\n{backlink}'), /未知变量.*\{backlink\}/);
 });
 
 test('custom output settings persist and can be reset as one formatting group', async () => {
@@ -88,4 +105,27 @@ test('custom output settings persist and can be reset as one formatting group', 
   assert.equal(settings.backlinkTemplate, DEFAULT_PRODUCT_SETTINGS.backlinkTemplate);
   assert.equal(settings.noteTemplate, DEFAULT_PRODUCT_SETTINGS.noteTemplate);
   assert.ok(plugin.persistCalls >= 3);
+});
+
+
+test('HUD mode, delay and direction recipes normalize safely', async () => {
+  const plugin = { state: { uiState: {} }, async persist() {} };
+  let settings = await updateProductSetting(plugin, 'shortcutMode', 'hud');
+  assert.equal(settings.shortcutMode, 'hud');
+  settings = await updateProductSetting(plugin, 'actionHudDelayMs', 5000);
+  assert.equal(settings.actionHudDelayMs, 1000);
+  settings = await updateProductSetting(plugin, 'actionHudSlots', {
+    left: 'note',
+    up: 'imageNote',
+    right: 'all',
+    down: 'time',
+    center: 'bogus'
+  });
+  assert.deepEqual(settings.actionHudSlots, {
+    left: 'note',
+    up: 'imageNote',
+    right: 'all',
+    down: 'time',
+    center: 'all'
+  });
 });
