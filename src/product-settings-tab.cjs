@@ -188,13 +188,13 @@ class GoStudySettingsTab extends PluginSettingTab {
           .addOption('mixed', '混合 · 动作盘 + 独立快捷键')
           .addOption('hud', '仅动作盘')
           .addOption('legacy', '仅独立快捷键')
-          .setValue(settings.shortcutMode)
-          .setDisabled?.(!enabled)
-          .onChange(async (value) => {
-            await updateProductSetting(this.plugin, 'shortcutMode', value);
-            registerImmersiveHotkeys(this.plugin);
-            this.display();
-          });
+          .setValue(settings.shortcutMode);
+        dropdown.setDisabled?.(!enabled);
+        dropdown.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'shortcutMode', value);
+          registerImmersiveHotkeys(this.plugin);
+          this.display();
+        });
       });
 
     if (settings.shortcutMode === 'hud' || settings.shortcutMode === 'mixed') {
@@ -221,16 +221,18 @@ class GoStudySettingsTab extends PluginSettingTab {
       new Setting(containerEl)
         .setName('动作盘显示延迟')
         .setDesc('熟练时可在 HUD 出现前直接按方向执行；停顿超过这个时间才显示提示。')
-        .addDropdown((dropdown) => dropdown
-          .addOption('0', '立即显示')
-          .addOption('200', '200 ms')
-          .addOption('300', '300 ms · 推荐')
-          .addOption('500', '500 ms')
-          .setValue(String(settings.actionHudDelayMs))
-          .setDisabled?.(!enabled)
-          .onChange(async (value) => {
+        .addDropdown((dropdown) => {
+          dropdown
+            .addOption('0', '立即显示')
+            .addOption('200', '200 ms')
+            .addOption('300', '300 ms · 推荐')
+            .addOption('500', '500 ms')
+            .setValue(String(settings.actionHudDelayMs));
+          dropdown.setDisabled?.(!enabled);
+          dropdown.onChange(async (value) => {
             await updateProductSetting(this.plugin, 'actionHudDelayMs', Number(value));
-          }));
+          });
+        });
 
       for (const slot of HUD_SLOT_ORDER) {
         new Setting(containerEl)
@@ -238,13 +240,12 @@ class GoStudySettingsTab extends PluginSettingTab {
           .setDesc('为这个方向选择要采集的组合；最终 Markdown 仍由对应模板决定。')
           .addDropdown((dropdown) => {
             for (const action of Object.values(CAPTURE_ACTIONS)) dropdown.addOption(action.id, action.label);
-            dropdown
-              .setValue(settings.actionHudSlots[slot])
-              .setDisabled?.(!enabled)
-              .onChange(async (value) => {
-                const next = { ...currentProductSettings(this.plugin).actionHudSlots, [slot]: value };
-                await updateProductSetting(this.plugin, 'actionHudSlots', next);
-              });
+            dropdown.setValue(settings.actionHudSlots[slot]);
+            dropdown.setDisabled?.(!enabled);
+            dropdown.onChange(async (value) => {
+              const next = { ...currentProductSettings(this.plugin).actionHudSlots, [slot]: value };
+              await updateProductSetting(this.plugin, 'actionHudSlots', next);
+            });
           });
       }
     }
