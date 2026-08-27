@@ -269,6 +269,14 @@ async function insertPlainTypedNote(plugin, noteText, options = {}) {
   editor.replaceSelection(markdown);
   return { mode: 'plain', editor, markdown };
 }
+async function commitPreparedPlainTypedNote(plugin, prepared, noteText) {
+  return insertPreparedMarkdown(
+    plugin,
+    prepared,
+    buildPlainNoteMarkdown(noteText, noteOutputOptions(plugin))
+  );
+}
+
 
 async function commitPreparedPlainCapture(plugin, prepared) {
   return commitPreparedCapture(
@@ -348,6 +356,7 @@ module.exports = {
   commitPreparedCaptureTypedNote,
   commitPreparedPlainCapture,
   commitPreparedPlainCaptureTypedNote,
+  commitPreparedPlainTypedNote,
   commitPreparedTypedNote,
   ensureVaultFolder,
   insertCurrentLearningPosition,
