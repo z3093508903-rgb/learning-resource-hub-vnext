@@ -9,6 +9,16 @@ function createId(prefix = 'note-ref') {
   return `${prefix}-${Date.now().toString(36)}-${random}`;
 }
 
+function normalizeNoteFolder(rawPath) {
+  const raw = String(rawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+  if (!raw) return '';
+  const parts = raw.split('/').filter(Boolean);
+  if (parts.some((part) => part === '.' || part === '..' || /[<>:"|?*\x00-\x1F]/.test(part))) {
+    throw new Error('项目笔记文件夹必须是 Vault 内的安全相对路径。');
+  }
+  return parts.join('/').normalize('NFC');
+}
+
 function normalizeNotePath(rawPath) {
   const parts = String(rawPath || '')
     .trim()
@@ -27,6 +37,10 @@ function ensureProjectNotesState(state) {
   state.uiState = objectOr(state.uiState);
   state.uiState.recentProjectNoteIds = objectOr(state.uiState.recentProjectNoteIds);
   state.uiState.recentStudyByProject = objectOr(state.uiState.recentStudyByProject);
+  for (const project of Object.values(objectOr(state.projects))) {
+    try { project.noteFolder = normalizeNoteFolder(project.noteFolder); }
+    catch { project.noteFolder = ''; }
+  }
 
   const normalized = {};
   const seen = new Set();
@@ -74,6 +88,20 @@ function ensureProjectNotesState(state) {
     };
   }
   return state;
+}
+
+function projectNoteFolder(state, projectId) {
+  ensureProjectNotesState(state);
+  return String(state.projects?.[projectId]?.noteFolder || '');
+}
+
+function setProjectNoteFolder(state, projectId, rawFolder, at = new Date()) {
+  ensureProjectNotesState(state);
+  const project = state.projects?.[projectId];
+  if (!project || project.deletedAt) throw new Error('找不到项目。');
+  project.noteFolder = normalizeNoteFolder(rawFolder);
+  project.updatedAt = at.toISOString();
+  return project.noteFolder;
 }
 
 function projectNotes(state, projectId) {
@@ -204,6 +232,39 @@ function updateProjectNotePathsOnRename(state, oldRawPath, newRawPath, at = new 
   return changed;
 }
 
+function updateProjectNoteFoldersOnRename(state, oldRawPath, newRawPath, at = new Date()) {
+  ensureProjectNotesState(state);
+  const oldPath = String(oldRawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  const newPath = String(newRawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  if (!oldPath || !newPath) return 0;
+  let changed = 0;
+  for (const project of Object.values(objectOr(state.projects))) {
+    const current = String(project.noteFolder || '');
+    if (!current || (current !== oldPath && !current.startsWith(`${oldPath}/`))) continue;
+    const next = current === oldPath ? newPath : `${newPath}${current.slice(oldPath.length)}`;
+    try { project.noteFolder = normalizeNoteFolder(next); }
+    catch { project.noteFolder = ''; }
+    project.updatedAt = at.toISOString();
+    changed += 1;
+  }
+  return changed;
+}
+
+function clearProjectNoteFoldersOnDelete(state, rawPath, at = new Date()) {
+  ensureProjectNotesState(state);
+  const path = String(rawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
+  if (!path) return 0;
+  let changed = 0;
+  for (const project of Object.values(objectOr(state.projects))) {
+    const current = String(project.noteFolder || '');
+    if (!current || (current !== path && !current.startsWith(`${path}/`))) continue;
+    project.noteFolder = '';
+    project.updatedAt = at.toISOString();
+    changed += 1;
+  }
+  return changed;
+}
+
 function markProjectNotesMissing(state, rawPath, at = new Date()) {
   ensureProjectNotesState(state);
   const path = String(rawPath || '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').normalize('NFC');
@@ -241,19 +302,24 @@ function playerTimeFromSeconds(value) {
 }
 
 module.exports = {
+  clearProjectNoteFoldersOnDelete,
   ensureProjectNotesState,
   findProjectNoteByPath,
   linkProjectNote,
   markProjectNotesMissing,
+  normalizeNoteFolder,
   normalizeNotePath,
   playerTimeFromSeconds,
+  projectNoteFolder,
   projectIdForResource,
   projectNotes,
   recentProjectNote,
   recentStudy,
   recordRecentStudy,
   restoreProjectNotePath,
+  setProjectNoteFolder,
   setRecentProjectNote,
   unlinkProjectNote,
+  updateProjectNoteFoldersOnRename,
   updateProjectNotePathsOnRename
 };
