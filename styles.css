@@ -881,3 +881,77 @@ textarea.rh-next-input { min-height: 100px; padding: 10px 12px; resize: vertical
 .go-study-template-markdown-details{margin-top:10px;color:var(--text-muted)}
 .go-study-template-markdown{white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0 0;padding:9px;border-radius:7px;background:var(--background-secondary-alt);font-size:11px}
 @media (max-width:760px){.go-study-template-card-body{grid-template-columns:1fr}.go-study-hud-map-row{grid-template-columns:90px 1fr}}
+
+
+/* Go Study beta.18 Companion Note Window */
+html.go-study-companion-document,
+body.go-study-companion-window {
+  --go-study-companion-scale: .82;
+  background: var(--background-primary);
+}
+body.go-study-companion-window {
+  overflow: hidden;
+}
+body.go-study-companion-window .workspace-ribbon,
+body.go-study-companion-window .workspace-split.mod-left-split,
+body.go-study-companion-window .workspace-split.mod-right-split,
+body.go-study-companion-window .status-bar,
+body.go-study-companion-window .workspace-tab-header-container {
+  display: none !important;
+}
+body.go-study-companion-window .workspace {
+  inset: 0 !important;
+}
+body.go-study-companion-window .workspace-split.mod-root,
+body.go-study-companion-window .workspace-leaf,
+body.go-study-companion-window .workspace-leaf-content,
+body.go-study-companion-window .view-content {
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+}
+body.go-study-companion-window .workspace-leaf {
+  border: 0 !important;
+}
+body.go-study-companion-window .workspace-leaf-content {
+  zoom: var(--go-study-companion-scale);
+}
+body.go-study-companion-window .view-header {
+  min-height: 28px;
+  height: 28px;
+  opacity: .32;
+  transition: opacity .14s ease;
+  border-bottom-color: transparent;
+}
+body.go-study-companion-window .view-header:hover,
+body.go-study-companion-window .view-header:focus-within {
+  opacity: 1;
+}
+body.go-study-companion-window .view-header-title {
+  font-size: 11px;
+}
+body.go-study-companion-window .markdown-source-view.mod-cm6 .cm-editor,
+body.go-study-companion-window .markdown-reading-view {
+  font-size: 0.94em;
+}
+body.go-study-companion-window .markdown-source-view.mod-cm6 .cm-contentContainer,
+body.go-study-companion-window .markdown-reading-view .markdown-preview-sizer {
+  max-width: none !important;
+}
+body.go-study-companion-window .markdown-source-view.mod-cm6 .cm-content,
+body.go-study-companion-window .markdown-reading-view .markdown-preview-sizer {
+  padding-left: 10px !important;
+  padding-right: 10px !important;
+}
+body.go-study-companion-window * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--text-muted) 24%, transparent) transparent;
+}
+body.go-study-companion-window *::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+body.go-study-companion-window *::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--text-muted) 24%, transparent);
+  border-radius: 999px;
+}
