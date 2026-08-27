@@ -307,7 +307,8 @@ const {
   resolveReferencePlayback,
   updateResumePosition
 } = __rhLoad("resource-resolver.cjs");
-const { matchingManagedResource } = __rhLoad("media-session.cjs");
+const { matchingManagedResource, matchingManagedResourceByPortableName } = __rhLoad("media-session.cjs");
+const { openPortableFreeformReference } = __rhLoad("freeform-playback.cjs");
 const {
   applySafeOpenListPathRemap,
   normalizeStrictOpenListPath,
@@ -374,23 +375,27 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   }
 
   async openFreeformReference(reference) {
-    const managed = matchingManagedResource(
+    const locator = reference?.locator || reference?.path;
+    const resolveActions = (resource) => this.resourceActions(resource);
+    const exactManaged = matchingManagedResource(this.state, locator, resolveActions);
+    const portableManaged = exactManaged || matchingManagedResourceByPortableName(
       this.state,
-      reference.path,
-      (resource) => this.resourceActions(resource)
+      reference?.name || '',
+      resolveActions
     );
-    if (managed) {
+    if (portableManaged) {
       return this.openResourceReference({
-        resourceId: managed.id,
+        resourceId: portableManaged.id,
         position: reference.position,
-        version: reference.version
+        version: 1
       });
     }
     try {
       const playerTime = formatPotPlayerTime(reference.position);
       new Notice(`正在跳转临时视频 · ${playerTime}`);
-      await shell.openExternal(this.toPotPlayerUri(reference.path, playerTime));
-      new Notice(`已跳转临时视频 · ${playerTime}`);
+      const opened = await openPortableFreeformReference(reference, { shell, platform: process.platform });
+      const suffix = opened.positionApplied ? ` · ${playerTime}` : ' · 当前平台暂未应用精确时间';
+      new Notice(`已打开临时视频${suffix}`);
       return true;
     } catch (error) {
       new Notice(`自由回链跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
@@ -638,16 +643,18 @@ function stopLinkEvent(event) {
   event.stopImmediatePropagation?.();
 }
 
+function httpLocator(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch { return ''; }
+}
+
 function jvWebLocator(rawUri) {
   let uri;
   try { uri = new URL(String(rawUri || '').trim()); } catch { return ''; }
   if (uri.protocol !== 'jv:' || uri.hostname !== 'open') return '';
-  const locator = String(uri.searchParams.get('path') || '').trim();
-  if (!locator) return '';
-  try {
-    const web = new URL(locator);
-    return web.protocol === 'http:' || web.protocol === 'https:' ? web.toString() : '';
-  } catch { return ''; }
+  return httpLocator(uri.searchParams.get('path'));
 }
 
 function installFreeformBrowserModifier(plugin, doc = globalThis.document, options = {}) {
@@ -673,8 +680,9 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
     if (reference?.mode !== 'freeform') return;
 
     stopLinkEvent(event);
-    if (event?.ctrlKey && reference.web) {
-      void shellImpl.openExternal(reference.web);
+    const web = reference.web || httpLocator(reference.locator);
+    if (event?.ctrlKey && web) {
+      void shellImpl.openExternal(web);
       return;
     }
     if (typeof plugin?.openFreeformReference === 'function') {
@@ -687,9 +695,92 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
 }
 
 module.exports = {
+  httpLocator,
   installFreeformBrowserModifier,
   jvWebLocator,
   stopLinkEvent
+};
+
+},
+"freeform-playback.cjs": (module, exports, require) => {
+'use strict';
+
+const { formatPotPlayerTime } = __rhLoad("resource-resolver.cjs");
+const { normalizeFreeformLocator } = __rhLoad("resource-reference.cjs");
+
+const VIDEO_EXTENSIONS = new Set([
+  'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm4v', 'ts', 'm2ts'
+]);
+
+function locatorKind(locator) {
+  const raw = normalizeFreeformLocator(locator);
+  try {
+    const url = new URL(raw);
+    if (url.protocol === 'http:' || url.protocol === 'https:') return 'web';
+  } catch {}
+  if (/^[A-Za-z]:[\\/]/.test(raw) || /^\\\\[^\\]+\\[^\\]+/.test(raw)) return 'windows-local';
+  if (/^\//.test(raw)) return 'posix-local';
+  return 'unknown';
+}
+
+function localVideoAllowed(locator) {
+  const name = String(locator || '').replace(/\\/g, '/').split('/').filter(Boolean).pop() || '';
+  const ext = name.includes('.') ? name.split('.').pop().toLocaleLowerCase() : '';
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
+function buildJvPlaybackUri(locator, position) {
+  const target = normalizeFreeformLocator(locator);
+  const playerTime = formatPotPlayerTime(position);
+  return `jv://open?path=${encodeURIComponent(target)}&time=${encodeURIComponent(playerTime)}`;
+}
+
+async function openPortableFreeformReference(reference, options = {}) {
+  const locator = normalizeFreeformLocator(reference?.locator ?? reference?.path);
+  const kind = locatorKind(locator);
+  const platform = String(options.platform || process.platform);
+  const shellImpl = options.shell || (() => {
+    try { return require('electron').shell; }
+    catch { throw new Error('当前运行环境无法访问系统打开能力。'); }
+  })();
+
+  if (kind === 'web') {
+    if (platform === 'win32') {
+      await shellImpl.openExternal(buildJvPlaybackUri(locator, reference.position));
+      return { transport: 'windows-jv', positionApplied: true, locator };
+    }
+    await shellImpl.openExternal(locator);
+    return { transport: 'browser', positionApplied: false, locator };
+  }
+
+  if (!localVideoAllowed(locator)) throw new Error('Go Study 自由回链只允许打开受支持的视频文件。');
+
+  if (platform === 'win32') {
+    if (kind !== 'windows-local') {
+      throw new Error('这个本地视频链接来自另一平台；请先在当前设备收录同一视频，或等待路径映射功能。');
+    }
+    await shellImpl.openExternal(buildJvPlaybackUri(locator, reference.position));
+    return { transport: 'windows-jv', positionApplied: true, locator };
+  }
+
+  if (platform === 'darwin' || platform === 'linux') {
+    if (kind !== 'posix-local') {
+      throw new Error('这个本地视频链接来自 Windows；请先在当前设备收录同一视频，或等待路径映射功能。');
+    }
+    const error = await shellImpl.openPath(locator);
+    if (error) throw new Error(error);
+    return { transport: 'system-player', positionApplied: false, locator };
+  }
+
+  throw new Error(`当前平台暂不支持直接打开未收录本地视频：${platform}`);
+}
+
+module.exports = {
+  VIDEO_EXTENSIONS,
+  buildJvPlaybackUri,
+  localVideoAllowed,
+  locatorKind,
+  openPortableFreeformReference
 };
 
 },
@@ -5536,6 +5627,7 @@ module.exports = ResourceHubNextPlugin;
 'use strict';
 
 const { openListLocatorFromResource } = __rhLoad("resource-locator.cjs");
+const { freeformLocatorName, normalizePortableMediaName } = __rhLoad("resource-reference.cjs");
 
 function normalizeLocalMediaPath(value) {
   return String(value || '')
@@ -5587,6 +5679,34 @@ function targetMatchesBridgeMedia(state, resource, target, mediaPath) {
   const currentUrl = comparableWebUrl(mediaPath);
   if (expectedUrl || currentUrl) return Boolean(expectedUrl && currentUrl && expectedUrl === currentUrl);
   return normalizeLocalMediaPath(expected) === normalizeLocalMediaPath(mediaPath);
+}
+
+function playTargetPortableName(target) {
+  if (!target) return '';
+  const raw = target.type === 'openlist'
+    ? target.remotePath
+    : target.type === 'potplayer'
+      ? target.target
+      : target.type === 'uri'
+        ? target.uri
+        : '';
+  if (!raw) return '';
+  try { return freeformLocatorName(raw); } catch { return ''; }
+}
+
+function matchingManagedResourceByPortableName(state, mediaName, resolveActions) {
+  if (typeof resolveActions !== 'function') throw new Error('资源启动解析器不可用。');
+  const expected = normalizePortableMediaName(mediaName).toLocaleLowerCase();
+  const matches = Object.values(state?.resources || {})
+    .filter((resource) => resource && !resource.deletedAt)
+    .filter((resource) => {
+      try {
+        const actions = resolveActions(resource) || {};
+        const name = playTargetPortableName(actions.playTarget);
+        return Boolean(name && name.toLocaleLowerCase() === expected);
+      } catch { return false; }
+    });
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function validatedBridgePosition(bridgeMedia) {
@@ -5659,7 +5779,9 @@ module.exports = {
   comparableWebUrl,
   normalizeLocalMediaPath,
   openListMediaMatches,
+  playTargetPortableName,
   matchingManagedResource,
+  matchingManagedResourceByPortableName,
   resolveActiveMediaSession,
   resolveUniversalMediaSession,
   targetMatchesBridgeMedia,
@@ -11004,7 +11126,7 @@ module.exports = {
 "resource-note.cjs": (module, exports, require) => {
 'use strict';
 
-const { buildReferenceUri, normalizeFreeformLocator, normalizeReferencePosition } = __rhLoad("resource-reference.cjs");
+const { buildFreeformReferenceUri, buildReferenceUri, freeformLocatorName, normalizeReferencePosition } = __rhLoad("resource-reference.cjs");
 const {
   DEFAULT_PRODUCT_SETTINGS,
   normalizeOutputTemplate,
@@ -11076,18 +11198,16 @@ function freeformWebLocator(media = {}) {
   } catch { return ''; }
 }
 
-function buildFreeformPlaybackUri(media, position) {
-  const normalized = normalizeReferencePosition(position);
-  const locator = normalizeFreeformLocator(media?.path);
-  const playerTime = formatPositionClock(normalized, 'hms');
-  return `jv://open?path=${encodeURIComponent(locator)}&time=${encodeURIComponent(playerTime)}`;
-}
-
 function buildFreeformPositionMarkdown(media, position, options = {}) {
   const normalized = normalizeReferencePosition(position);
-  const uri = buildFreeformPlaybackUri(media, normalized);
+  const locator = String(media?.path || '').trim();
+  const uri = buildFreeformReferenceUri({
+    locator,
+    name: freeformLocatorName(locator),
+    position: normalized
+  });
   const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
-  const title = escapeMarkdownLabel(options.title || freeformMediaTitle(media));
+  const title = escapeMarkdownLabel(options.title || '回到课程');
   const template = normalizeOutputTemplate(
     'backlinkTemplate',
     options.template ?? options.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate
@@ -11246,7 +11366,6 @@ module.exports = {
   buildCaptureNoteMarkdown,
   buildNotePositionMarkdown,
   buildPositionMarkdown,
-  buildFreeformPlaybackUri,
   buildFreeformPositionMarkdown,
   buildPlainCaptureMarkdown,
   buildPlainCaptureNoteMarkdown,
@@ -11269,7 +11388,8 @@ module.exports = {
 
 const REFERENCE_ACTION = 'go-study';
 const REFERENCE_VERSION = 1;
-const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v', 'mode', 'path', 'web']);
+const FREEFORM_REFERENCE_VERSION = 2;
+const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v', 'mode', 'locator', 'name', 'path', 'web']);
 const ALLOWED_PROTOCOL_META_KEYS = new Set(['action']);
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 
@@ -11298,7 +11418,7 @@ function serializeReferencePosition(position) {
 
 function normalizeReferenceVersion(value) {
   const version = Number(value);
-  if (!Number.isInteger(version) || version !== REFERENCE_VERSION) {
+  if (!Number.isInteger(version) || ![REFERENCE_VERSION, FREEFORM_REFERENCE_VERSION].includes(version)) {
     throw new Error(`不支持的 Go Study 回链版本：${String(value || '') || '缺失'}。`);
   }
   return version;
@@ -11312,11 +11432,33 @@ function normalizeFreeformLocator(value) {
     if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
     return url.toString();
   } catch {
-    if (!/^[A-Za-z]:[\\/]/.test(raw) && !/^\\\\[^\\]+\\[^\\]+/.test(raw)) {
-      throw new Error('Go Study 自由回链只允许 Windows 本地路径或 HTTP(S) 地址。');
+    const windowsDrive = /^[A-Za-z]:[\\/]/.test(raw);
+    const windowsUnc = /^\\\\[^\\]+\\[^\\]+/.test(raw);
+    const posixAbsolute = /^\//.test(raw);
+    if (!windowsDrive && !windowsUnc && !posixAbsolute) {
+      throw new Error('Go Study 自由回链只允许 Windows/macOS/Linux 绝对本地路径或 HTTP(S) 地址。');
     }
     return raw;
   }
+}
+
+function normalizePortableMediaName(value) {
+  const name = String(value || '').trim();
+  if (!name || name.length > 512 || /[\x00-\x1F]/.test(name) || /[\\/]/.test(name)) {
+    throw new Error('Go Study 自由回链中的媒体名称无效。');
+  }
+  return name;
+}
+
+function freeformLocatorName(value) {
+  const locator = normalizeFreeformLocator(value);
+  try {
+    const url = new URL(locator);
+    const tail = decodeURIComponent(url.pathname.split('/').filter(Boolean).pop() || url.hostname || '');
+    return normalizePortableMediaName(tail);
+  } catch {}
+  const tail = locator.replace(/\\/g, '/').split('/').filter(Boolean).pop() || '';
+  return normalizePortableMediaName(tail);
 }
 
 function normalizeOptionalWebLocator(value) {
@@ -11330,21 +11472,26 @@ function normalizeOptionalWebLocator(value) {
 
 function validateReferenceData(input) {
   const source = input && typeof input === 'object' ? input : {};
+  const version = normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION);
+  if (version !== REFERENCE_VERSION) throw new Error(`Managed Go Study 回链只支持 v${REFERENCE_VERSION}。`);
   return {
     resourceId: normalizeResourceId(source.resourceId ?? source.resource),
     position: normalizeReferencePosition(source.position),
-    version: normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION)
+    version
   };
 }
 
 function validateFreeformReferenceData(input) {
   const source = input && typeof input === 'object' ? input : {};
+  const locator = normalizeFreeformLocator(source.locator ?? source.path);
+  const version = normalizeReferenceVersion(source.version ?? source.v ?? FREEFORM_REFERENCE_VERSION);
   return {
     mode: 'freeform',
-    path: normalizeFreeformLocator(source.path),
+    locator,
+    name: normalizePortableMediaName(source.name || freeformLocatorName(locator)),
     web: normalizeOptionalWebLocator(source.web),
     position: normalizeReferencePosition(source.position),
-    version: normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION)
+    version
   };
 }
 
@@ -11358,11 +11505,11 @@ function buildReferenceUri(input) {
 }
 
 function buildFreeformReferenceUri(input) {
-  const reference = validateFreeformReferenceData(input);
+  const reference = validateFreeformReferenceData({ ...input, version: input?.version ?? input?.v ?? FREEFORM_REFERENCE_VERSION });
   const url = new URL(`obsidian://${REFERENCE_ACTION}`);
   url.searchParams.set('mode', 'freeform');
-  url.searchParams.set('path', reference.path);
-  if (reference.web) url.searchParams.set('web', reference.web);
+  url.searchParams.set('locator', reference.locator);
+  url.searchParams.set('name', reference.name);
   url.searchParams.set('position', serializeReferencePosition(reference.position));
   url.searchParams.set('v', String(reference.version));
   return url.toString();
@@ -11376,15 +11523,17 @@ function parseQueryEntries(searchParams) {
   }
   if (searchParams.get('mode') === 'freeform') {
     if (searchParams.has('resource')) throw new Error('Go Study 自由回链不能同时包含 Resource ID。');
+    if (searchParams.has('locator') && searchParams.has('path')) throw new Error('Go Study 自由回链不能同时包含 locator 与旧 path 参数。');
     return validateFreeformReferenceData({
       mode: 'freeform',
-      path: searchParams.get('path'),
+      locator: searchParams.get('locator') || searchParams.get('path'),
+      name: searchParams.get('name') || '',
       web: searchParams.get('web'),
       position: searchParams.get('position'),
       v: searchParams.get('v')
     });
   }
-  if (searchParams.has('mode') || searchParams.has('path') || searchParams.has('web')) {
+  if (searchParams.has('mode') || searchParams.has('locator') || searchParams.has('name') || searchParams.has('path') || searchParams.has('web')) {
     throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
   }
   return validateReferenceData({
@@ -11422,9 +11571,10 @@ function parseProtocolParams(params) {
   }
   if (String(source.mode || '') === 'freeform') {
     if (source.resource != null) throw new Error('Go Study 自由回链不能同时包含 Resource ID。');
+    if (source.locator != null && source.path != null) throw new Error('Go Study 自由回链不能同时包含 locator 与旧 path 参数。');
     return validateFreeformReferenceData(source);
   }
-  if (source.mode != null || source.path != null || source.web != null) {
+  if (source.mode != null || source.locator != null || source.name != null || source.path != null || source.web != null) {
     throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
   }
   return validateReferenceData({
@@ -11437,12 +11587,15 @@ function parseProtocolParams(params) {
 module.exports = {
   ALLOWED_PROTOCOL_META_KEYS,
   ALLOWED_QUERY_KEYS,
+  FREEFORM_REFERENCE_VERSION,
   REFERENCE_ACTION,
   REFERENCE_VERSION,
   buildFreeformReferenceUri,
   buildReferenceUri,
+  freeformLocatorName,
   normalizeFreeformLocator,
   normalizeOptionalWebLocator,
+  normalizePortableMediaName,
   normalizeReferencePosition,
   normalizeReferenceVersion,
   normalizeResourceId,

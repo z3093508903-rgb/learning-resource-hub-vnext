@@ -1,6 +1,6 @@
 'use strict';
 
-const { buildReferenceUri, normalizeFreeformLocator, normalizeReferencePosition } = require('./resource-reference.cjs');
+const { buildFreeformReferenceUri, buildReferenceUri, freeformLocatorName, normalizeReferencePosition } = require('./resource-reference.cjs');
 const {
   DEFAULT_PRODUCT_SETTINGS,
   normalizeOutputTemplate,
@@ -72,18 +72,16 @@ function freeformWebLocator(media = {}) {
   } catch { return ''; }
 }
 
-function buildFreeformPlaybackUri(media, position) {
-  const normalized = normalizeReferencePosition(position);
-  const locator = normalizeFreeformLocator(media?.path);
-  const playerTime = formatPositionClock(normalized, 'hms');
-  return `jv://open?path=${encodeURIComponent(locator)}&time=${encodeURIComponent(playerTime)}`;
-}
-
 function buildFreeformPositionMarkdown(media, position, options = {}) {
   const normalized = normalizeReferencePosition(position);
-  const uri = buildFreeformPlaybackUri(media, normalized);
+  const locator = String(media?.path || '').trim();
+  const uri = buildFreeformReferenceUri({
+    locator,
+    name: freeformLocatorName(locator),
+    position: normalized
+  });
   const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
-  const title = escapeMarkdownLabel(options.title || freeformMediaTitle(media));
+  const title = escapeMarkdownLabel(options.title || '回到课程');
   const template = normalizeOutputTemplate(
     'backlinkTemplate',
     options.template ?? options.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate
@@ -242,7 +240,6 @@ module.exports = {
   buildCaptureNoteMarkdown,
   buildNotePositionMarkdown,
   buildPositionMarkdown,
-  buildFreeformPlaybackUri,
   buildFreeformPositionMarkdown,
   buildPlainCaptureMarkdown,
   buildPlainCaptureNoteMarkdown,

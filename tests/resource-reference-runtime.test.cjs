@@ -129,3 +129,40 @@ test('entry registers only the fixed go-study Obsidian protocol action', () => {
   assert.match(source, /REFERENCE_ACTION/);
   assert.doesNotMatch(source, /registerObsidianProtocolHandler\([^\n]*path/i);
 });
+
+
+test('cross-platform freeform link upgrades to the unique managed Resource by portable file name', async () => {
+  await withPluginModule(async ({ ExportedPlugin }) => {
+    const plugin = new ExportedPlugin();
+    plugin.state = {
+      schemaVersion: 2,
+      resources: {
+        local: { id: 'local', title: 'Lesson 17', kind: 'video', deletedAt: '' }
+      },
+      sources: {},
+      uiState: {}
+    };
+    plugin.resourceActions = () => ({
+      playTarget: { type: 'potplayer', target: 'D:\\Course\\lesson-17.mp4' }
+    });
+    let positionedCall = null;
+    plugin.openPositionedPlayTarget = async (resource, target, playerTime) => {
+      positionedCall = { resource, target, playerTime };
+      return true;
+    };
+    plugin.persist = async () => {};
+
+    const opened = await plugin.openResourceReference({
+      mode: 'freeform',
+      locator: '/Users/zl/Course/lesson-17.mp4',
+      name: 'lesson-17.mp4',
+      web: '',
+      position: { type: 'time', seconds: 18 },
+      version: 2
+    });
+
+    assert.equal(opened, true);
+    assert.equal(positionedCall.resource.id, 'local');
+    assert.equal(positionedCall.playerTime, '00:00:18');
+  });
+});

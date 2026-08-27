@@ -33,7 +33,8 @@ const {
   resolveReferencePlayback,
   updateResumePosition
 } = require('./resource-resolver.cjs');
-const { matchingManagedResource } = require('./media-session.cjs');
+const { matchingManagedResource, matchingManagedResourceByPortableName } = require('./media-session.cjs');
+const { openPortableFreeformReference } = require('./freeform-playback.cjs');
 const {
   applySafeOpenListPathRemap,
   normalizeStrictOpenListPath,
@@ -100,23 +101,27 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   }
 
   async openFreeformReference(reference) {
-    const managed = matchingManagedResource(
+    const locator = reference?.locator || reference?.path;
+    const resolveActions = (resource) => this.resourceActions(resource);
+    const exactManaged = matchingManagedResource(this.state, locator, resolveActions);
+    const portableManaged = exactManaged || matchingManagedResourceByPortableName(
       this.state,
-      reference.path,
-      (resource) => this.resourceActions(resource)
+      reference?.name || '',
+      resolveActions
     );
-    if (managed) {
+    if (portableManaged) {
       return this.openResourceReference({
-        resourceId: managed.id,
+        resourceId: portableManaged.id,
         position: reference.position,
-        version: reference.version
+        version: 1
       });
     }
     try {
       const playerTime = formatPotPlayerTime(reference.position);
       new Notice(`正在跳转临时视频 · ${playerTime}`);
-      await shell.openExternal(this.toPotPlayerUri(reference.path, playerTime));
-      new Notice(`已跳转临时视频 · ${playerTime}`);
+      const opened = await openPortableFreeformReference(reference, { shell, platform: process.platform });
+      const suffix = opened.positionApplied ? ` · ${playerTime}` : ' · 当前平台暂未应用精确时间';
+      new Notice(`已打开临时视频${suffix}`);
       return true;
     } catch (error) {
       new Notice(`自由回链跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);

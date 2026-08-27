@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  FREEFORM_REFERENCE_VERSION,
   REFERENCE_ACTION,
   REFERENCE_VERSION,
   buildFreeformReferenceUri,
@@ -57,9 +58,13 @@ test('missing or malformed resource IDs are rejected', () => {
   );
 });
 
-test('unknown protocol versions fail closed', () => {
+test('managed v1 stays fixed while unknown protocol versions fail closed', () => {
   assert.throws(
     () => parseReferenceUri('obsidian://go-study?resource=resource-1&position=time%3A10&v=2'),
+    /Managed Go Study 回链只支持 v1/
+  );
+  assert.throws(
+    () => parseReferenceUri('obsidian://go-study?resource=resource-1&position=time%3A10&v=99'),
     /不支持的 Go Study 回链版本/
   );
 });
@@ -130,36 +135,60 @@ test('Obsidian protocol-handler params accept only the registered action metadat
   );
 });
 
-test('freeform backlinks preserve a safe local or web locator plus time without inventing a Resource ID', () => {
+test('freeform v2 backlinks use portable locator/name fields instead of Obsidian reserved path', () => {
   const local = buildFreeformReferenceUri({
-    path: 'D:\\Course\\lesson 01.mp4',
-    position: { type: 'time', seconds: 754 },
-    version: 1
+    locator: 'D:\\Course\\lesson 01.mp4',
+    position: { type: 'time', seconds: 754 }
   });
-  const parsedLocal = parseReferenceUri(local);
-  assert.equal(parsedLocal.mode, 'freeform');
-  assert.equal(parsedLocal.path, 'D:\\Course\\lesson 01.mp4');
-  assert.equal(parsedLocal.web, '');
-  assert.deepEqual(parsedLocal.position, { type: 'time', seconds: 754 });
+  assert.match(local, /mode=freeform/);
+  assert.match(local, /locator=D%3A%5CCourse%5Clesson\+01\.mp4/);
+  assert.match(local, /name=lesson\+01\.mp4/);
+  assert.match(local, /v=2/);
+  assert.doesNotMatch(local, /[?&]path=/);
+  assert.deepEqual(parseReferenceUri(local), {
+    mode: 'freeform',
+    locator: 'D:\\Course\\lesson 01.mp4',
+    name: 'lesson 01.mp4',
+    web: '',
+    position: { type: 'time', seconds: 754 },
+    version: FREEFORM_REFERENCE_VERSION
+  });
+
+  const mac = buildFreeformReferenceUri({
+    locator: '/Users/zl/Course/lesson 01.mp4',
+    position: { type: 'time', seconds: 9 }
+  });
+  assert.equal(parseReferenceUri(mac).locator, '/Users/zl/Course/lesson 01.mp4');
 
   const web = buildFreeformReferenceUri({
-    path: 'https://www.bilibili.com/video/BV1TEST?p=2',
-    web: 'https://www.bilibili.com/video/BV1TEST?p=2',
+    locator: 'https://www.bilibili.com/video/BV1TEST?p=2',
     position: { type: 'time', seconds: 65 }
   });
   const parsedWeb = parseReferenceUri(web);
   assert.equal(parsedWeb.mode, 'freeform');
-  assert.match(parsedWeb.path, /^https:\/\/www\.bilibili\.com\/video\/BV1TEST/);
-  assert.equal(parsedWeb.web, parsedWeb.path);
+  assert.match(parsedWeb.locator, /^https:\/\/www\.bilibili\.com\/video\/BV1TEST/);
+  assert.equal(parsedWeb.name, 'BV1TEST');
 });
 
-test('freeform backlinks reject arbitrary executable protocols and mixed managed/freeform identity', () => {
+test('legacy beta.15 path-based freeform links still parse into the v2 runtime shape', () => {
+  const legacy = parseReferenceUri('obsidian://go-study?mode=freeform&path=D%3A%5CLoose%5Cold.mp4&position=time%3A18&v=1');
+  assert.equal(legacy.mode, 'freeform');
+  assert.equal(legacy.locator, 'D:\\Loose\\old.mp4');
+  assert.equal(legacy.name, 'old.mp4');
+  assert.equal(legacy.version, 1);
+});
+
+test('freeform backlinks reject arbitrary custom schemes and mixed managed/freeform identity', () => {
   assert.throws(() => buildFreeformReferenceUri({
-    path: 'file:///C:/Windows/System32/calc.exe',
+    locator: 'javascript:alert(1)',
     position: { type: 'time', seconds: 1 }
-  }), /只允许 Windows 本地路径或 HTTP/);
+  }), /绝对本地路径或 HTTP/);
   assert.throws(
-    () => parseReferenceUri('obsidian://go-study?mode=freeform&resource=r1&path=D%3A%5Cvideo.mp4&position=time%3A1&v=1'),
+    () => parseReferenceUri('obsidian://go-study?mode=freeform&resource=r1&locator=D%3A%5Cvideo.mp4&position=time%3A1&v=2'),
     /不能同时包含 Resource ID/
+  );
+  assert.throws(
+    () => parseReferenceUri('obsidian://go-study?mode=freeform&locator=D%3A%5Cvideo.mp4&path=D%3A%5Cvideo.mp4&position=time%3A1&v=2'),
+    /不能同时包含 locator 与旧 path/
   );
 });

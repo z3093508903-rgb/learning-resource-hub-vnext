@@ -9,16 +9,18 @@ function stopLinkEvent(event) {
   event.stopImmediatePropagation?.();
 }
 
+function httpLocator(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch { return ''; }
+}
+
 function jvWebLocator(rawUri) {
   let uri;
   try { uri = new URL(String(rawUri || '').trim()); } catch { return ''; }
   if (uri.protocol !== 'jv:' || uri.hostname !== 'open') return '';
-  const locator = String(uri.searchParams.get('path') || '').trim();
-  if (!locator) return '';
-  try {
-    const web = new URL(locator);
-    return web.protocol === 'http:' || web.protocol === 'https:' ? web.toString() : '';
-  } catch { return ''; }
+  return httpLocator(uri.searchParams.get('path'));
 }
 
 function installFreeformBrowserModifier(plugin, doc = globalThis.document, options = {}) {
@@ -44,8 +46,9 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
     if (reference?.mode !== 'freeform') return;
 
     stopLinkEvent(event);
-    if (event?.ctrlKey && reference.web) {
-      void shellImpl.openExternal(reference.web);
+    const web = reference.web || httpLocator(reference.locator);
+    if (event?.ctrlKey && web) {
+      void shellImpl.openExternal(web);
       return;
     }
     if (typeof plugin?.openFreeformReference === 'function') {
@@ -58,6 +61,7 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
 }
 
 module.exports = {
+  httpLocator,
   installFreeformBrowserModifier,
   jvWebLocator,
   stopLinkEvent
