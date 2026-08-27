@@ -21,6 +21,7 @@ test('video enhancement is opt-in while workbench and note-output defaults stay 
   assert.equal(settings.videoResumeAfterSave, true);
   assert.equal(settings.videoResumeAfterCancel, true);
   assert.equal(settings.videoSuccessFeedback, true);
+  assert.equal(settings.focusStudyNoteAtEnd, true);
   assert.equal(settings.captureFolder, 'GoStudy/Captures');
   assert.equal(settings.backupRetention, 10);
   assert.equal(settings.timeDisplayFormat, 'smart');
@@ -35,6 +36,14 @@ test('ensureProductSettings persists normalized defaults into legacy state', () 
   assert.equal(plugin.state.uiState.videoEnhancementEnabled, false);
   assert.equal(plugin.state.uiState.captureFolder, DEFAULT_PRODUCT_SETTINGS.captureFolder);
   assert.equal(plugin.state.uiState.backlinkTemplate, DEFAULT_PRODUCT_SETTINGS.backlinkTemplate);
+});
+
+test('capture folder can be cleared to hand attachment placement back to Obsidian', async () => {
+  assert.equal(normalizeCaptureFolder(''), '');
+  const plugin = { state: { uiState: {} }, async persist() {} };
+  const settings = await updateProductSetting(plugin, 'captureFolder', '');
+  assert.equal(settings.captureFolder, '');
+  assert.equal(plugin.state.uiState.captureFolder, '');
 });
 
 test('capture folder rejects traversal and Windows-invalid path components', () => {
