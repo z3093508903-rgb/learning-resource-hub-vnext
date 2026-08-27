@@ -20,7 +20,7 @@
 
 ## Current milestone
 
-`0.3.0-beta.15 — Universal Capture / 真人验收与缺陷收敛`
+`0.3.0-beta.16 — Freeform jv:// 回链修复 / 真人验收`
 
 ## Verified GitHub state（2026-08-28）
 
@@ -31,6 +31,18 @@
 - Preview HEAD CI：失败；构建后的 `main.js` 与提交中的生成产物不一致
 - Stable / Merge：HOLD
 
+## beta.16 validation candidate
+
+- Fix Branch：`fix/freeform-jv-reopen-v1`
+- Current Branch HEAD：`7e8a0cc52277bb1f87fbbb3d8168b575964cfba1`
+- Draft PR：#24
+- Release：`Go Study Preview 0.3.0-beta.16`
+- Tag：`go-study-preview-v0.3.0-beta.16`
+- Release Target：`7fd6c15bae574af961b45e6263fdfaba07b81659`
+- Automation：289/289 tests；full release validation PASS；committed main.js consistency PASS；isolated Preview package + asset verification PASS
+- Manual Acceptance：PENDING
+
+
 项目记忆 v1 已上传到 `origin/docs/project-memory-v1`，基于开发 HEAD `ec854a9`，当前尚未合入 beta.15 开发基线。该文档分支自身 HEAD 为动态状态，接手时应通过 Git / GitHub 实时核对，而不是依赖文档中的固定 SHA。
 
 ## What changed in the latest acceptance
@@ -38,7 +50,7 @@
 - 真人复现 Freeform 回链 `Vault not found`；
 - 根因定位到 `obsidian://go-study?...&path=...` 与 Obsidian 保留路由参数冲突；
 - 确认 GitHub beta.15 仍是修复前代码；
-- 曾存在 EPHEMERAL / LOCAL ONLY 的 Freeform 修复候选，但尚未形成 GitHub 可恢复事实或可信真人验收；
+- 已建立 GitHub 可恢复的 beta.16 Freeform 修复候选：新 Freeform 直接生成 `jv://`；旧 beta.15 Freeform 链接增加兼容拦截；
 - 发现 Preview 打包必须保持目录、manifest ID 和 Preview 版本一致。
 
 ## What is verified
@@ -47,11 +59,11 @@
 - 远端 Freeform builder 仍使用 `path`；
 - Freeform reopen 失败可复现；
 - 历史 `288 / 288` checkpoint 存在，但当前 CI 不是绿色；
-- 历史上 local-only 候选有 targeted/load 验证通过记录；具体 branch/commit 仅作为历史线索，见 `docs/sessions/2026-08-28.md`，不得假定当前环境可获取。
+- beta.16 远程候选已通过 289/289 tests、完整 release validation、`main.js` 一致性检查和 Preview 资产验证；历史 local-only commit 只作为排查线索。
 
 ## What is not verified
 
-- 任何后续正式修复候选是否在真实 `go-study-preview` 冷启动成功；
+- beta.16 是否在真实 `go-study-preview` 冷启动成功；
 - 修复后的链接是否真正打开 PotPlayer 并 seek；
 - HUD、快捷键、Capture、Restart、OpenList、Bilibili、Vault lifecycle 和 Backup Restore 真人验收；
 - 完整 release check 的最终绿色状态。
@@ -60,11 +72,11 @@
 
 1. Freeform `path` 链接可能先被 Obsidian 解释为 Vault 路径；
 2. Preview 分支的生成 `main.js` 与源码不同步，CI 失败；
-3. 历史 local-only 修复候选不是 GitHub 可恢复事实，不能作为正式 Preview 或产品行为依据。
+3. beta.16 仍只是自动化通过的 Preview 候选；在 Windows 真人验收前不能把直达 `jv://` 宣布为最终产品行为。
 
 ## Next action
 
-先决定 Freeform 回链策略，然后在正确 beta.15 基线上做最小修复、正确 Preview 打包与真人 reopen 验收。不要继续加大型功能。
+安装 beta.16 并依次验收：新 Freeform `jv://` → 旧 beta.15 Freeform 兼容 → Managed Resource 回归。三项通过后再确认协议与更新 ADR；不要继续加大型功能。
 
 ## Do not change silently
 

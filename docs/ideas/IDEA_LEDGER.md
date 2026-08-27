@@ -99,7 +99,15 @@ Resource → Note → Heading Anchor
 
 状态：**PROPOSED**
 
-Decision gate：**NEEDS USER DECISION**
+Decision gate：**NEEDS USER ACCEPTANCE**
+
+当前验证候选（beta.16）：
+
+- 新未收录 / Freeform 视频直接生成 `jv://open?path=...&time=...`；
+- Managed Resource 继续使用 Resource ID + Resolver；
+- 旧 beta.15 `obsidian://go-study?...&path=...` 增加点击拦截兼容；
+- 自动化与 Preview 打包已通过，等待 Windows 真人验收；
+- 真人验收通过前，本条状态保持 `PROPOSED`。
 
 背景：
 
