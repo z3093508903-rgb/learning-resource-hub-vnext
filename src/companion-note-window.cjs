@@ -1,6 +1,10 @@
 'use strict';
 
-const { resolveRemote } = require('./quick-note-window.cjs');
+function resolveRemote(options = {}) {
+  if (options.remote) return options.remote;
+  try { return require('@electron/remote'); } catch { return null; }
+}
+
 const { projectIdForResource, recentProjectNote } = require('./project-notes.cjs');
 
 const DEFAULT_LAYOUT_ID = 'right-rail';
