@@ -162,7 +162,7 @@ beta.17 当前策略：
 
 ## beta.17 Polish
 
-状态：**CONFIRMED**
+状态：**CONFIRMED / IMPLEMENTED IN beta.18 Preview, acceptance pending**
 
 - HUD：同一方向键双击可直接执行，等价于方向 + Enter；
 - 笔记弹窗：弱化滚动条 / 滑块，支持位置调整与记忆；
@@ -174,7 +174,7 @@ beta.17 当前策略：
 
 ## Companion Note Window / 分屏小窗笔记
 
-状态：**CONFIRMED — beta.18 scope**
+状态：**CONFIRMED — beta.18 scope / IMPLEMENTED IN PREVIEW, acceptance pending**
 
 用户目标：
 
