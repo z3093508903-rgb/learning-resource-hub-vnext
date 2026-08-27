@@ -6,6 +6,7 @@ const { installScopedUiFixes } = require('./ui-fixes.cjs');
 const { registerRememberedNoteTarget } = require('./note-target.cjs');
 const { registerImmersiveHotkeys } = require('./immersive-hotkeys.cjs');
 const { installLearningControls } = require('./learning-controls-ui.cjs');
+const { installFreeformBrowserModifier } = require('./freeform-link-ui.cjs');
 const { GoStudySettingsTab } = require('./product-settings-tab.cjs');
 const { currentProductSettings, ensureProductSettings } = require('./product-settings.cjs');
 const { pruneStateBackups } = require('./release-hardening.cjs');
@@ -49,6 +50,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     registerImmersiveHotkeys(this);
     installScopedUiFixes(this);
     installLearningControls(this);
+    installFreeformBrowserModifier(this);
     installProjectNoteEntryPoints(this);
   }
 
