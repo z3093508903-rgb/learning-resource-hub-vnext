@@ -4,6 +4,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
+  matchingManagedResourceByPortableName,
   normalizeLocalMediaPath,
   openListMediaMatches,
   resolveActiveMediaSession,
@@ -110,4 +111,24 @@ test('universal resolution falls back to freeform only when no managed resource 
     () => ({}),
     { allowFreeform: false }
   ), /没有匹配到 Go Study 资源/);
+});
+
+
+test('portable-name upgrade only resolves a unique managed resource across device-specific paths', () => {
+  const state = {
+    resources: {
+      a: { id: 'a', kind: 'video', deletedAt: '' },
+      b: { id: 'b', kind: 'video', deletedAt: '' }
+    },
+    sources: {}
+  };
+  const targets = {
+    a: { type: 'potplayer', target: 'D:\\Courses\\lesson-17.mp4' },
+    b: { type: 'potplayer', target: 'D:\\Other\\different.mp4' }
+  };
+  const resolve = (resource) => ({ playTarget: targets[resource.id] });
+  assert.equal(matchingManagedResourceByPortableName(state, 'lesson-17.mp4', resolve)?.id, 'a');
+
+  targets.b = { type: 'potplayer', target: 'E:\\Mirror\\lesson-17.mp4' };
+  assert.equal(matchingManagedResourceByPortableName(state, 'lesson-17.mp4', resolve), null);
 });
