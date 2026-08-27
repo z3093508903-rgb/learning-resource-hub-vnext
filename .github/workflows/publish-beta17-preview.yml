@@ -1,0 +1,161 @@
+name: Publish Beta17 Preview
+
+on:
+  push:
+    branches:
+      - work/portable-freeform-beta17
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.17
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.17
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Full release validation
+        env:
+          RELEASE_TAG: ''
+        run: npm run release:check
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Go Study Preview beta.17: portable Freeform backlink protocol v2.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const packed = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          for (const marker of [
+            'go-study-preview-workbench',
+            'FREEFORM_REFERENCE_VERSION',
+            'locator',
+            'matchingManagedResourceByPortableName',
+            'openPortableFreeformReference',
+            '回到课程'
+          ]) {
+            if (!packed.includes(marker)) throw new Error('Missing beta.17 marker: ' + marker);
+          }
+          if (packed.includes(oldView)) throw new Error('Preview view isolation failed.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.17
+
+          Portable Freeform backlink v2 acceptance build.
+
+          ## What changed
+          - New Freeform notes no longer expose jv:// in Markdown.
+          - New Freeform links use:
+            obsidian://go-study?mode=freeform&locator=...&name=...&position=...&v=2
+          - locator= replaces the Obsidian-reserved path= key.
+          - Visible Freeform label defaults to:
+            ↗ 回到课程 · time
+          - Managed Resource links remain:
+            obsidian://go-study?resource=...
+          - When a Freeform link is clicked, Go Study first tries exact Managed matching.
+          - If the absolute path changed across devices, Go Study can upgrade by a unique portable media filename.
+          - beta.16 / historical jv:// links remain compatible.
+          - legacy beta.15 path-based Freeform obsidian links remain parse-compatible.
+
+          ## Cross-platform boundary
+          The backlink protocol itself is platform-neutral.
+          A local uncollected file cannot magically know a different device's absolute path.
+          If the same video has been collected on the other device, beta.17 can upgrade the old Freeform link to that Managed Resource when the filename match is unique.
+          Without a Managed match or future path mapping:
+          - Windows local paths are opened through the current Windows playback fallback.
+          - macOS/Linux POSIX local paths open with the system player.
+          - a foreign-OS local path fails clearly rather than guessing.
+
+          ## Windows acceptance
+          1. Open a video directly in PotPlayer without adding it to Go Study.
+          2. Open Markdown and capture a timestamp with Alt+S.
+          3. New link text should look like:
+             ↗ 回到课程 · 00:18
+          4. Link target should contain locator= and v=2.
+          5. It must not contain path= or expose jv:// in the Markdown.
+          6. Click normally. Expected: Go Study handles the link and current Windows fallback opens/seeks the video.
+          7. Add that same video to Go Study later.
+          8. Click the old Freeform link again. Expected: Go Study should prefer the Managed Resource path when it can uniquely match the media.
+          9. Re-test an existing beta.16 jv:// link. It should continue to work.
+          10. Re-test a beta.15 obsidian://go-study?mode=freeform&path=... link.
+
+          ## Managed regression
+          Capture from an already collected Resource.
+          The new backlink must still be Resource-ID based and must not become mode=freeform.
+
+          ## macOS design acceptance
+          Automated tests cover POSIX locator parsing and non-Windows fallback.
+          Real macOS playback/seek acceptance is still required before calling the cross-platform player layer complete.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release tag already exists; refusing to overwrite."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG"             --target "${{ github.sha }}"             --title "Go Study Preview ${PREVIEW_VERSION}"             --notes "beta.17 validates platform-neutral Freeform backlinks: locator= v2, clean visible labels, runtime Managed upgrade, and internal platform playback fallback. Do not merge before Windows/macOS acceptance."             --prerelease             "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip"             "dist-preview/go-study-preview/main.js"             "dist-preview/go-study-preview/manifest.json"             "dist-preview/go-study-preview/styles.css"             "dist-preview/go-study-preview/TESTING.md"
+
+      - name: Verify release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isPrerelease,assets > release.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const r = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+          if (r.tagName !== process.env.RELEASE_TAG || !r.isPrerelease) throw new Error('Release metadata mismatch.');
+          const names = new Set(r.assets.map(x => x.name));
+          for (const name of [
+            'go-study-preview-' + process.env.PREVIEW_VERSION + '.zip',
+            'main.js', 'manifest.json', 'styles.css', 'TESTING.md'
+          ]) if (!names.has(name)) throw new Error('Missing asset: ' + name);
+          NODE
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-beta17-preview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-beta17-preview.yml
+          git commit -m "ci: remove one-shot beta.17 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
