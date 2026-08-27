@@ -1,6 +1,5 @@
 'use strict';
 
-const { shell } = require('electron');
 const { formatPotPlayerTime } = require('./resource-resolver.cjs');
 const { normalizeFreeformLocator } = require('./resource-reference.cjs');
 
@@ -35,7 +34,10 @@ async function openPortableFreeformReference(reference, options = {}) {
   const locator = normalizeFreeformLocator(reference?.locator ?? reference?.path);
   const kind = locatorKind(locator);
   const platform = String(options.platform || process.platform);
-  const shellImpl = options.shell || shell;
+  const shellImpl = options.shell || (() => {
+    try { return require('electron').shell; }
+    catch { throw new Error('当前运行环境无法访问系统打开能力。'); }
+  })();
 
   if (kind === 'web') {
     if (platform === 'win32') {
