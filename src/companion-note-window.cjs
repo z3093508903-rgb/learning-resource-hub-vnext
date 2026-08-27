@@ -66,8 +66,9 @@ function ensureCompanionWindowState(plugin) {
     lastGeometry: normalizeStoredGeometry(raw.lastGeometry),
     customLayouts
   };
-  plugin.state.uiState.companionNoteWindow = next;
-  return next;
+  Object.assign(raw, next);
+  plugin.state.uiState.companionNoteWindow = raw;
+  return raw;
 }
 
 function companionWindowState(plugin) {
