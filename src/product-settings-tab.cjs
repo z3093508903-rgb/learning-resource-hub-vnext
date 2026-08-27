@@ -130,6 +130,15 @@ class GoStudySettingsTab extends PluginSettingTab {
           await updateProductSetting(this.plugin, 'autoCollapseSidebar', value);
           if (!value) await this.plugin.restoreSidebar?.();
         }));
+
+    new Setting(containerEl)
+      .setName('学习时把光标定位到笔记末尾')
+      .setDesc('开始学习或继续学习并打开一篇项目笔记时，自动进入编辑状态并把光标放到文件最后一行；关闭后只打开笔记，不改变光标位置。')
+      .addToggle((toggle) => toggle
+        .setValue(settings.focusStudyNoteAtEnd)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'focusStudyNoteAtEnd', value);
+        }));
   }
 
   renderVideoSettings(containerEl) {
@@ -245,16 +254,16 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('截图保存目录')
-      .setDesc('Vault 内的相对路径，例如 GoStudy/Captures 或 Notes/Video Captures。使用独立附件管理插件的用户也可以继续交给自己的附件工作流管理。')
+      .setDesc('留空时跟随 Obsidian 当前附件设置；填写 Vault 相对路径时由 Go Study 固定保存到该目录。这样也更容易与自定义附件位置插件共存。')
       .addText((text) => {
         text.setValue(settings.captureFolder);
-        text.setPlaceholder('GoStudy/Captures');
+        text.setPlaceholder('留空 = 跟随 Obsidian 附件设置');
         text.setDisabled?.(!enabled);
         const commit = async () => {
           try {
             const next = await updateProductSetting(this.plugin, 'captureFolder', text.getValue());
             text.setValue(next.captureFolder);
-            new Notice(`截图目录已更新：${next.captureFolder}`);
+            new Notice(next.captureFolder ? `截图目录已更新：${next.captureFolder}` : '截图保存已改为跟随 Obsidian 附件设置。');
           } catch (error) {
             text.setValue(currentProductSettings(this.plugin).captureFolder);
             new Notice(commandErrorText('截图目录更新失败', error), 5000);
