@@ -138,6 +138,7 @@ class ProjectNoteFolderPickerModal extends Modal {
     this.plugin = plugin;
     this.options = options;
     this.settled = false;
+    this.currentPath = normalizeNoteFolder(options.initialPath || '');
   }
 
   onOpen() {
@@ -152,40 +153,103 @@ class ProjectNoteFolderPickerModal extends Modal {
     this.close();
   }
 
+  directChildren(all, currentPath) {
+    const prefix = currentPath ? `${currentPath}/` : '';
+    return all.filter((folder) => {
+      if (!folder.path.startsWith(prefix)) return false;
+      const rest = folder.path.slice(prefix.length);
+      return rest && !rest.includes('/');
+    });
+  }
+
+  breadcrumbPaths() {
+    const parts = this.currentPath.split('/').filter(Boolean);
+    const result = [{ label: 'Vault', path: '' }];
+    let path = '';
+    for (const part of parts) {
+      path = path ? `${path}/${part}` : part;
+      result.push({ label: part, path });
+    }
+    return result;
+  }
+
   render() {
     this.contentEl.empty();
     const ui = createPickerShell(this.contentEl, {
       title: this.options.title || '选择笔记文件夹',
-      description: this.options.description || '只决定新建笔记保存位置，不会自动收录整个文件夹。',
+      description: this.options.description || '逐层进入 Vault 文件夹，或搜索完整路径；只决定新建笔记保存位置。',
       searchLabel: '搜索 Vault 文件夹',
-      placeholder: '搜索文件夹…'
+      placeholder: '搜索任意层级文件夹…'
     });
+    const all = vaultFolders(this.plugin);
+
     const paint = () => {
       ui.body.empty();
       const query = String(ui.search.value || '').trim().toLocaleLowerCase('zh-CN');
       const section = ui.body.createDiv({ cls: 'go-study-picker-section' });
+      if (!query) {
+        const crumbs = section.createDiv({ cls: 'go-study-folder-breadcrumbs' });
+        for (const [index, crumb] of this.breadcrumbPaths().entries()) {
+          if (index) crumbs.createSpan({ text: '›', cls: 'go-study-folder-breadcrumb-sep' });
+          const button = crumbs.createEl('button', { cls: 'go-study-folder-breadcrumb' });
+          button.textContent = crumb.label;
+          button.addEventListener('click', () => {
+            this.currentPath = crumb.path;
+            paint();
+          });
+        }
+      } else {
+        section.createEl('strong', { cls: 'go-study-picker-section-title', text: '搜索结果 · 点击进入文件夹' });
+      }
+
       const list = section.createDiv({ cls: 'rh-next-picker-list' });
-      const system = list.createEl('button', { cls: 'rh-next-picker-row go-study-folder-row' });
-      setIcon(system.createSpan(), 'folder-cog');
-      const systemCopy = system.createDiv();
-      systemCopy.createEl('strong', { text: '跟随 Obsidian 默认位置' });
-      systemCopy.createEl('small', { text: '不设置项目固定文件夹' });
-      system.addEventListener('click', () => this.choose(''));
-      for (const folder of vaultFolders(this.plugin)
-        .filter((item) => !query || item.path.toLocaleLowerCase('zh-CN').includes(query))
-        .slice(0, 160)) {
+      const folders = query
+        ? all.filter((item) => item.path.toLocaleLowerCase('zh-CN').includes(query)).slice(0, 160)
+        : this.directChildren(all, this.currentPath);
+
+      if (!folders.length) {
+        list.createEl('p', {
+          cls: 'rh-next-empty-inline',
+          text: query ? '没有找到匹配文件夹。' : '当前文件夹没有子文件夹，可以直接选择当前文件夹。'
+        });
+      }
+
+      for (const folder of folders) {
         const row = list.createEl('button', { cls: 'rh-next-picker-row go-study-folder-row' });
         setIcon(row.createSpan(), 'folder');
         const copy = row.createDiv();
         copy.createEl('strong', { text: folder.name });
         copy.createEl('small', { text: folder.path });
-        row.addEventListener('click', () => this.choose(folder.path));
+        row.addEventListener('click', () => {
+          this.currentPath = folder.path;
+          ui.search.value = '';
+          paint();
+        });
       }
     };
+
     ui.search.addEventListener('input', paint);
+
+    const system = ui.footer.createEl('button', { cls: 'rh-next-button' });
+    system.textContent = '跟随 Obsidian 默认位置';
+    system.addEventListener('click', () => this.choose(''));
+
+    const current = ui.footer.createEl('button', { cls: 'rh-next-button is-primary' });
+    const updateCurrentButton = () => {
+      current.textContent = this.currentPath ? `选择：${this.currentPath}` : '选择 Vault 根目录';
+      current.title = this.currentPath || 'Vault 根目录';
+    };
+    current.addEventListener('click', () => this.choose(this.currentPath));
+
     const cancel = ui.footer.createEl('button', { cls: 'rh-next-button' });
     cancel.textContent = '取消';
     cancel.addEventListener('click', () => this.close());
+
+    const originalPaint = paint;
+    const wrappedPaint = () => { originalPaint(); updateCurrentButton(); };
+    ui.search.removeEventListener?.('input', paint);
+    ui.search.addEventListener('input', wrappedPaint);
+    paint = wrappedPaint;
     paint();
   }
 
@@ -320,6 +384,10 @@ function installPickerUxStyles(plugin, doc = globalThis.document) {
 .go-study-note-management-row > div:nth-child(2) small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .go-study-note-management-row .rh-next-resource-actions { justify-self: end; }
 .go-study-folder-row { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; text-align: left; }
+.go-study-folder-breadcrumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; padding: 9px 12px; border-bottom: 1px solid var(--background-modifier-border); }
+.go-study-folder-breadcrumb { border: 0; background: transparent; color: var(--text-accent); padding: 2px 4px; border-radius: 5px; cursor: pointer; }
+.go-study-folder-breadcrumb:hover { background: var(--background-modifier-hover); }
+.go-study-folder-breadcrumb-sep { color: var(--text-faint); }
 .rh-next-vault-picker-modal .rh-next-picker-list {
   min-height: 0;
   max-height: none;
