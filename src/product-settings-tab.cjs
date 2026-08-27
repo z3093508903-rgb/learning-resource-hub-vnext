@@ -21,6 +21,16 @@ const {
 } = require('./immersive-hotkeys.cjs');
 const { immersiveShortcuts } = require('./native-potplayer.cjs');
 const {
+  applyCompanionLayout,
+  companionStatusText,
+  companionWindowState,
+  listCompanionLayouts,
+  openCompanionNoteWindow,
+  saveCurrentCompanionLayout,
+  setCompanionLocked,
+  setCompanionScale
+} = require('./companion-note-window.cjs');
+const {
   DEFAULT_PRODUCT_SETTINGS,
   currentProductSettings,
   resetOutputTemplates,
@@ -118,6 +128,7 @@ class GoStudySettingsTab extends PluginSettingTab {
     });
 
     this.renderWorkbenchSettings(containerEl);
+    this.renderCompanionWindowSettings(containerEl);
     this.renderVideoSettings(containerEl);
     this.renderNoteOutputSettings(containerEl);
     this.renderDataSettings(containerEl);
@@ -165,6 +176,109 @@ class GoStudySettingsTab extends PluginSettingTab {
         .setValue(settings.focusStudyNoteAtEnd)
         .onChange(async (value) => {
           await updateProductSetting(this.plugin, 'focusStudyNoteAtEnd', value);
+        }));
+  }
+
+  renderCompanionWindowSettings(containerEl) {
+    const state = companionWindowState(this.plugin);
+    const layouts = listCompanionLayouts(this.plugin);
+    section(
+      containerEl,
+      '学习笔记小窗',
+      '把真实 Markdown 笔记弹成一个极简窄窗，适合覆盖播放器右侧栏；窗口位置、尺寸和缩放会保留。'
+    );
+
+    const status = new Setting(containerEl)
+      .setName('当前小窗')
+      .setDesc(companionStatusText(this.plugin));
+    status.addButton((button) => button
+      .setButtonText('打开当前笔记')
+      .onClick(async () => {
+        button.setDisabled(true);
+        try {
+          await openCompanionNoteWindow(this.plugin, {
+            filePath: String(this.app.workspace?.getActiveFile?.()?.path || '')
+          });
+          new Notice('学习笔记小窗已打开。');
+        } catch (error) {
+          new Notice(commandErrorText('打开学习笔记小窗失败', error), 6000);
+        } finally {
+          button.setDisabled(false);
+          this.display();
+        }
+      }));
+    status.addButton((button) => button
+      .setButtonText('恢复上次')
+      .setDisabled(!state.notePath)
+      .onClick(async () => {
+        button.setDisabled(true);
+        try {
+          await openCompanionNoteWindow(this.plugin, { preferSaved: true });
+          new Notice('已恢复上次学习笔记小窗。');
+        } catch (error) {
+          new Notice(commandErrorText('恢复学习笔记小窗失败', error), 6000);
+        } finally {
+          button.setDisabled(false);
+          this.display();
+        }
+      }));
+
+    new Setting(containerEl)
+      .setName('锁定为 Capture 目标')
+      .setDesc('开启后，即使 PotPlayer 或 Obsidian 主窗口获得焦点，Alt+S 仍优先写入这篇小窗笔记。')
+      .addToggle((toggle) => toggle
+        .setValue(state.locked)
+        .onChange(async (value) => {
+          await setCompanionLocked(this.plugin, value);
+          this.display();
+        }));
+
+    new Setting(containerEl)
+      .setName('小窗布局')
+      .setDesc('“播放器右侧栏”是默认窄高布局；也可以拖动调整后保存为自定义布局。')
+      .addDropdown((dropdown) => {
+        for (const layout of layouts) dropdown.addOption(layout.id, layout.name);
+        dropdown.setValue(state.activeLayoutId);
+        dropdown.onChange(async (value) => {
+          try {
+            await applyCompanionLayout(this.plugin, value);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('应用小窗布局失败', error), 5000);
+          }
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('小窗缩放')
+      .setDesc('只压缩小窗里的 Obsidian 编辑区密度，不改变 Markdown 文件本身。')
+      .addDropdown((dropdown) => dropdown
+        .addOption('0.70', '70% · 极紧凑')
+        .addOption('0.80', '80%')
+        .addOption('0.82', '82% · 右侧栏推荐')
+        .addOption('0.90', '90%')
+        .addOption('1', '100%')
+        .setValue(String(state.scale))
+        .onChange(async (value) => {
+          await setCompanionScale(this.plugin, Number(value));
+          this.display();
+        }));
+
+    new Setting(containerEl)
+      .setName('保存当前布局')
+      .setDesc('保存当前 x / y / 宽 / 高 / 缩放，之后可以从“布局”下拉框恢复。')
+      .addButton((button) => button
+        .setButtonText('保存为自定义布局')
+        .onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const layout = await saveCurrentCompanionLayout(this.plugin);
+            new Notice(`已保存：${layout.name}`);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('保存小窗布局失败', error), 5000);
+            button.setDisabled(false);
+          }
         }));
   }
 
