@@ -166,7 +166,11 @@ function ensureProductSettings(plugin) {
   const normalized = currentProductSettings(plugin);
   let changed = false;
   for (const [key, value] of Object.entries(normalized)) {
-    if (plugin.state.uiState[key] !== value) {
+    const current = plugin.state.uiState[key];
+    const same = value && typeof value === 'object'
+      ? JSON.stringify(current) === JSON.stringify(value)
+      : current === value;
+    if (!same) {
       plugin.state.uiState[key] = value;
       changed = true;
     }
