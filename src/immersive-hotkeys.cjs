@@ -3,11 +3,16 @@
 const {
   captureFrameAndInsertLearningPosition,
   commitPreparedCaptureTypedNote,
+  commitPreparedPlainCapture,
+  commitPreparedPlainCaptureTypedNote,
+  commitPreparedPlainTypedNote,
   commitPreparedTypedNote,
   insertCurrentLearningPosition,
   prepareCaptureLearningPosition,
   prepareCurrentLearningPosition
 } = require('./learning-capture.cjs');
+const { CAPTURE_ACTIONS, actionForSlot } = require('./capture-actions.cjs');
+const { createNativeActionHud } = require('./action-hud.cjs');
 const {
   DEFAULT_IMMERSIVE_SHORTCUTS,
   immersiveShortcuts,
@@ -24,6 +29,20 @@ const HOTKEY_ACTIONS = Object.freeze({
   capture: '截图并记录',
   note: '输入笔记并记录',
   captureNote: '截图、输入笔记并记录'
+});
+
+const LEGACY_ACTION_MAP = Object.freeze({
+  position: 'time',
+  capture: 'timeImage',
+  note: 'timeNote',
+  captureNote: 'all'
+});
+
+const HUD_ACCELERATORS = Object.freeze({
+  Up: 'up',
+  Down: 'down',
+  Left: 'left',
+  Right: 'right'
 });
 
 function immersiveStatus(plugin) {
@@ -82,83 +101,192 @@ async function resumePreparedPlayback(plugin, prepared, outcome, options = {}) {
   return true;
 }
 
-async function runImmersiveAction(plugin, key, options = {}) {
+function resultTimeSuffix(action, result) {
+  if (!action?.time || !result?.position) return '';
+  return ` ${formatPositionClock(result.position)}`;
+}
+
+async function promptForPreparedNote(plugin, prepared, action, options = {}) {
+  return (options.showQuickNoteInput || showQuickNoteInput)(plugin, {
+    title: action.time
+      ? `${action.label} · ${formatPositionClock(prepared.position)}`
+      : action.label,
+    subtitle: '视频已暂停 · Enter 保存 · Shift+Enter 换行 · Esc 取消',
+    placeholder: '写下这一刻的笔记…',
+    ...(options.promptOptions || {})
+  });
+}
+
+async function runCaptureAction(plugin, actionValue, options = {}) {
   if (!currentProductSettings(plugin).videoEnhancementEnabled) return null;
+  const action = typeof actionValue === 'string' ? CAPTURE_ACTIONS[actionValue] : actionValue;
+  if (!action) throw new Error('未知视频笔记动作。');
   if (plugin?._goStudyImmersiveBusy) {
     await successFeedback(plugin, 'Go Study：上一项记录还在处理中', options);
     return null;
   }
   plugin._goStudyImmersiveBusy = true;
+  let prepared = null;
   try {
-    if (key === 'position') {
-      const result = await insertCurrentLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
-      await successFeedback(plugin, `✓ 已记录 ${formatPositionClock(result.position)}`, options);
-      return result;
-    }
-
-    if (key === 'capture') {
-      const result = await captureFrameAndInsertLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
-      await successFeedback(plugin, `✓ 截图已记录 ${formatPositionClock(result.position)}`, options);
-      return result;
-    }
-
-    if (key === 'note') {
-      const prepared = await prepareCurrentLearningPosition(plugin, {
+    let result;
+    if (action.image && action.note) {
+      prepared = await prepareCaptureLearningPosition(plugin, {
         nativeOnly: true,
         pause: true,
         ...options.captureOptions
       });
-      const note = await (options.showQuickNoteInput || showQuickNoteInput)(plugin, {
-        title: `快速笔记 · ${formatPositionClock(prepared.position)}`,
-        subtitle: '视频已暂停 · Enter 保存 · Shift+Enter 换行 · Esc 取消',
-        placeholder: '写下这一刻的笔记…',
-        ...(options.promptOptions || {})
-      });
+      const note = await promptForPreparedNote(plugin, prepared, action, options);
       if (!note) {
         await resumePreparedPlayback(plugin, prepared, 'cancel', options);
         await successFeedback(plugin, '已取消笔记', options);
         return null;
       }
-      const result = await commitPreparedTypedNote(plugin, prepared, note);
+      result = action.time
+        ? await commitPreparedCaptureTypedNote(plugin, prepared, note)
+        : await commitPreparedPlainCaptureTypedNote(plugin, prepared, note);
       await resumePreparedPlayback(plugin, prepared, 'save', options);
-      await successFeedback(plugin, `✓ 笔记已记录 ${formatPositionClock(result.position)}`, options);
-      return result;
-    }
-
-    if (key === 'captureNote') {
-      const prepared = await prepareCaptureLearningPosition(plugin, {
+    } else if (action.image) {
+      if (action.time) {
+        result = await captureFrameAndInsertLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
+      } else {
+        prepared = await prepareCaptureLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
+        result = await commitPreparedPlainCapture(plugin, prepared);
+      }
+    } else if (action.note) {
+      prepared = await prepareCurrentLearningPosition(plugin, {
         nativeOnly: true,
         pause: true,
         ...options.captureOptions
       });
-      const note = await (options.showQuickNoteInput || showQuickNoteInput)(plugin, {
-        title: `截图笔记 · ${formatPositionClock(prepared.position)}`,
-        subtitle: '当前帧已捕获、视频已暂停 · Enter 保存 · Shift+Enter 换行 · Esc 取消',
-        placeholder: '为这一帧写一条笔记…',
-        ...(options.promptOptions || {})
-      });
+      const note = await promptForPreparedNote(plugin, prepared, action, options);
       if (!note) {
         await resumePreparedPlayback(plugin, prepared, 'cancel', options);
-        await successFeedback(plugin, '已取消截图笔记', options);
+        await successFeedback(plugin, '已取消笔记', options);
         return null;
       }
-      const result = await commitPreparedCaptureTypedNote(plugin, prepared, note);
+      result = action.time
+        ? await commitPreparedTypedNote(plugin, prepared, note)
+        : await commitPreparedPlainTypedNote(plugin, prepared, note);
       await resumePreparedPlayback(plugin, prepared, 'save', options);
-      await successFeedback(plugin, `✓ 截图笔记已记录 ${formatPositionClock(result.position)}`, options);
-      return result;
+    } else if (action.time) {
+      result = await insertCurrentLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
+    } else {
+      throw new Error('当前动作没有任何采集内容。');
     }
 
-    throw new Error(`未知沉浸式操作：${String(key || '')}`);
+    await successFeedback(plugin, `✓ ${action.label}${resultTimeSuffix(action, result)}`, options);
+    return result;
   } catch (error) {
     const message = compactError(error);
-    if (!/PotPlayer 当前不是前台窗口/.test(message)) await feedback(`⚠ ${message}`, { ...options, toastOptions: { ...(options.toastOptions || {}), durationMs: 2200 } });
+    if (!/PotPlayer 当前不是前台窗口/.test(message)) {
+      await feedback(`⚠ ${message}`, { ...options, toastOptions: { ...(options.toastOptions || {}), durationMs: 2200 } });
+    }
     throw error;
   } finally {
     plugin._goStudyImmersiveBusy = false;
   }
 }
 
+async function runImmersiveAction(plugin, key, options = {}) {
+  const actionId = LEGACY_ACTION_MAP[key];
+  if (!actionId) throw new Error(`未知沉浸式操作：${String(key || '')}`);
+  return runCaptureAction(plugin, actionId, options);
+}
+
+function closeActionHudSession(plugin) {
+  const session = plugin?._goStudyActionHudSession;
+  if (!session) return;
+  try { session.close?.(); } catch {}
+  if (plugin) plugin._goStudyActionHudSession = null;
+}
+
+function beginActionHud(plugin, globalShortcut, options = {}) {
+  const settings = currentProductSettings(plugin);
+  if (!settings.videoEnhancementEnabled) return null;
+  closeActionHudSession(plugin);
+
+  const api = globalShortcut || plugin?._goStudyGlobalShortcut;
+  if (!api?.register || !api?.unregister) {
+    void feedback('⚠ Go Study 动作盘无法使用全局键盘接口', options);
+    return null;
+  }
+
+  const hud = createNativeActionHud(settings.actionHudSlots, options.hudOptions || {});
+  const temporary = [];
+  let visible = false;
+  let selected = '';
+  let closed = false;
+  let showTimer = null;
+  let expiryTimer = null;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    if (showTimer) clearTimeout(showTimer);
+    if (expiryTimer) clearTimeout(expiryTimer);
+    for (const accelerator of temporary) {
+      try { api.unregister(accelerator); } catch {}
+    }
+    try { hud?.close?.(); } catch {}
+    if (plugin?._goStudyActionHudSession?.close === cleanup) plugin._goStudyActionHudSession = null;
+  };
+
+  const execute = (slot) => {
+    const action = actionForSlot(settings.actionHudSlots, slot);
+    cleanup();
+    void runCaptureAction(plugin, action, options).catch(() => {});
+  };
+
+  const chooseDirection = (slot) => {
+    if (!visible) return execute(slot);
+    selected = slot;
+    void hud?.select?.(slot);
+  };
+
+  const handlers = {
+    Up: () => chooseDirection('up'),
+    Down: () => chooseDirection('down'),
+    Left: () => chooseDirection('left'),
+    Right: () => chooseDirection('right'),
+    Enter: () => execute(selected || 'center'),
+    Escape: () => cleanup()
+  };
+
+  const failures = [];
+  for (const [accelerator, handler] of Object.entries(handlers)) {
+    try {
+      const ok = api.register(accelerator, handler);
+      if (ok === false) failures.push(accelerator);
+      else temporary.push(accelerator);
+    } catch {
+      failures.push(accelerator);
+    }
+  }
+  if (failures.length) {
+    cleanup();
+    void feedback(`⚠ 动作盘无法临时接管：${failures.join('、')}`, options);
+    return null;
+  }
+
+  const delay = Number(settings.actionHudDelayMs || 0);
+  showTimer = setTimeout(() => {
+    if (closed) return;
+    visible = true;
+    void hud?.show?.();
+  }, delay);
+  expiryTimer = setTimeout(cleanup, Math.max(8000, delay + 5000));
+
+  plugin._goStudyActionHudSession = {
+    close: cleanup,
+    execute,
+    select: chooseDirection,
+    get visible() { return visible; }
+  };
+  return plugin._goStudyActionHudSession;
+}
+
 function unregisterImmersiveHotkeys(plugin, globalShortcut = null) {
+  closeActionHudSession(plugin);
   const api = globalShortcut || plugin?._goStudyGlobalShortcut;
   const accelerators = plugin?._goStudyRegisteredAccelerators || [];
   for (const accelerator of accelerators) {
@@ -167,23 +295,42 @@ function unregisterImmersiveHotkeys(plugin, globalShortcut = null) {
   if (plugin) plugin._goStudyRegisteredAccelerators = [];
 }
 
+function registrationConflict(settings, shortcuts) {
+  const mode = settings.shortcutMode;
+  if (mode === 'legacy' || mode === 'mixed') {
+    const conflict = shortcutConflict(shortcuts);
+    if (conflict) {
+      return `${HOTKEY_ACTIONS[conflict[0]]} 与 ${HOTKEY_ACTIONS[conflict[1]]} 使用了同一个快捷键：${conflict[2]}`;
+    }
+  }
+  if (mode === 'mixed') {
+    const hud = normalizeShortcut(settings.actionHudShortcut).toLowerCase();
+    for (const [key, value] of Object.entries(shortcuts)) {
+      if (hud && normalizeShortcut(value).toLowerCase() === hud) {
+        return `动作盘快捷键与 ${HOTKEY_ACTIONS[key]} 重复：${settings.actionHudShortcut}`;
+      }
+    }
+  }
+  return '';
+}
+
 function registerImmersiveHotkeys(plugin, options = {}) {
   const api = resolveElectronGlobalShortcut(options);
   unregisterImmersiveHotkeys(plugin, api);
   plugin._goStudyGlobalShortcut = api;
   const shortcuts = immersiveShortcuts(plugin);
-  const enabled = currentProductSettings(plugin).videoEnhancementEnabled;
+  const settings = currentProductSettings(plugin);
+  const enabled = settings.videoEnhancementEnabled;
 
   if (!enabled) {
     return setImmersiveStatus(plugin, {
       mode: 'disabled', registered: false, shortcuts, registeredAccelerators: [], error: ''
     });
   }
-  const conflict = shortcutConflict(shortcuts);
+  const conflict = registrationConflict(settings, shortcuts);
   if (conflict) {
     return setImmersiveStatus(plugin, {
-      mode: 'unavailable', registered: false, shortcuts, registeredAccelerators: [],
-      error: `${HOTKEY_ACTIONS[conflict[0]]} 与 ${HOTKEY_ACTIONS[conflict[1]]} 使用了同一个快捷键：${conflict[2]}`
+      mode: 'unavailable', registered: false, shortcuts, registeredAccelerators: [], error: conflict
     });
   }
   if (process.platform !== 'win32' && !options.allowNonWindows) {
@@ -199,21 +346,33 @@ function registerImmersiveHotkeys(plugin, options = {}) {
 
   const registered = [];
   const failures = [];
-  for (const key of Object.keys(HOTKEY_ACTIONS)) {
-    let accelerator;
-    try { accelerator = normalizeShortcut(shortcuts[key]); }
-    catch (error) { failures.push(`${key}: ${compactError(error)}`); continue; }
-    if (!accelerator) continue;
+  const registerOne = (accelerator, callback) => {
+    if (!accelerator) return;
     try {
-      const ok = api.register(accelerator, () => {
-        void runImmersiveAction(plugin, key, options).catch(() => {});
-      });
+      const ok = api.register(accelerator, callback);
       if (ok === false) failures.push(`${accelerator} 已被其他程序占用`);
       else registered.push(accelerator);
     } catch (error) {
       failures.push(`${accelerator}: ${compactError(error)}`);
     }
+  };
+
+  if (settings.shortcutMode === 'legacy' || settings.shortcutMode === 'mixed') {
+    for (const key of Object.keys(HOTKEY_ACTIONS)) {
+      let accelerator;
+      try { accelerator = normalizeShortcut(shortcuts[key]); }
+      catch (error) { failures.push(`${key}: ${compactError(error)}`); continue; }
+      registerOne(accelerator, () => void runImmersiveAction(plugin, key, options).catch(() => {}));
+    }
   }
+
+  if (settings.shortcutMode === 'hud' || settings.shortcutMode === 'mixed') {
+    let master = '';
+    try { master = normalizeShortcut(settings.actionHudShortcut); }
+    catch (error) { failures.push(`HUD: ${compactError(error)}`); }
+    registerOne(master, () => beginActionHud(plugin, api, options));
+  }
+
   plugin._goStudyRegisteredAccelerators = registered;
   if (!plugin._goStudyHotkeyUnloadRegistered) {
     plugin._goStudyHotkeyUnloadRegistered = true;
@@ -223,6 +382,8 @@ function registerImmersiveHotkeys(plugin, options = {}) {
     mode: registered.length ? 'native-windows' : 'unavailable',
     registered: registered.length > 0,
     shortcuts,
+    shortcutMode: settings.shortcutMode,
+    actionHudShortcut: settings.actionHudShortcut,
     registeredAccelerators: registered,
     error: failures.join('；')
   });
@@ -237,6 +398,11 @@ async function updateImmersiveShortcut(plugin, key, value, options = {}) {
   };
   const conflict = shortcutConflict(next);
   if (conflict) throw new Error(`${HOTKEY_ACTIONS[conflict[0]]} 与 ${HOTKEY_ACTIONS[conflict[1]]} 不能使用同一个快捷键。`);
+  const settings = currentProductSettings(plugin);
+  if (settings.shortcutMode === 'mixed' && normalized
+    && normalized.toLowerCase() === normalizeShortcut(settings.actionHudShortcut).toLowerCase()) {
+    throw new Error('独立快捷键不能与动作盘主快捷键重复。');
+  }
   plugin.state.uiState.immersiveShortcuts = next;
   await plugin.persist();
   return registerImmersiveHotkeys(plugin, options);
@@ -250,12 +416,17 @@ async function resetImmersiveShortcuts(plugin, options = {}) {
 
 module.exports = {
   HOTKEY_ACTIONS,
+  LEGACY_ACTION_MAP,
+  beginActionHud,
+  closeActionHudSession,
   compactError,
   feedback,
   immersiveStatus,
   registerImmersiveHotkeys,
+  registrationConflict,
   resetImmersiveShortcuts,
   resumePreparedPlayback,
+  runCaptureAction,
   runImmersiveAction,
   setImmersiveStatus,
   shortcutConflict,
