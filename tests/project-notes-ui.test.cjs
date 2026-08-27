@@ -16,6 +16,14 @@ test('project note box exposes only lightweight Markdown association actions', (
   assert.doesNotMatch(uiSource, /delete\(file|trash|removeFile/i);
 });
 
+test('project note box offers an optional project folder plus a per-create location override', () => {
+  assert.match(uiSource, /项目笔记文件夹/);
+  assert.match(uiSource, /设置项目默认/);
+  assert.match(uiSource, /选择本次新建位置/);
+  assert.match(uiSource, /位置：跟随 Obsidian/);
+  assert.match(uiSource, /不会自动收录整个文件夹/);
+});
+
 test('study launch picker describes a temporary learning note instead of permanent resource binding', () => {
   assert.match(uiSource, /选择这次学习要带上的笔记/);
   assert.match(uiSource, /不会建立永久的资源绑定/);
@@ -43,14 +51,23 @@ test('continue learning restores the recent note before reopening the resource a
   const start = runtimeSource.indexOf('async continueRecentProjectStudy');
   const end = runtimeSource.indexOf('async handleVaultRename', start);
   const block = runtimeSource.slice(start, end);
-  assert.match(block, /openProjectNote\(this, study\.note\)/);
+  assert.match(block, /openProjectNote\(this, study\.note, \{ prepareForStudy: true \}\)/);
   assert.match(block, /resource\.resume\?\.position/);
   assert.match(block, /openPositionedPlayTarget/);
   assert.match(block, /playerTimeFromSeconds/);
+});
+
+test('study note preparation can focus the Markdown editor at the last line without changing ordinary note opens', () => {
+  assert.match(uiSource, /focusProjectNoteAtEnd/);
+  assert.match(uiSource, /editor\.setCursor\(\{ line: lastLine, ch: lineText\.length \}\)/);
+  assert.match(uiSource, /prepareForStudy/);
+  assert.match(uiSource, /focusStudyNoteAtEnd/);
 });
 
 test('project note paths reuse the existing Vault rename/delete/create lifecycle', () => {
   assert.match(runtimeSource, /updateProjectNotePathsOnRename/);
   assert.match(runtimeSource, /markProjectNotesMissing/);
   assert.match(runtimeSource, /restoreProjectNotePath/);
+  assert.match(runtimeSource, /updateProjectNoteFoldersOnRename/);
+  assert.match(runtimeSource, /clearProjectNoteFoldersOnDelete/);
 });
