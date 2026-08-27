@@ -44,8 +44,30 @@ function targetLeaf(workspace, target) {
   }) || null;
 }
 
+function resolveCompanionNoteTarget(plugin) {
+  const workspace = plugin?.app?.workspace;
+  const target = plugin?._goStudyCompanionTarget;
+  if (!target?.locked || !target.filePath || !isEditableMarkdownEditor(target.editor)) return null;
+  const leaf = target.leaf;
+  const view = leaf?.view;
+  const valid = String(view?.file?.path || '') === target.filePath
+    && view?.editor === target.editor
+    && isEditableMarkdownEditor(view.editor);
+  if (!valid) {
+    plugin._goStudyCompanionTarget = null;
+    return null;
+  }
+  return {
+    editor: target.editor,
+    filePath: target.filePath,
+    source: 'companion'
+  };
+}
+
 function resolveRememberedNoteTarget(plugin) {
   const workspace = plugin?.app?.workspace;
+  const companion = resolveCompanionNoteTarget(plugin);
+  if (companion) return companion;
   const active = workspace?.activeEditor;
   if (isEditableMarkdownEditor(active?.editor) && normalizeFilePath(active?.file || workspace?.getActiveFile?.())) {
     rememberNoteTarget(plugin, active.editor, active.file || workspace.getActiveFile?.());
@@ -108,6 +130,7 @@ module.exports = {
   normalizeFilePath,
   registerRememberedNoteTarget,
   rememberNoteTarget,
+  resolveCompanionNoteTarget,
   resolveRememberedNoteTarget,
   targetLeaf
 };

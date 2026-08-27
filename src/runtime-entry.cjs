@@ -9,6 +9,7 @@ const { installLearningControls } = require('./learning-controls-ui.cjs');
 const { installFreeformBrowserModifier } = require('./freeform-link-ui.cjs');
 const { GoStudySettingsTab } = require('./product-settings-tab.cjs');
 const { currentProductSettings, ensureProductSettings } = require('./product-settings.cjs');
+const { registerCompanionNoteCommands } = require('./companion-note-window.cjs');
 const { pruneStateBackups } = require('./release-hardening.cjs');
 const {
   clearProjectNoteFoldersOnDelete,
@@ -47,6 +48,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     ensureProjectNotesState(this.state);
     if (normalized.changed || !hadProjectNotes) await this.persist();
     registerRememberedNoteTarget(this);
+    registerCompanionNoteCommands(this);
     registerImmersiveHotkeys(this);
     installScopedUiFixes(this);
     installLearningControls(this);
