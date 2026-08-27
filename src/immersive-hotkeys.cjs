@@ -212,6 +212,10 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
   }
 
   const hud = createNativeActionHud(settings.actionHudSlots, options.hudOptions || {});
+  if (!hud) {
+    void feedback('⚠ Go Study 动作盘窗口接口不可用', options);
+    return null;
+  }
   const temporary = [];
   let visible = false;
   let selected = '';
