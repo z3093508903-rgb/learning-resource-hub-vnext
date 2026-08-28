@@ -192,3 +192,29 @@ beta.17 当前策略：
 - 不第一步就扩成完整 Study Workspace。
 
 详细产品规格已进入 `docs/product/companion-note-window.md`。Always-on-top 仍作为可选项；具体 Obsidian popout/new-window 技术路线在实现前验证。
+
+
+---
+
+## Legacy protocol coexistence guard
+
+状态：**CONFIRMED BUG / PROPOSED FIX**
+
+问题：
+
+`go-study-preview` 与 `learning-resource-hub-next` 都可能注册 `go-study` Obsidian protocol action，完整 reload 时存在重复注册导致后加载插件启动失败的风险。
+
+目标：
+
+- 当前 Go Study 即使遇到 legacy protocol owner，也不应整插件启动失败；
+- 明确提示用户停用旧版；
+- 不破坏已有 `obsidian://go-study` 笔记；
+- 不把协议简单改名后留下历史回链断裂。
+
+优先修复顺序：
+
+1. fail-safe registration；
+2. legacy detection + UI warning；
+3. 再评估双方条件注册 / protocol ownership migration。
+
+本问题与时间戳 CSS 无直接因果关系。
