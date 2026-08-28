@@ -503,3 +503,86 @@ Hotfix：
 - CI #238 PASS
 - **337 / 337 tests PASS**
 - ZIP SHA256 `869652f154512285e88f2a933dfe37564aecb488899161108449ac60ccbae61a`
+
+
+## beta20.6：发布前 P0 收口
+
+用户确认 Timeline 的产品职责最终固定为：
+
+- 正文时间戳 = 回到视频位置；
+- 悬浮时间线 = 当前笔记内知识点导航；
+- Timeline 只负责 Go Study 时间戳；
+- Timeline 右侧展开辅助显示视频来源；
+- 正文不需要显示视频标题，来源 metadata 保留在 URI / Resource 中；
+- Timeline 折叠 rail 的点数 = 视频来源数量，而不是时间戳数量。
+
+### 时间戳视觉
+
+默认 backlink template 改为：
+
+`[{time}]({uri})`
+
+即默认正文只显示：
+
+`00:35`
+
+不再显示“↗ 回到课程”，也不默认显示视频标题，不增加 tooltip。
+
+仓库 `styles.css` 增加 Go Study 时间戳小胶囊样式，并去掉自定义协议链接的外链图标视觉污染。
+
+为避免破坏用户配置：
+- 旧默认模板 `[↗ {title} · {time}]({uri})` 自动迁移为新 timestamp-only 默认；
+- 用户自己修改过的模板不会被覆盖。
+
+### Timeline rail
+
+折叠状态改为：
+- 1 个视频来源 → 1 个点；
+- N 个视频来源 → N 个点；
+- 同一来源存在多个时间戳也只占 1 个点。
+
+Hover 展开后仍显示：
+- 来源标题；
+- 该来源对应的时间点；
+- 点击时间点只定位到当前笔记对应行。
+
+### 零散视频 Study Mode
+
+补齐导航页入口：
+
+- Go Study 项目导航中的 Markdown 项目文件现在可拖动；
+- Drag 开始时出现与“开始学习”相同的右侧小窗 Study Mode drop target；
+- Drop 时读取**已经打开的当前 PotPlayer 媒体**，使用 `foregroundOnly: false`；
+- 不重新启动 / 替换 PotPlayer 当前视频；
+- 不强制把媒体收录为 Resource；
+- 打开 Companion right-rail，锁定该 Markdown 为 Capture Target；
+- Study Mode state 保存临时 `freeformMedia` context；
+- HUD 后续仍通过当前 PotPlayer 媒体解析 Managed / Freeform。
+
+### 发布验收
+
+新增：
+
+`docs/release-final-acceptance-checklist.md`
+
+覆盖：
+- timestamp capsule；
+- Timeline scope / hover / multi-source / note navigation；
+- Freeform Study Mode；
+- HUD / Companion；
+- Resume / Vault lifecycle；
+- OpenList / Bilibili / PotPlayer；
+- persistence / backup restore；
+- fresh install / upgrade；
+- Publish / Hold 判定。
+
+开发：
+- branch `work/release-p0-beta20-6`
+- Draft PR #35
+- Preview `Go Study Preview 0.3.0-beta.20.6`
+- release target `74b2fd41d405f6c70bb9d561dcae1d8e1785218f`
+- **345 / 345 tests PASS**
+- CI #244 PASS（P0 bundle current）
+- ZIP SHA256 `a5a6ebe78d3bf4d24627900831c2f75df646ac0fef74bf3e2676b084893cb5bf`
+
+状态：VALIDATING。等待 Windows 实机 P0 验收，不合并。
