@@ -5,6 +5,8 @@ const assert = require('node:assert/strict');
 
 const {
   activateTimelineReference,
+  activeMarkdownView,
+  diagnoseTimelineNavigator,
   extractGoStudyReferenceUris,
   renderedReferenceUris,
   timelineGroupsFromMarkdown,
@@ -130,4 +132,55 @@ test('timeline implementation mounts to document body so CodeMirror overflow can
   assert.match(source, /positionTimelineOverlay\(nav, host, doc\)/);
   assert.match(css, /\.go-study-floating-timeline\s*\{[\s\S]*position:\s*fixed/);
   assert.match(css, /z-index:\s*2147482000/);
+});
+
+
+test('active Markdown leaf is accepted even when getLeavesOfType misses it', async () => {
+  const plugin = pluginFixture();
+  const uri = buildReferenceUri({ resourceId: 'r1', position: { type: 'time', seconds: 16 }, version: 1 });
+  const host = {
+    ownerDocument: {
+      documentElement: { clientWidth: 1200 },
+      defaultView: { innerWidth: 1200 },
+      body: { appendChild() {} },
+      querySelectorAll() { return []; }
+    },
+    classList: { add() {}, remove() {} },
+    querySelectorAll() { return []; },
+    getBoundingClientRect() {
+      return { top: 40, right: 1100, bottom: 800, width: 900, height: 760 };
+    }
+  };
+  const view = {
+    file: { path: '视频学习笔记.md', extension: 'md' },
+    editor: { getValue: () => `[回到课程](${uri})` },
+    containerEl: {
+      querySelector(selector) { return selector === '.view-content' ? host : null; }
+    }
+  };
+  plugin.app = {
+    workspace: {
+      activeLeaf: { view },
+      getLeavesOfType() { return []; }
+    },
+    vault: {}
+  };
+  assert.equal(activeMarkdownView(plugin), view);
+  const d = await diagnoseTimelineNavigator({
+    ...plugin,
+    state: {
+      ...plugin.state,
+      uiState: { videoEnhancementEnabled: false, timelineNavigatorEnabled: false }
+    }
+  });
+  assert.equal(d.activeMarkdown, true);
+  assert.equal(d.rawLinkCount, 1);
+  assert.equal(d.timestampCount, 1);
+});
+
+test('runtime source installs timeline before later DOM entry-point hooks', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'runtime-entry.cjs'), 'utf8');
+  assert.ok(source.indexOf('installTimelineNavigator(this)') < source.indexOf('installProjectNoteEntryPoints(this)'));
 });
