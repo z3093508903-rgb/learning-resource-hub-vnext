@@ -412,3 +412,42 @@ Hotfix：
 - ZIP SHA256 `d7d6f9fe2c868e168b4086fee52809f26452dcb6e99d1ffa52a3f3d554ec18d4`
 
 仍需用户 Windows / Obsidian 实机复验，PR 不合并。
+
+
+## beta20.3：Timeline Parser Hotfix
+
+Windows 实机 beta20.2 诊断结果：
+
+- 视频增强 ON
+- Timeline ON
+- Markdown YES
+- 原始 Go Study 链接 7
+- 渲染链接 0
+- 来源 0
+- 时间点 0
+- 挂载 0
+
+这把故障范围从“设置 / UI 挂载”进一步缩小到 **Timeline reference parsing / grouping**。
+
+用户上传的真实笔记包含 7 条 Managed v1 回链、4 个不同 Resource ID。已将这 7 条真实 URI 形状加入回归测试。
+
+修复：
+- Timeline 先使用严格 `parseReferenceUri`；
+- 若真实 Electron/Chromium custom-scheme URL 解析失败，则只对精确的 `obsidian://go-study?` query 形式启用 fallback；
+- fallback 使用 `URLSearchParams` 拆 query，再交给已有 `parseProtocolParams` 校验，因此不放宽原有安全边界；
+- 诊断新增 `解析失败 N` 与首个解析错误。
+
+Hotfix：
+- branch `fix/timeline-parser-beta20-3`
+- Draft PR #32
+- Preview `Go Study Preview 0.3.0-beta.20.3`
+- CI #227 PASS
+- **331 / 331 tests PASS**
+- ZIP SHA256 `2fdfb9833a208df549d47ea92327b272ed8c43726a65020718cdb8e6fbf53e37`
+
+对用户上传的测试笔记，修复后的预期诊断：
+- 原始链接 7
+- 来源 4
+- 时间点 7
+- 解析失败 0
+- 挂载 1
