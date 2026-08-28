@@ -102,6 +102,17 @@ function timelineSummary(groups) {
   };
 }
 
+function timelineSignature(groups) {
+  return (Array.isArray(groups) ? groups : [])
+    .map((group) => [
+      group.key,
+      group.title,
+      group.kind,
+      ...(group.items || []).map((item) => `${item.seconds}:${item.uri}`)
+    ].join('|'))
+    .join('||');
+}
+
 async function browserUrlForTimelineReference(plugin, reference) {
   if (!reference) return '';
   if (reference.mode === 'freeform') {
@@ -215,6 +226,13 @@ function timelineOwnerId(view) {
   return leafId.replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 120);
 }
 
+function existingTimelineForView(view) {
+  const host = markdownViewHost(view);
+  const doc = host?.ownerDocument || view?.containerEl?.ownerDocument;
+  const owner = timelineOwnerId(view);
+  return doc?.querySelector?.(`.go-study-floating-timeline[data-go-study-owner="${owner}"]`) || null;
+}
+
 function removeTimelineFromView(view) {
   const host = markdownViewHost(view);
   const doc = host?.ownerDocument || view?.containerEl?.ownerDocument;
@@ -261,13 +279,24 @@ function renderTimelineIntoView(plugin, view, groups) {
   const doc = host?.ownerDocument || view?.containerEl?.ownerDocument;
   if (!host || !doc) return null;
 
-  removeTimelineFromView(view);
   const summary = timelineSummary(groups);
-  if (!summary.timestampCount) return null;
+  if (!summary.timestampCount) {
+    removeTimelineFromView(view);
+    return null;
+  }
 
+  const signature = timelineSignature(groups);
+  const existing = existingTimelineForView(view);
+  if (existing?.dataset?.goStudyTimelineSignature === signature) {
+    positionTimelineOverlay(existing, host, doc);
+    return existing;
+  }
+
+  removeTimelineFromView(view);
   host.classList?.add?.('go-study-timeline-host');
   const nav = element(doc, 'div', 'go-study-floating-timeline');
   nav.dataset.goStudyOwner = timelineOwnerId(view);
+  nav.dataset.goStudyTimelineSignature = signature;
   nav.setAttribute('aria-label', `Go Study 悬浮时间线 · ${summary.sourceCount} 个来源 · ${summary.timestampCount} 个时间点`);
   nav.setAttribute('data-go-study-timeline-ready', 'true');
 
@@ -423,6 +452,24 @@ async function diagnoseTimelineNavigator(plugin) {
   };
 }
 
+function nodeIsTimelineUi(node) {
+  if (!node || node.nodeType !== 1) return false;
+  try {
+    return node.matches?.('.go-study-floating-timeline')
+      || Boolean(node.closest?.('.go-study-floating-timeline'));
+  } catch {
+    return false;
+  }
+}
+
+function mutationOnlyTouchesTimelineUi(record) {
+  if (!record) return true;
+  if (nodeIsTimelineUi(record.target)) return true;
+  const changed = [...(record.addedNodes || []), ...(record.removedNodes || [])]
+    .filter((node) => node?.nodeType === 1);
+  return changed.length > 0 && changed.every(nodeIsTimelineUi);
+}
+
 function installTimelineNavigator(plugin) {
   const manager = {
     timer: null,
@@ -445,7 +492,10 @@ function installTimelineNavigator(plugin) {
         win?.addEventListener?.('resize', onViewport, { passive: true });
         doc.addEventListener?.('scroll', onViewport, true);
         const Observer = win?.MutationObserver || globalThis.MutationObserver;
-        const observer = Observer ? new Observer(() => this.schedule(90)) : null;
+        const observer = Observer ? new Observer((records = []) => {
+          if (records.length && records.every(mutationOnlyTouchesTimelineUi)) return;
+          this.schedule(90);
+        }) : null;
         observer?.observe?.(doc.body, { childList: true, subtree: true });
         this.observers.push(() => {
           observer?.disconnect?.();
@@ -505,11 +555,14 @@ module.exports = {
   cleanSourceTitle,
   extractGoStudyReferenceUris,
   diagnoseTimelineNavigator,
+  existingTimelineForView,
   freeformSource,
   installTimelineNavigator,
   isMarkdownView,
   managedSource,
   markdownViewText,
+  mutationOnlyTouchesTimelineUi,
+  nodeIsTimelineUi,
   renderedReferenceUris,
   parseTimelineReferenceUri,
   refreshTimelineNavigator,
@@ -518,5 +571,6 @@ module.exports = {
   timelineGroupsFromMarkdown,
   timelineGroupsFromMatches,
   timelineGroupsFromView,
+  timelineSignature,
   timelineSummary
 };
