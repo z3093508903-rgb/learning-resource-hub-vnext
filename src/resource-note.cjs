@@ -78,6 +78,7 @@ function buildFreeformPositionMarkdown(media, position, options = {}) {
   const uri = buildFreeformReferenceUri({
     locator,
     name: freeformLocatorName(locator),
+    web: freeformWebLocator(media),
     position: normalized
   });
   const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
