@@ -478,3 +478,28 @@ Hotfix：
 - CI #232 PASS
 - **334 / 334 tests PASS**
 - ZIP SHA256 `4a54df0bfd288fdb47709b2fda740cc1656e92b56d4afc23623f405a49e7a6b0`
+
+
+## beta20.5：Timeline 改为笔记内导航
+
+用户实机确认 beta20.4 的 Hover 稳定性问题已解决，并进一步明确 Timeline Navigator 的产品职责：
+
+> 悬浮时间线用于更快找到知识点、定位笔记位置，而不是作为第二个视频 / 网页启动入口。
+
+因此 beta20.5 修改：
+
+- 点击 Timeline 时间点 → 导航到当前 Markdown 中对应的时间戳行；
+- 定位后做轻微视觉 pulse，帮助用户找到知识点；
+- Timeline 不再负责 Ctrl+点击网页或直接启动视频；
+- 真正的视频回跳仍由正文中的“回到课程” backlink 负责；
+- Timeline 只允许出现在**当前 active Markdown 且该笔记本身包含 Go Study 时间戳**时；
+- 切换到普通笔记、Go Study Workbench、Settings 或其他非相关页面时，旧 overlay 立即清除；
+- 保留 beta20.4 的稳定 Hover DOM 复用机制。
+
+Hotfix：
+- branch `fix/timeline-note-navigation-beta20-5`
+- Draft PR #34
+- Preview `Go Study Preview 0.3.0-beta.20.5`
+- CI #238 PASS
+- **337 / 337 tests PASS**
+- ZIP SHA256 `869652f154512285e88f2a933dfe37564aecb488899161108449ac60ccbae61a`
