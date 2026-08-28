@@ -17,6 +17,7 @@ test('video enhancement is opt-in while workbench and note-output defaults stay 
   const plugin = { state: { uiState: {} } };
   const settings = currentProductSettings(plugin);
   assert.equal(settings.videoEnhancementEnabled, false);
+  assert.equal(settings.timelineNavigatorEnabled, false);
   assert.equal(settings.autoCollapseSidebar, true);
   assert.equal(settings.videoResumeAfterSave, true);
   assert.equal(settings.videoResumeAfterCancel, true);
@@ -45,6 +46,7 @@ test('ensureProductSettings persists normalized defaults into legacy state', () 
   const result = ensureProductSettings(plugin);
   assert.equal(result.changed, true);
   assert.equal(plugin.state.uiState.videoEnhancementEnabled, false);
+  assert.equal(plugin.state.uiState.timelineNavigatorEnabled, false);
   assert.equal(plugin.state.uiState.captureFolder, DEFAULT_PRODUCT_SETTINGS.captureFolder);
   assert.equal(plugin.state.uiState.backlinkTemplate, DEFAULT_PRODUCT_SETTINGS.backlinkTemplate);
   assert.equal(plugin.state.uiState.actionHudShortcut, 'Alt+S');
