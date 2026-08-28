@@ -127,3 +127,16 @@ test('freeform context backlinks use a stable human label instead of player titl
   assert.match(markdown, /^\[↗ 回到课程 · 00:18\]/);
   assert.doesNotMatch(markdown, /bl��e/);
 });
+
+
+test('freeform web captures keep their browser URL in the permanent v2 backlink', () => {
+  const markdown = buildFreeformPositionMarkdown(
+    { path: 'https://www.bilibili.com/video/BV1TEST?p=2', title: '课程 - PotPlayer' },
+    { type: 'time', seconds: 65 }
+  );
+  const uri = markdown.match(/\((obsidian:\/\/go-study\?[^)]+)\)/)?.[1];
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.mode, 'freeform');
+  assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1TEST?p=2');
+  assert.equal(parsed.position.seconds, 65);
+});

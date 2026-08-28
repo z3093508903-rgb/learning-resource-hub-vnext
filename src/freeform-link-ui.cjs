@@ -1,6 +1,7 @@
 'use strict';
 
-const { shell } = require('electron');
+let shell = null;
+try { shell = require('electron').shell; } catch {}
 const { parseReferenceUri } = require('./resource-reference.cjs');
 
 function stopLinkEvent(event) {
@@ -23,9 +24,35 @@ function jvWebLocator(rawUri) {
   return httpLocator(uri.searchParams.get('path'));
 }
 
+function positionSeconds(position) {
+  const seconds = Number(position?.seconds);
+  return Number.isFinite(seconds) && seconds >= 0 ? Math.floor(seconds) : null;
+}
+
+function bilibiliUrlAtPosition(rawUrl, position) {
+  const source = httpLocator(rawUrl);
+  if (!source) return '';
+  let url;
+  try { url = new URL(source); } catch { return source; }
+  const host = url.hostname.toLowerCase();
+  const isBilibili = host === 'bilibili.com' || host.endsWith('.bilibili.com');
+  if (!isBilibili || !/^\/video\//i.test(url.pathname)) return source;
+  const seconds = positionSeconds(position);
+  if (seconds == null) return source;
+  url.searchParams.set('t', String(seconds));
+  return url.toString();
+}
+
+function browserUrlAtPosition(rawUrl, position) {
+  const source = httpLocator(rawUrl);
+  if (!source) return '';
+  return bilibiliUrlAtPosition(source, position) || source;
+}
+
 function installFreeformBrowserModifier(plugin, doc = globalThis.document, options = {}) {
   if (!doc?.addEventListener) return null;
   const shellImpl = options.shell || shell;
+  if (!shellImpl?.openExternal) return null;
   const onClick = (event) => {
     const target = event?.target?.closest?.('a[href]');
     if (!target) return;
@@ -48,7 +75,7 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
     stopLinkEvent(event);
     const web = reference.web || httpLocator(reference.locator);
     if (event?.ctrlKey && web) {
-      void shellImpl.openExternal(web);
+      void shellImpl.openExternal(browserUrlAtPosition(web, reference.position));
       return;
     }
     if (typeof plugin?.openFreeformReference === 'function') {
@@ -61,8 +88,11 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
 }
 
 module.exports = {
+  bilibiliUrlAtPosition,
+  browserUrlAtPosition,
   httpLocator,
   installFreeformBrowserModifier,
   jvWebLocator,
+  positionSeconds,
   stopLinkEvent
 };

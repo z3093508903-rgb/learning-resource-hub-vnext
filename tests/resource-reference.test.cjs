@@ -192,3 +192,17 @@ test('freeform backlinks reject arbitrary custom schemes and mixed managed/freef
     /不能同时包含 locator 与旧 path/
   );
 });
+
+
+test('freeform v2 can preserve an optional browser source beside the playback locator', () => {
+  const uri = buildFreeformReferenceUri({
+    locator: 'D:\\Loose\\lesson.mp4',
+    web: 'https://www.bilibili.com/video/BV1TEST?p=2',
+    position: { type: 'time', seconds: 65 }
+  });
+  assert.match(uri, /web=https%3A%2F%2Fwww\.bilibili\.com%2Fvideo%2FBV1TEST%3Fp%3D2/);
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.locator, 'D:\\Loose\\lesson.mp4');
+  assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1TEST?p=2');
+  assert.equal(parsed.position.seconds, 65);
+});

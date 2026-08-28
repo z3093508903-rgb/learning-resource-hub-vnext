@@ -124,6 +124,7 @@ function buildFreeformReferenceUri(input) {
   url.searchParams.set('mode', 'freeform');
   url.searchParams.set('locator', reference.locator);
   url.searchParams.set('name', reference.name);
+  if (reference.web) url.searchParams.set('web', reference.web);
   url.searchParams.set('position', serializeReferencePosition(reference.position));
   url.searchParams.set('v', String(reference.version));
   return url.toString();
