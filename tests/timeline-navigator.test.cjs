@@ -4,11 +4,11 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  activateTimelineReference,
   activeMarkdownView,
   diagnoseTimelineNavigator,
   extractGoStudyReferenceUris,
   mutationOnlyTouchesTimelineUi,
+  navigateTimelineItem,
   renderedReferenceUris,
   parseTimelineReferenceUri,
   timelineGroupsFromMarkdown,
@@ -80,23 +80,42 @@ test('freeform timeline uses hidden media title metadata instead of exposing the
   assert.equal(groups[0].items[0].time, '01:05');
 });
 
-test('Ctrl-click on a managed Bilibili timeline item opens browser at the captured time', async () => {
-  const plugin = pluginFixture();
-  const opened = [];
-  const reference = { resourceId: 'r1', position: { type: 'time', seconds: 65 }, version: 1 };
-  const result = await activateTimelineReference(plugin, reference, { ctrlKey: true }, {
-    shell: { openExternal: async (url) => opened.push(url) }
+test('timeline item click navigates to its Markdown line instead of opening media', () => {
+  const calls = [];
+  const view = {
+    editor: {
+      scrollIntoView(range, center) { calls.push(['scroll', range, center]); },
+      setCursor(cursor) { calls.push(['cursor', cursor]); }
+    },
+    containerEl: { querySelector() { return null; } }
+  };
+  const result = navigateTimelineItem(view, {
+    uri: 'obsidian://go-study?resource=r1&position=time%3A65&v=1',
+    line: 12
   });
-  assert.equal(result.transport, 'browser');
-  assert.equal(opened[0], 'https://www.bilibili.com/video/BV1PHOTO?t=65');
+  assert.deepEqual(result, { transport: 'note', mode: 'editor', line: 12, found: true });
+  assert.deepEqual(calls[0], ['scroll', { from: { line: 12, ch: 0 }, to: { line: 12, ch: 0 } }, true]);
+  assert.deepEqual(calls[1], ['cursor', { line: 12, ch: 0 }]);
 });
 
-test('ordinary timeline click reuses Go Study reference playback', async () => {
-  const plugin = pluginFixture();
-  const reference = { resourceId: 'r2', position: { type: 'time', seconds: 42 }, version: 1 };
-  const result = await activateTimelineReference(plugin, reference, {});
-  assert.equal(result.transport, 'go-study');
-  assert.deepEqual(plugin.lastReference, reference);
+test('timeline rendered fallback scrolls the matching backlink into view', () => {
+  const calls = [];
+  const anchor = {
+    isConnected: true,
+    ownerDocument: { defaultView: { setTimeout(fn) { fn(); } } },
+    classList: { add() {}, remove() {} },
+    closest() { return this; },
+    scrollIntoView(options) { calls.push(options); }
+  };
+  const result = navigateTimelineItem({ containerEl: { querySelector() { return null; } } }, {
+    uri: 'obsidian://go-study?resource=r1&position=time%3A65&v=1',
+    line: null,
+    anchor
+  });
+  assert.equal(result.transport, 'note');
+  assert.equal(result.mode, 'rendered');
+  assert.equal(result.found, true);
+  assert.equal(calls.length, 1);
 });
 
 
@@ -263,4 +282,29 @@ test('stable timeline render reuses unchanged DOM instead of rebuilding on every
   assert.match(source, /goStudyTimelineSignature === signature/);
   assert.match(source, /positionTimelineOverlay\(existing, host, doc\)/);
   assert.match(source, /records\.every\(mutationOnlyTouchesTimelineUi\)/);
+});
+
+
+test('raw Go Study matches remember the Markdown line for local knowledge navigation', () => {
+  const uri = buildReferenceUri({ resourceId: 'r1', position: { type: 'time', seconds: 16 }, version: 1 });
+  const markdown = ['标题', '', '一段说明', `[回到课程](${uri})`, '尾部'].join('\n');
+  const matches = extractGoStudyReferenceUris(markdown);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].line, 3);
+});
+
+test('timeline runtime renders only the active relevant Markdown note and clears stale overlays', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'timeline-navigator.cjs'), 'utf8');
+  assert.match(source, /const view = activeMarkdownView\(plugin\);\s*clearTimelinesExcept\(plugin, view\);\s*if \(!view\) return \[\];/);
+  assert.doesNotMatch(source, /for \(const leaf of leaves\)[\s\S]{0,220}refreshTimelineView/);
+});
+
+test('Timeline Navigator no longer owns playback or browser-opening semantics', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'timeline-navigator.cjs'), 'utf8');
+  assert.doesNotMatch(source, /openExternal|browserUrlAtPosition|openResourceReference/);
+  assert.match(source, /点击定位到笔记/);
 });
