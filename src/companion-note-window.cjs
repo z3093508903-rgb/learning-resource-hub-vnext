@@ -383,9 +383,11 @@ function cleanupCompanionSession(plugin, session, options = {}) {
   const studyMode = plugin?.state?.uiState?.studyMode;
   if (studyMode?.active && (!studyMode.notePath || studyMode.notePath === session.filePath)) {
     studyMode.active = false;
+    studyMode.mode = 'note';
     studyMode.notePath = '';
     studyMode.resourceId = '';
     studyMode.projectId = '';
+    studyMode.freeformMedia = null;
     studyMode.enteredAt = '';
     plugin._goStudyStudyMode = null;
   }
