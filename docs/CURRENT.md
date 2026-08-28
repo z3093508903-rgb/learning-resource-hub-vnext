@@ -317,3 +317,74 @@ CI：
 
 - 未收录零散视频如何通过 Study Mode UI 绑定当前已打开的 PotPlayer，会在下一切片处理；
 - 如果 PotPlayer 只暴露 Bilibili CDN/媒体流 URL，而不是 Bilibili 页面 URL，当前无法凭空恢复 canonical page。
+
+
+## beta20：Lightweight Timeline Navigator
+
+开发分支：
+
+`work/timeline-navigator-beta20`
+
+Draft PR：
+
+`#29 Go Study beta20: Lightweight Timeline Navigator`
+
+当前开发 HEAD：
+
+`91916d440b30ca5c95bd191ee2bc9258949aa12c`
+
+CI：
+
+- run #209 ✅
+- **325 / 325 tests PASS**
+- committed `main.js` current ✅
+
+Preview：
+
+- `Go Study Preview 0.3.0-beta.20`
+- tag `go-study-preview-v0.3.0-beta.20`
+- ZIP SHA256 `3500cf42965fcd0c7dc4278421104b683d6a34d73d262147ad4e2984c773f035`
+
+### 产品决定
+
+悬浮时间线属于 **可选的视频功能增强**，默认关闭。
+
+视觉规则：
+
+- 平时只显示 Markdown 右边缘的一根极细线和少量点；
+- 鼠标移动到指定区域才轻微展开；
+- 展开仍保持透明背景；
+- 不做卡片式时间线；
+- 不抢占 Companion 的阅读空间；
+- 没有 Go Study 时间戳的普通 Markdown 不显示任何时间线 UI。
+
+### 多视频笔记
+
+同一 Markdown 可以包含多个不同视频的时间戳。
+
+Timeline 不把所有时间混为一根伪时间轴，而是读取 Go Study 回链中的来源元数据并按视频分组：
+
+1. Managed Resource ID → 当前 Resource title；
+2. Freeform 若可唯一升级为 Managed → 合并到 Resource；
+3. Freeform hidden media title；
+4. portable filename / web host fallback。
+
+### 时间戳来源 metadata
+
+新 Freeform 回链可在 URI 内隐藏保存：
+
+- `locator`
+- `name`
+- `title`
+- `web`
+- `position`
+
+其中 `title` 用于记住本地视频 / PotPlayer 当前媒体的人类可读标题。可见 Markdown 仍保持简洁的“回到课程 · time”，不会额外污染正文。
+
+### 点击语义
+
+- 普通点击 Timeline 时间点 → 复用现有 Go Study 精确回链；
+- Ctrl/Cmd + 点击 → 若存在网页来源则浏览器打开；
+- Bilibili → 保留 `p` 并应用 `t=<seconds>`。
+
+当前仍处于真实 Obsidian UI 验收阶段，PR 不合并。
