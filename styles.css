@@ -973,3 +973,255 @@ body.go-study-companion-window *::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--text-muted) 24%, transparent);
   border-radius: 999px;
 }
+
+
+/* beta20 · optional lightweight floating timeline */
+.go-study-timeline-host {
+  position: relative;
+}
+
+.go-study-floating-timeline {
+  position: absolute;
+  z-index: 24;
+  top: 12%;
+  right: 3px;
+  width: 18px;
+  height: 72%;
+  min-height: 220px;
+  pointer-events: auto;
+  color: var(--text-muted);
+  transition: width 140ms ease;
+}
+
+.go-study-floating-timeline:hover,
+.go-study-floating-timeline:focus-within {
+  width: 176px;
+}
+
+.go-study-timeline-rail {
+  position: absolute;
+  z-index: 2;
+  top: 8px;
+  right: 5px;
+  bottom: 8px;
+  width: 8px;
+  pointer-events: none;
+}
+
+.go-study-timeline-rail::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 3px;
+  width: 1px;
+  background: color-mix(in srgb, var(--interactive-accent) 52%, transparent);
+  opacity: .56;
+}
+
+.go-study-timeline-rail::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  right: -2px;
+  width: 7px;
+  height: 18px;
+  transform: translateY(-50%);
+  border-right: 1px solid color-mix(in srgb, var(--interactive-accent) 62%, transparent);
+  border-radius: 50%;
+  opacity: .62;
+}
+
+.go-study-timeline-node {
+  position: absolute;
+  top: var(--go-study-node-y);
+  left: 1px;
+  width: 5px;
+  height: 5px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--interactive-accent) 70%, var(--text-muted));
+  box-shadow: 0 0 6px color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+  opacity: .7;
+}
+
+.go-study-floating-timeline:hover .go-study-timeline-node,
+.go-study-floating-timeline:focus-within .go-study-timeline-node {
+  opacity: .95;
+}
+
+.go-study-timeline-hover {
+  position: absolute;
+  z-index: 1;
+  top: 0;
+  right: 16px;
+  width: 150px;
+  max-height: 100%;
+  overflow: auto;
+  padding: 4px 6px 4px 0;
+  opacity: 0;
+  transform: translateX(8px);
+  pointer-events: none;
+  scrollbar-width: none;
+  background: transparent;
+  transition: opacity 120ms ease, transform 140ms ease;
+}
+
+.go-study-timeline-hover::-webkit-scrollbar {
+  display: none;
+}
+
+.go-study-floating-timeline:hover .go-study-timeline-hover,
+.go-study-floating-timeline:focus-within .go-study-timeline-hover {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.go-study-timeline-head,
+.go-study-timeline-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.go-study-timeline-head {
+  margin: 0 0 8px;
+  padding-right: 4px;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.go-study-timeline-title {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.go-study-timeline-count,
+.go-study-timeline-source-count {
+  margin-left: auto;
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.go-study-timeline-group {
+  position: relative;
+  margin: 0 0 10px;
+  padding-left: 10px;
+}
+
+.go-study-timeline-group::before {
+  content: '';
+  position: absolute;
+  top: 16px;
+  bottom: 2px;
+  left: 2px;
+  width: 1px;
+  background: color-mix(in srgb, var(--interactive-accent) 26%, transparent);
+}
+
+.go-study-timeline-group-head {
+  min-height: 18px;
+  margin-bottom: 2px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.go-study-timeline-source {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.go-study-timeline-items {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1px 6px;
+  min-width: 0;
+}
+
+button.go-study-timeline-item {
+  position: relative;
+  width: auto;
+  min-width: 0;
+  height: auto;
+  margin: 0;
+  padding: 1px 0;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: transparent;
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.35;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+}
+
+button.go-study-timeline-item::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: -9px;
+  width: 4px;
+  height: 4px;
+  transform: translateY(-50%);
+  border-radius: 50%;
+  background: color-mix(in srgb, var(--interactive-accent) 60%, var(--text-faint));
+  opacity: .66;
+}
+
+button.go-study-timeline-item:hover,
+button.go-study-timeline-item:focus-visible {
+  background: transparent;
+  color: var(--text-accent);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  outline: none;
+}
+
+button.go-study-timeline-item:hover::before,
+button.go-study-timeline-item:focus-visible::before {
+  opacity: 1;
+  box-shadow: 0 0 5px color-mix(in srgb, var(--interactive-accent) 35%, transparent);
+}
+
+.go-study-timeline-more,
+.go-study-timeline-hint {
+  color: var(--text-faint);
+  font-size: 9px;
+}
+
+.go-study-timeline-hint {
+  padding-left: 10px;
+  opacity: .72;
+}
+
+body.go-study-companion-window .go-study-floating-timeline {
+  top: 9%;
+  right: 1px;
+  height: 80%;
+}
+
+body.go-study-companion-window .go-study-floating-timeline:hover,
+body.go-study-companion-window .go-study-floating-timeline:focus-within {
+  width: 144px;
+}
+
+body.go-study-companion-window .go-study-timeline-hover {
+  width: 118px;
+}
+
+@media (max-width: 760px) {
+  .go-study-floating-timeline:hover,
+  .go-study-floating-timeline:focus-within {
+    width: 132px;
+  }
+  .go-study-timeline-hover {
+    width: 110px;
+  }
+}
