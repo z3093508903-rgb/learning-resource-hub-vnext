@@ -108,11 +108,12 @@ function validateFreeformReferenceData(input) {
   const source = input && typeof input === 'object' ? input : {};
   const locator = normalizeFreeformLocator(source.locator ?? source.path);
   const version = normalizeReferenceVersion(source.version ?? source.v ?? FREEFORM_REFERENCE_VERSION);
+  const title = normalizeOptionalMediaTitle(source.title);
   return {
     mode: 'freeform',
     locator,
     name: normalizePortableMediaName(source.name || freeformLocatorName(locator)),
-    title: normalizeOptionalMediaTitle(source.title),
+    ...(title ? { title } : {}),
     web: normalizeOptionalWebLocator(source.web),
     position: normalizeReferencePosition(source.position),
     version
