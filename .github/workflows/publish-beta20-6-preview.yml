@@ -1,0 +1,114 @@
+name: Publish Beta20.6 Preview
+
+on:
+  push:
+    branches:
+      - work/release-p0-beta20-6
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.20.6
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.20.6
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Full release validation
+        env:
+          RELEASE_TAG: ''
+        run: npm run release:check
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Go Study Preview beta.20.6: release P0 finalization.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+          fs.copyFileSync('docs/release-final-acceptance-checklist.md', path.join(out, 'RELEASE-CHECKLIST.md'));
+
+          const packed = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          for (const marker of [
+            'enterCurrentPotPlayerStudyMode',
+            'data-go-study-study-note-path',
+            'freeformMedia',
+            'sourceNodes = groups.slice',
+            '[{time}]({uri})'
+          ]) if (!packed.includes(marker)) throw new Error('Missing beta20.6 marker: ' + marker);
+
+          const css = fs.readFileSync(path.join(out, 'styles.css'), 'utf8');
+          if (!css.includes('compact timestamp capsule')) throw new Error('Missing timestamp capsule CSS.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.20.6
+
+          P0 release-finalization build.
+
+          ## Fast acceptance
+          1. Generate a new Managed timestamp → visible label should be only the time.
+          2. Generate a new Freeform timestamp → visible label should be only the time; source title stays hidden metadata.
+          3. Open a mixed-video note → collapsed Timeline dots should equal video source count.
+          4. Hover Timeline → source titles and timestamps appear; click a timestamp → navigate to that note line.
+          5. Switch to an unrelated page → Timeline disappears.
+          6. With a loose video already open in PotPlayer, drag a Markdown note from the Go Study project navigation.
+          7. Drop it into the right-side Study Mode target → Companion opens/locks; PotPlayer must not restart.
+          8. Return focus to PotPlayer and capture → timestamp should write into the dragged note.
+
+          Full checklist: RELEASE-CHECKLIST.md
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists"; exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "${{ github.sha }}" \
+            --title "Go Study Preview ${PREVIEW_VERSION}" \
+            --notes "P0 release-finalization preview: timestamp-only capsules, source-count Timeline dots, and navigation-note drag into current loose-video Study Mode. 345/345 tests passing. Use RELEASE-CHECKLIST.md for final Windows acceptance." \
+            --prerelease \
+            "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+            "dist-preview/go-study-preview/main.js" \
+            "dist-preview/go-study-preview/manifest.json" \
+            "dist-preview/go-study-preview/styles.css" \
+            "dist-preview/go-study-preview/TESTING.md" \
+            "dist-preview/go-study-preview/RELEASE-CHECKLIST.md"
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-beta20-6-preview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-beta20-6-preview.yml
+          git commit -m "ci: remove one-shot beta20.6 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
