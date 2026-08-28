@@ -1,6 +1,10 @@
 'use strict';
 
-const { setIcon = () => {} } = require('obsidian');
+let setIcon = () => {};
+try {
+  const obsidian = require('obsidian');
+  setIcon = obsidian.setIcon || setIcon;
+} catch {}
 
 function resolveRemote(options = {}) {
   if (options.remote) return options.remote;
