@@ -274,6 +274,12 @@ module.exports = {
 "companion-note-window.cjs": (module, exports, require) => {
 'use strict';
 
+let setIcon = () => {};
+try {
+  const obsidian = require('obsidian');
+  setIcon = obsidian.setIcon || setIcon;
+} catch {}
+
 function resolveRemote(options = {}) {
   if (options.remote) return options.remote;
   try { return require('@electron/remote'); } catch { return null; }
@@ -335,6 +341,7 @@ function ensureCompanionWindowState(plugin) {
   const next = {
     notePath: String(raw.notePath || ''),
     locked: raw.locked !== false,
+    alwaysOnTop: raw.alwaysOnTop !== false,
     scale: normalizeCompanionScale(raw.scale),
     activeLayoutId: String(raw.activeLayoutId || DEFAULT_LAYOUT_ID),
     lastGeometry: normalizeStoredGeometry(raw.lastGeometry),
@@ -506,6 +513,109 @@ function leafWindow(leaf) {
   return el?.win || el?.ownerDocument?.defaultView || el?.doc?.defaultView || null;
 }
 
+function companionTitle(fileOrPath) {
+  const path = String(fileOrPath?.path || fileOrPath || '');
+  return path.split('/').pop()?.replace(/\.md$/i, '') || '学习笔记';
+}
+
+function nativeWindowScore(nativeWindow, win) {
+  if (!nativeWindow?.getBounds || !win) return Number.POSITIVE_INFINITY;
+  try {
+    const bounds = nativeWindow.getBounds();
+    const expected = {
+      x: Number(win.screenX),
+      y: Number(win.screenY),
+      width: Number(win.outerWidth),
+      height: Number(win.outerHeight)
+    };
+    if (!Object.values(expected).every(Number.isFinite)) return Number.POSITIVE_INFINITY;
+    return Math.abs(Number(bounds.x) - expected.x)
+      + Math.abs(Number(bounds.y) - expected.y)
+      + Math.abs(Number(bounds.width) - expected.width)
+      + Math.abs(Number(bounds.height) - expected.height);
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function resolveNativeCompanionWindow(win, options = {}) {
+  if (options.nativeWindow?.setAlwaysOnTop) return options.nativeWindow;
+  const remote = options.remote || resolveRemote(options);
+  let windows = [];
+  try { windows = remote?.BrowserWindow?.getAllWindows?.() || []; } catch {}
+  let best = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidate of windows) {
+    const score = nativeWindowScore(candidate, win);
+    if (score < bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return bestScore <= 180 ? best : null;
+}
+
+function syncCompanionNativeState(plugin, session, options = {}) {
+  const win = session?.win;
+  if (!win) return false;
+  const state = companionWindowState(plugin);
+  const title = companionTitle(session.filePath);
+  try { if (win.document) win.document.title = title; } catch {}
+  try {
+    const viewTitle = win.document?.querySelector?.('.view-header-title');
+    if (viewTitle) viewTitle.textContent = title;
+  } catch {}
+
+  const nativeWindow = session.nativeWindow || resolveNativeCompanionWindow(win, options);
+  if (!nativeWindow) return false;
+  session.nativeWindow = nativeWindow;
+  try {
+    if (typeof nativeWindow.setTitle === 'function' && nativeWindow.getTitle?.() !== title) nativeWindow.setTitle(title);
+  } catch {}
+  try {
+    if (typeof nativeWindow.setAlwaysOnTop === 'function') nativeWindow.setAlwaysOnTop(Boolean(state.alwaysOnTop));
+  } catch {}
+  return true;
+}
+
+function updatePinButton(plugin, session) {
+  const button = session?.pinButton;
+  if (!button) return;
+  const pinned = companionWindowState(plugin).alwaysOnTop;
+  button.classList?.toggle?.('is-active', pinned);
+  button.setAttribute?.('aria-label', pinned ? '取消置顶学习笔记小窗' : '置顶学习笔记小窗');
+  button.setAttribute?.('title', pinned ? '已置顶 · 点击取消' : '未置顶 · 点击置顶');
+  button.empty?.();
+  try { setIcon(button, pinned ? 'pin' : 'pin-off'); } catch {}
+}
+
+function installCompanionPinControl(plugin, session) {
+  const doc = session?.win?.document;
+  if (!doc?.createElement) return null;
+  const header = doc.querySelector?.('.view-header');
+  const actions = header?.querySelector?.('.view-actions') || header;
+  if (!actions) return null;
+  const existing = actions.querySelector?.('[data-go-study-companion-pin]');
+  if (existing) {
+    session.pinButton = existing;
+    updatePinButton(plugin, session);
+    return existing;
+  }
+  const button = doc.createElement('button');
+  button.type = 'button';
+  button.className = 'clickable-icon go-study-companion-pin';
+  button.setAttribute('data-go-study-companion-pin', 'true');
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void setCompanionAlwaysOnTop(plugin, !companionWindowState(plugin).alwaysOnTop);
+  });
+  actions.prepend?.(button);
+  session.pinButton = button;
+  updatePinButton(plugin, session);
+  return button;
+}
+
 function applyCompanionChrome(win, scale) {
   const doc = win?.document;
   if (!doc?.body) return false;
@@ -544,6 +654,15 @@ function cleanupCompanionSession(plugin, session, options = {}) {
   }
   if (plugin?._goStudyCompanionWindow === session) plugin._goStudyCompanionWindow = null;
   if (plugin?._goStudyCompanionTarget?.leaf === session.leaf) detachCompanionTarget(plugin);
+  const studyMode = plugin?.state?.uiState?.studyMode;
+  if (studyMode?.active && (!studyMode.notePath || studyMode.notePath === session.filePath)) {
+    studyMode.active = false;
+    studyMode.notePath = '';
+    studyMode.resourceId = '';
+    studyMode.projectId = '';
+    studyMode.enteredAt = '';
+    plugin._goStudyStudyMode = null;
+  }
   if (options.persist !== false && plugin?.state) void persistCompanionState(plugin).catch(() => {});
 }
 
@@ -561,6 +680,7 @@ function installGeometryTracking(plugin, session) {
     void persistCompanionState(plugin).catch(() => {});
   };
   const captureGeometry = () => {
+    syncCompanionNativeState(plugin, session);
     const geometry = currentWindowGeometry(plugin);
     if (!geometry) return;
     const same = last && ['x','y','width','height'].every((key) => geometry[key] === last[key]);
@@ -626,6 +746,7 @@ async function openCompanionNoteWindow(plugin, options = {}) {
 
   state.notePath = file.path;
   state.locked = options.locked == null ? state.locked : Boolean(options.locked);
+  state.alwaysOnTop = options.alwaysOnTop == null ? state.alwaysOnTop : Boolean(options.alwaysOnTop);
   const layout = resolveLayout(plugin, options.layoutId || state.activeLayoutId, options);
   state.activeLayoutId = layout.id;
   const scale = normalizeCompanionScale(options.scale ?? state.scale ?? layout.scale);
@@ -641,7 +762,7 @@ async function openCompanionNoteWindow(plugin, options = {}) {
   applyGeometry(win, geometry);
   try { win.focus?.(); } catch {}
 
-  const session = { leaf, win, filePath: file.path, cleaned: false, timer: null };
+  const session = { leaf, win, filePath: file.path, cleaned: false, timer: null, nativeWindow: null, pinButton: null };
   plugin._goStudyCompanionWindow = session;
   plugin._goStudyCompanionTarget = {
     editor: view.editor,
@@ -650,9 +771,35 @@ async function openCompanionNoteWindow(plugin, options = {}) {
     locked: state.locked,
     openedAt: Date.now()
   };
+  syncCompanionNativeState(plugin, session, options);
+  installCompanionPinControl(plugin, session);
   installGeometryTracking(plugin, session);
   await persistCompanionState(plugin);
-  return { leaf, win, file, editor: view.editor, geometry, scale, locked: state.locked, layoutId: state.activeLayoutId };
+  return {
+    leaf,
+    win,
+    file,
+    editor: view.editor,
+    geometry,
+    scale,
+    locked: state.locked,
+    alwaysOnTop: state.alwaysOnTop,
+    layoutId: state.activeLayoutId
+  };
+}
+
+async function setCompanionAlwaysOnTop(plugin, value, options = {}) {
+  const state = companionWindowState(plugin);
+  state.alwaysOnTop = Boolean(value);
+  const session = currentCompanionWindow(plugin);
+  if (session?.win) {
+    syncCompanionNativeState(plugin, session, options);
+    try { session.nativeWindow?.setAlwaysOnTop?.(state.alwaysOnTop); } catch {}
+    updatePinButton(plugin, session);
+  }
+  if (plugin?.state?.uiState?.studyMode) plugin.state.uiState.studyMode.alwaysOnTop = state.alwaysOnTop;
+  await persistCompanionState(plugin);
+  return state.alwaysOnTop;
 }
 
 async function setCompanionLocked(plugin, value) {
@@ -746,6 +893,11 @@ function registerCompanionNoteCommands(plugin) {
     callback: () => void setCompanionLocked(plugin, !companionWindowState(plugin).locked)
   });
   plugin.addCommand?.({
+    id: 'toggle-companion-note-always-on-top',
+    name: '切换学习笔记小窗置顶',
+    callback: () => void setCompanionAlwaysOnTop(plugin, !companionWindowState(plugin).alwaysOnTop)
+  });
+  plugin.addCommand?.({
     id: 'save-companion-note-layout',
     name: '保存当前学习笔记小窗布局',
     checkCallback: (checking) => {
@@ -782,9 +934,12 @@ module.exports = {
   registerCompanionNoteCommands,
   resolveCompanionNotePath,
   resolveLayout,
+  resolveNativeCompanionWindow,
   saveCurrentCompanionLayout,
+  setCompanionAlwaysOnTop,
   setCompanionLocked,
-  setCompanionScale
+  setCompanionScale,
+  syncCompanionNativeState
 };
 
 },
@@ -10391,6 +10546,9 @@ class ProjectNoteFolderPickerModal extends Modal {
   }
 
   onClose() {
+    this.studyDropEl?.remove?.();
+    this.studyDropEl = null;
+    this.dragSelection = null;
     this.contentEl.empty();
     if (!this.settled) {
       this.settled = true;
@@ -10430,6 +10588,25 @@ function rowButton(container, file, secondary, onClick) {
   body.createEl('strong', { text: noteDisplayName(file) });
   body.createEl('small', { text: secondary || file.path });
   row.addEventListener('click', () => void onClick());
+  return row;
+}
+
+function studyRowButton(container, file, secondary, onClick, options = {}) {
+  const row = rowButton(container, file, secondary, onClick);
+  row.addClass?.('go-study-study-note-row');
+  row.setAttribute?.('draggable', 'true');
+  row.addEventListener('dragstart', (event) => {
+    options.onDragStart?.({ file, note: options.note || null, row, event });
+    try {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(file?.path || ''));
+    } catch {}
+    row.addClass?.('is-dragging');
+  });
+  row.addEventListener('dragend', () => {
+    row.removeClass?.('is-dragging');
+    options.onDragEnd?.();
+  });
   return row;
 }
 
@@ -10533,6 +10710,113 @@ function installPickerUxStyles(plugin, doc = globalThis.document) {
   scrollbar-gutter: stable;
 }
 .rh-next-vault-picker-modal .rh-next-vault-path-quick { max-height: 86px; overflow: auto; scrollbar-gutter: stable; }
+
+.modal.go-study-study-note-picker-modal {
+  overflow: visible;
+}
+.go-study-study-note-row[draggable="true"] {
+  cursor: grab;
+}
+.go-study-study-note-row[draggable="true"]:active,
+.go-study-study-note-row.is-dragging {
+  cursor: grabbing;
+}
+.go-study-study-note-row.is-dragging {
+  opacity: .64;
+  transform: scale(.995);
+}
+.go-study-study-mode-drop-target {
+  position: absolute;
+  left: calc(100% + 16px);
+  top: 52%;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
+  width: 142px;
+  min-height: 104px;
+  padding: 13px 12px;
+  box-sizing: border-box;
+  border: 1px dashed color-mix(in srgb, var(--interactive-accent) 58%, var(--background-modifier-border));
+  border-radius: 12px;
+  color: var(--text-muted);
+  background:
+    radial-gradient(circle at 82% 22%, color-mix(in srgb, var(--interactive-accent) 10%, transparent), transparent 48%),
+    var(--background-secondary);
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
+  transform: translateY(-50%) rotate(.35deg);
+  transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease, background .14s ease;
+}
+.go-study-study-mode-drop-target.is-active {
+  border-color: var(--interactive-accent);
+  background:
+    radial-gradient(circle at 82% 22%, color-mix(in srgb, var(--interactive-accent) 24%, transparent), transparent 52%),
+    color-mix(in srgb, var(--background-secondary) 90%, var(--interactive-accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent), 0 14px 38px rgba(0,0,0,.24);
+  transform: translateY(-50%) rotate(0deg) scale(1.035);
+}
+.go-study-study-mode-drop-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  line-height: 1.22;
+  font-size: 12px;
+}
+.go-study-study-mode-drop-copy span {
+  color: var(--text-muted);
+}
+.go-study-study-mode-drop-copy strong {
+  margin-top: 3px;
+  color: var(--text-accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+.go-study-study-mode-doodle {
+  position: relative;
+  width: 48px;
+  height: 62px;
+  color: color-mix(in srgb, var(--text-normal) 82%, var(--interactive-accent));
+  transform: rotate(3deg);
+}
+.go-study-study-mode-note-icon {
+  position: absolute;
+  inset: 4px 2px auto auto;
+  width: 42px;
+  height: 42px;
+}
+.go-study-study-mode-note-icon svg {
+  width: 42px;
+  height: 42px;
+  stroke-width: 1.45;
+}
+.go-study-study-mode-hand-icon {
+  position: absolute;
+  right: 27px;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  color: var(--interactive-accent);
+  transform: rotate(-18deg);
+}
+.go-study-study-mode-hand-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.55;
+}
+@media (max-width: 1050px) {
+  .go-study-study-mode-drop-target {
+    left: auto;
+    right: 14px;
+    top: auto;
+    bottom: 56px;
+    width: 126px;
+    min-height: 92px;
+    transform: none;
+    opacity: .96;
+  }
+  .go-study-study-mode-drop-target.is-active { transform: scale(1.03); }
+}
 @media (max-width: 620px) {
   .modal.go-study-project-note-box-modal,
   .modal.go-study-study-note-picker-modal,
@@ -10709,6 +10993,8 @@ class StudyNotePickerModal extends Modal {
     this.query = '';
     this.settled = false;
     this.bodyEl = null;
+    this.dragSelection = null;
+    this.studyDropEl = null;
   }
 
   onOpen() {
@@ -10723,18 +11009,74 @@ class StudyNotePickerModal extends Modal {
     this.close();
   }
 
+  async resolveSelectedNote(note, file = null) {
+    let selected = note;
+    if (!selected && file) selected = linkProjectNote(this.plugin.state, this.projectId, file.path).note;
+    if (!selected) return null;
+    setRecentProjectNote(this.plugin.state, this.projectId, selected.id);
+    await this.plugin.persist?.();
+    return selected;
+  }
+
   async chooseNote(note, file = null) {
     try {
-      let selected = note;
-      if (!selected && file) selected = linkProjectNote(this.plugin.state, this.projectId, file.path).note;
-      if (!selected) return this.finish({ cancelled: false, note: null });
+      const selected = await this.resolveSelectedNote(note, file);
+      if (!selected) return this.finish({ cancelled: false, note: null, studyMode: false });
       const opened = await openProjectNote(this.plugin, selected, { prepareForStudy: true });
       if (!opened) return;
       await this.plugin.workbenchLeaf?.view?.render?.();
-      this.finish({ cancelled: false, note: selected });
+      this.finish({ cancelled: false, note: selected, studyMode: false });
     } catch (error) {
       new Notice(`打开学习笔记失败：${error instanceof Error ? error.message : String(error)}`, 5000);
     }
+  }
+
+  async chooseStudyMode(note, file = null) {
+    try {
+      const selected = await this.resolveSelectedNote(note, file);
+      if (!selected) return;
+      await this.plugin.workbenchLeaf?.view?.render?.();
+      this.finish({ cancelled: false, note: selected, studyMode: true });
+    } catch (error) {
+      new Notice(`进入学习模式失败：${error instanceof Error ? error.message : String(error)}`, 5000);
+    }
+  }
+
+  createStudyModeDropTarget() {
+    this.studyDropEl?.remove?.();
+    const target = this.modalEl.createDiv({ cls: 'go-study-study-mode-drop-target' });
+    target.setAttribute?.('aria-label', '拖入笔记，进入学习模式');
+
+    const copy = target.createDiv({ cls: 'go-study-study-mode-drop-copy' });
+    copy.createSpan({ text: '拖入' });
+    copy.createSpan({ text: '右侧小窗' });
+    copy.createEl('strong', { text: '学习模式' });
+
+    const doodle = target.createDiv({ cls: 'go-study-study-mode-doodle' });
+    const noteIcon = doodle.createSpan({ cls: 'go-study-study-mode-note-icon' });
+    const handIcon = doodle.createSpan({ cls: 'go-study-study-mode-hand-icon' });
+    try { setIcon(noteIcon, 'notebook-pen'); } catch {}
+    try { setIcon(handIcon, 'mouse-pointer-2'); } catch {}
+
+    const activate = (event) => {
+      event.preventDefault();
+      target.addClass?.('is-active');
+      try { event.dataTransfer.dropEffect = 'move'; } catch {}
+    };
+    target.addEventListener('dragenter', activate);
+    target.addEventListener('dragover', activate);
+    target.addEventListener('dragleave', (event) => {
+      if (!target.contains?.(event.relatedTarget)) target.removeClass?.('is-active');
+    });
+    target.addEventListener('drop', (event) => {
+      event.preventDefault();
+      target.removeClass?.('is-active');
+      const selection = this.dragSelection;
+      this.dragSelection = null;
+      if (selection?.file) void this.chooseStudyMode(selection.note, selection.file);
+    });
+    this.studyDropEl = target;
+    return target;
   }
 
   render() {
@@ -10747,6 +11089,7 @@ class StudyNotePickerModal extends Modal {
       placeholder: '搜索 Markdown…'
     });
     this.bodyEl = ui.body;
+    this.createStudyModeDropTarget();
     ui.search.value = this.query;
     ui.search.addEventListener('input', () => {
       this.query = ui.search.value;
@@ -10776,7 +11119,11 @@ class StudyNotePickerModal extends Modal {
       recentSection.createEl('strong', { cls: 'go-study-picker-section-title', text: '最近使用' });
       const list = recentSection.createDiv({ cls: 'rh-next-picker-list' });
       const file = resolveNoteFile(this.plugin, recent);
-      if (file) rowButton(list, file, `${recent.path} · 上次使用`, () => this.chooseNote(recent));
+      if (file) studyRowButton(list, file, `${recent.path} · 上次使用`, () => this.chooseNote(recent), {
+        note: recent,
+        onDragStart: (selection) => { this.dragSelection = selection; },
+        onDragEnd: () => { this.studyDropEl?.removeClass?.('is-active'); }
+      });
     }
 
     const projectSection = container.createDiv({ cls: 'go-study-picker-section' });
@@ -10786,7 +11133,11 @@ class StudyNotePickerModal extends Modal {
     if (!visible.length) list.createEl('p', { cls: 'rh-next-empty-inline', text: recent ? '没有其他项目笔记。输入上方搜索框可从整个 Vault 选择。' : '笔记盒还是空的。输入上方搜索框可从整个 Vault 选择。' });
     for (const note of visible) {
       const file = resolveNoteFile(this.plugin, note);
-      if (file) rowButton(list, file, note.path, () => this.chooseNote(note));
+      if (file) studyRowButton(list, file, note.path, () => this.chooseNote(note), {
+        note,
+        onDragStart: (selection) => { this.dragSelection = selection; },
+        onDragEnd: () => { this.studyDropEl?.removeClass?.('is-active'); }
+      });
     }
   }
 
@@ -10803,7 +11154,11 @@ class StudyNotePickerModal extends Modal {
     }
     for (const file of matches) {
       const linked = findProjectNoteByPath(this.plugin.state, this.projectId, file.path);
-      rowButton(results, file, linked ? `${file.path} · 已在笔记盒` : `${file.path} · 选择后加入笔记盒`, () => this.chooseNote(linked, file));
+      studyRowButton(results, file, linked ? `${file.path} · 已在笔记盒` : `${file.path} · 选择后加入笔记盒`, () => this.chooseNote(linked, file), {
+        note: linked,
+        onDragStart: (selection) => { this.dragSelection = selection; },
+        onDragEnd: () => { this.studyDropEl?.removeClass?.('is-active'); }
+      });
     }
   }
 
@@ -12919,6 +13274,7 @@ const { installFreeformBrowserModifier } = __rhLoad("freeform-link-ui.cjs");
 const { GoStudySettingsTab } = __rhLoad("product-settings-tab.cjs");
 const { currentProductSettings, ensureProductSettings } = __rhLoad("product-settings.cjs");
 const { registerCompanionNoteCommands } = __rhLoad("companion-note-window.cjs");
+const { enterStudyMode, exitStudyMode, studyModeState } = __rhLoad("study-mode.cjs");
 const { pruneStateBackups } = __rhLoad("release-hardening.cjs");
 const {
   clearProjectNoteFoldersOnDelete,
@@ -12977,8 +13333,20 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
 
     const choice = await chooseStudyNote(this, projectId, resource);
     if (choice?.cancelled) return false;
+
+    let enteredStudyMode = false;
+    if (choice?.studyMode && choice?.note) {
+      await enterStudyMode(this, { note: choice.note, resource, projectId });
+      enteredStudyMode = true;
+    } else if (studyModeState(this).active) {
+      await exitStudyMode(this, { closeCompanion: true });
+    }
+
     const opened = await super.openResourceAction(resource, actionType, target, options);
-    if (!opened) return false;
+    if (!opened) {
+      if (enteredStudyMode) await exitStudyMode(this, { closeCompanion: true });
+      return false;
+    }
 
     recordRecentStudy(this.state, projectId, resource.id, choice?.note?.id || '');
     await this.persist();
@@ -13074,6 +13442,126 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
 }
 
 module.exports = ResourceHubNextRuntimePlugin;
+
+},
+"study-mode.cjs": (module, exports, require) => {
+'use strict';
+
+const {
+  closeCompanionNoteWindow,
+  companionWindowState,
+  openCompanionNoteWindow,
+  setCompanionAlwaysOnTop,
+  setCompanionLocked
+} = __rhLoad("companion-note-window.cjs");
+
+function objectOr(value, fallback = {}) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : fallback;
+}
+
+function ensureStudyModeState(plugin) {
+  if (!plugin?.state) throw new Error('Go Study 状态不可用。');
+  plugin.state.uiState ||= {};
+  const raw = objectOr(plugin.state.uiState.studyMode);
+  Object.assign(raw, {
+    active: Boolean(raw.active),
+    notePath: String(raw.notePath || ''),
+    resourceId: String(raw.resourceId || ''),
+    projectId: String(raw.projectId || ''),
+    alwaysOnTop: raw.alwaysOnTop !== false,
+    enteredAt: String(raw.enteredAt || '')
+  });
+  plugin.state.uiState.studyMode = raw;
+  return raw;
+}
+
+function studyModeState(plugin) {
+  return ensureStudyModeState(plugin);
+}
+
+function notePathFrom(options = {}) {
+  return String(options.filePath || options.note?.path || '');
+}
+
+async function enterStudyMode(plugin, options = {}) {
+  const filePath = notePathFrom(options);
+  if (!filePath) throw new Error('进入学习模式前需要选择一篇 Markdown 笔记。');
+
+  const state = ensureStudyModeState(plugin);
+  state.active = true;
+  state.notePath = filePath;
+  state.resourceId = String(options.resource?.id || options.resourceId || '');
+  state.projectId = String(options.projectId || '');
+  state.alwaysOnTop = options.alwaysOnTop == null ? state.alwaysOnTop : Boolean(options.alwaysOnTop);
+  state.enteredAt = new Date().toISOString();
+
+  const companionState = companionWindowState(plugin);
+  companionState.locked = true;
+  companionState.alwaysOnTop = state.alwaysOnTop;
+  companionState.activeLayoutId = 'right-rail';
+
+  await plugin.persist?.();
+
+  try {
+    const result = await openCompanionNoteWindow(plugin, {
+      filePath,
+      locked: true,
+      layoutId: 'right-rail',
+      forceLayout: true,
+      alwaysOnTop: state.alwaysOnTop,
+      studyMode: true
+    });
+    await setCompanionLocked(plugin, true);
+    await setCompanionAlwaysOnTop(plugin, state.alwaysOnTop);
+    plugin._goStudyStudyMode = {
+      active: true,
+      notePath: filePath,
+      resourceId: state.resourceId,
+      projectId: state.projectId,
+      enteredAt: Date.now()
+    };
+    return { ...result, studyMode: true, alwaysOnTop: state.alwaysOnTop };
+  } catch (error) {
+    state.active = false;
+    state.notePath = '';
+    state.resourceId = '';
+    state.projectId = '';
+    state.enteredAt = '';
+    plugin._goStudyStudyMode = null;
+    await plugin.persist?.();
+    throw error;
+  }
+}
+
+async function exitStudyMode(plugin, options = {}) {
+  const state = ensureStudyModeState(plugin);
+  state.active = false;
+  state.notePath = '';
+  state.resourceId = '';
+  state.projectId = '';
+  state.enteredAt = '';
+  plugin._goStudyStudyMode = null;
+  if (options.closeCompanion) await closeCompanionNoteWindow(plugin, { persist: false });
+  await plugin.persist?.();
+  return true;
+}
+
+async function setStudyModeAlwaysOnTop(plugin, value) {
+  const state = ensureStudyModeState(plugin);
+  state.alwaysOnTop = Boolean(value);
+  companionWindowState(plugin).alwaysOnTop = state.alwaysOnTop;
+  await setCompanionAlwaysOnTop(plugin, state.alwaysOnTop);
+  await plugin.persist?.();
+  return state.alwaysOnTop;
+}
+
+module.exports = {
+  ensureStudyModeState,
+  enterStudyMode,
+  exitStudyMode,
+  setStudyModeAlwaysOnTop,
+  studyModeState
+};
 
 },
 "ui-fixes.cjs": (module, exports, require) => {
