@@ -78,6 +78,7 @@ function buildFreeformPositionMarkdown(media, position, options = {}) {
   const uri = buildFreeformReferenceUri({
     locator,
     name: freeformLocatorName(locator),
+    title: freeformMediaTitle(media),
     web: freeformWebLocator(media),
     position: normalized
   });
