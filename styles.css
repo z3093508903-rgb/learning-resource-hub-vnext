@@ -981,15 +981,13 @@ body.go-study-companion-window *::-webkit-scrollbar-thumb {
 }
 
 .go-study-floating-timeline {
-  position: absolute;
-  z-index: 24;
-  top: 12%;
-  right: 3px;
+  position: fixed;
+  z-index: 2147482000;
   width: 18px;
-  height: 72%;
   min-height: 220px;
   pointer-events: auto;
   color: var(--text-muted);
+  isolation: isolate;
   transition: width 140ms ease;
 }
 
@@ -1199,12 +1197,6 @@ button.go-study-timeline-item:focus-visible::before {
 .go-study-timeline-hint {
   padding-left: 10px;
   opacity: .72;
-}
-
-body.go-study-companion-window .go-study-floating-timeline {
-  top: 9%;
-  right: 1px;
-  height: 80%;
 }
 
 body.go-study-companion-window .go-study-floating-timeline:hover,
