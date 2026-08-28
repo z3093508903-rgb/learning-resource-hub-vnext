@@ -6,7 +6,9 @@ const assert = require('node:assert/strict');
 const {
   activateTimelineReference,
   extractGoStudyReferenceUris,
+  renderedReferenceUris,
   timelineGroupsFromMarkdown,
+  timelineGroupsFromView,
   timelineSummary
 } = require('../src/timeline-navigator.cjs');
 const {
@@ -90,4 +92,42 @@ test('ordinary timeline click reuses Go Study reference playback', async () => {
   const result = await activateTimelineReference(plugin, reference, {});
   assert.equal(result.transport, 'go-study');
   assert.deepEqual(plugin.lastReference, reference);
+});
+
+
+test('timeline falls back to rendered Obsidian links when editor/source text is unavailable', () => {
+  const plugin = pluginFixture();
+  const uri = buildReferenceUri({ resourceId: 'r1', position: { type: 'time', seconds: 16 }, version: 1 });
+  const anchor = {
+    getAttribute(name) { return name === 'href' ? uri : ''; }
+  };
+  const host = {
+    querySelectorAll(selector) {
+      assert.equal(selector, 'a[href^="obsidian://go-study"]');
+      return [anchor];
+    }
+  };
+  const view = {
+    containerEl: {
+      querySelector(selector) {
+        return selector === '.view-content' ? host : null;
+      }
+    }
+  };
+  assert.equal(renderedReferenceUris(view).length, 1);
+  const groups = timelineGroupsFromView(view, '', plugin);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].title, '学习摄影');
+  assert.equal(groups[0].items[0].time, '00:16');
+});
+
+test('timeline implementation mounts to document body so CodeMirror overflow cannot hide it', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'timeline-navigator.cjs'), 'utf8');
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'styles.css'), 'utf8');
+  assert.match(source, /const mount = doc\.body \|\| host/);
+  assert.match(source, /positionTimelineOverlay\(nav, host, doc\)/);
+  assert.match(css, /\.go-study-floating-timeline\s*\{[\s\S]*position:\s*fixed/);
+  assert.match(css, /z-index:\s*2147482000/);
 });

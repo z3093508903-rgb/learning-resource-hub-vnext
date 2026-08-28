@@ -13713,30 +13713,13 @@ function sourceForReference(plugin, reference) {
 }
 
 function timelineGroupsFromMarkdown(markdown, plugin) {
-  const groups = new Map();
-  for (const match of extractGoStudyReferenceUris(markdown)) {
-    let reference;
-    try { reference = parseReferenceUri(match.uri); }
-    catch { continue; }
-    const seconds = Number(reference?.position?.seconds);
-    if (!Number.isFinite(seconds) || seconds < 0) continue;
-    const source = sourceForReference(plugin, reference);
-    if (!source?.key) continue;
-    if (!groups.has(source.key)) groups.set(source.key, { ...source, firstIndex: match.index, items: [] });
-    groups.get(source.key).items.push({
-      uri: match.uri,
-      reference,
-      seconds,
-      time: formatPositionClock(reference.position),
-      index: match.index
-    });
-  }
-  return [...groups.values()]
-    .map((group) => ({
-      ...group,
-      items: group.items.sort((a, b) => a.seconds - b.seconds || a.index - b.index)
-    }))
-    .sort((a, b) => a.firstIndex - b.firstIndex);
+  return timelineGroupsFromMatches(extractGoStudyReferenceUris(markdown), plugin);
+}
+
+function timelineGroupsFromView(view, markdown, plugin) {
+  const fromMarkdown = timelineGroupsFromMarkdown(markdown, plugin);
+  if (timelineSummary(fromMarkdown).timestampCount) return fromMarkdown;
+  return timelineGroupsFromMatches(renderedReferenceUris(view), plugin);
 }
 
 function timelineSummary(groups) {
@@ -13778,10 +13761,46 @@ async function activateTimelineReference(plugin, reference, event = {}, options 
 }
 
 function markdownViewHost(view) {
-  return view?.contentEl
-    || view?.containerEl?.querySelector?.('.view-content')
+  return view?.containerEl?.querySelector?.('.view-content')
+    || view?.contentEl
     || view?.containerEl
     || null;
+}
+
+function renderedReferenceUris(view) {
+  const host = markdownViewHost(view);
+  const anchors = host?.querySelectorAll?.('a[href^="obsidian://go-study"]') || [];
+  return [...anchors].map((anchor, index) => ({
+    uri: String(anchor.getAttribute?.('href') || anchor.href || ''),
+    index
+  })).filter((entry) => entry.uri);
+}
+
+function timelineGroupsFromMatches(matches, plugin) {
+  const groups = new Map();
+  for (const match of matches || []) {
+    let reference;
+    try { reference = parseReferenceUri(match.uri); }
+    catch { continue; }
+    const seconds = Number(reference?.position?.seconds);
+    if (!Number.isFinite(seconds) || seconds < 0) continue;
+    const source = sourceForReference(plugin, reference);
+    if (!source?.key) continue;
+    if (!groups.has(source.key)) groups.set(source.key, { ...source, firstIndex: match.index, items: [] });
+    groups.get(source.key).items.push({
+      uri: match.uri,
+      reference,
+      seconds,
+      time: formatPositionClock(reference.position),
+      index: match.index
+    });
+  }
+  return [...groups.values()]
+    .map((group) => ({
+      ...group,
+      items: group.items.sort((a, b) => a.seconds - b.seconds || a.index - b.index)
+    }))
+    .sort((a, b) => a.firstIndex - b.firstIndex);
 }
 
 function markdownViewText(view) {
@@ -13792,10 +13811,19 @@ function markdownViewText(view) {
   return '';
 }
 
+function timelineOwnerId(view) {
+  const leafId = String(view?.leaf?.id || view?.containerEl?.dataset?.type || view?.file?.path || 'markdown');
+  return leafId.replace(/[^a-zA-Z0-9_-]+/g, '-').slice(0, 120);
+}
+
 function removeTimelineFromView(view) {
   const host = markdownViewHost(view);
+  const doc = host?.ownerDocument || view?.containerEl?.ownerDocument;
   host?.querySelectorAll?.('.go-study-floating-timeline').forEach?.((el) => el.remove?.());
   host?.classList?.remove?.('go-study-timeline-host');
+  const owner = timelineOwnerId(view);
+  doc?.querySelectorAll?.(`.go-study-floating-timeline[data-go-study-owner="${owner}"]`)
+    .forEach?.((el) => el.remove?.());
 }
 
 function element(doc, tag, cls, text = '') {
@@ -13803,6 +13831,30 @@ function element(doc, tag, cls, text = '') {
   if (cls) el.className = cls;
   if (text) el.textContent = text;
   return el;
+}
+
+function visibleRect(host) {
+  try {
+    const rect = host?.getBoundingClientRect?.();
+    if (!rect || rect.width < 40 || rect.height < 100) return null;
+    if (rect.bottom <= 0 || rect.right <= 0) return null;
+    return rect;
+  } catch {
+    return null;
+  }
+}
+
+function positionTimelineOverlay(nav, host, doc) {
+  const rect = visibleRect(host);
+  const viewportWidth = Number(doc?.documentElement?.clientWidth || doc?.defaultView?.innerWidth || 0);
+  if (!rect || !viewportWidth) return false;
+  const top = Math.max(42, rect.top + Math.max(24, rect.height * 0.1));
+  const height = Math.max(220, Math.min(rect.height * 0.76, rect.height - 54));
+  const right = Math.max(2, viewportWidth - rect.right + 3);
+  nav.style.top = `${Math.round(top)}px`;
+  nav.style.right = `${Math.round(right)}px`;
+  nav.style.height = `${Math.round(height)}px`;
+  return true;
 }
 
 function renderTimelineIntoView(plugin, view, groups) {
@@ -13816,7 +13868,9 @@ function renderTimelineIntoView(plugin, view, groups) {
 
   host.classList?.add?.('go-study-timeline-host');
   const nav = element(doc, 'div', 'go-study-floating-timeline');
+  nav.dataset.goStudyOwner = timelineOwnerId(view);
   nav.setAttribute('aria-label', `Go Study 悬浮时间线 · ${summary.sourceCount} 个来源 · ${summary.timestampCount} 个时间点`);
+  nav.setAttribute('data-go-study-timeline-ready', 'true');
 
   const rail = element(doc, 'div', 'go-study-timeline-rail');
   const flattened = groups.flatMap((group) => group.items.map((item) => ({ group, item })));
@@ -13861,7 +13915,15 @@ function renderTimelineIntoView(plugin, view, groups) {
   const hint = element(doc, 'div', 'go-study-timeline-hint', '点击跳转 · Ctrl 点击网页');
   hover.appendChild(hint);
   nav.appendChild(hover);
-  host.appendChild(nav);
+
+  // Mount to the owning window document rather than inside CodeMirror/preview.
+  // This avoids Obsidian view overflow/stacking contexts hiding the rail.
+  const mount = doc.body || host;
+  mount.appendChild(nav);
+  if (!positionTimelineOverlay(nav, host, doc)) {
+    nav.remove?.();
+    return null;
+  }
   return nav;
 }
 
@@ -13882,7 +13944,7 @@ async function refreshTimelineView(plugin, view) {
     return [];
   }
   const markdown = await markdownTextForView(plugin, view);
-  const groups = timelineGroupsFromMarkdown(markdown, plugin);
+  const groups = timelineGroupsFromView(view, markdown, plugin);
   renderTimelineIntoView(plugin, view, groups);
   return groups;
 }
@@ -13906,6 +13968,7 @@ async function refreshTimelineNavigator(plugin) {
 function installTimelineNavigator(plugin) {
   const manager = {
     timer: null,
+    observers: [],
     schedule(delay = 70) {
       if (this.timer) clearTimeout(this.timer);
       this.timer = setTimeout(() => {
@@ -13917,6 +13980,9 @@ function installTimelineNavigator(plugin) {
     destroy() {
       if (this.timer) clearTimeout(this.timer);
       this.timer = null;
+      for (const stop of this.observers.splice(0)) {
+        try { stop(); } catch {}
+      }
       for (const leaf of markdownLeaves(plugin)) removeTimelineFromView(leaf?.view);
     }
   };
@@ -13936,6 +14002,21 @@ function installTimelineNavigator(plugin) {
       if (ref) plugin.registerEvent?.(ref);
     } catch {}
   }
+
+  const docs = new Set(markdownLeaves(plugin).map((leaf) => markdownViewHost(leaf?.view)?.ownerDocument).filter(Boolean));
+  for (const doc of docs) {
+    const win = doc.defaultView;
+    const onViewport = () => manager.schedule(0);
+    try {
+      win?.addEventListener?.('resize', onViewport, { passive: true });
+      doc?.addEventListener?.('scroll', onViewport, true);
+      manager.observers.push(() => {
+        win?.removeEventListener?.('resize', onViewport);
+        doc?.removeEventListener?.('scroll', onViewport, true);
+      });
+    } catch {}
+  }
+
   plugin.register?.(() => manager.destroy());
   manager.schedule(0);
   return manager;
@@ -13950,10 +14031,13 @@ module.exports = {
   installTimelineNavigator,
   managedSource,
   markdownViewText,
+  renderedReferenceUris,
   refreshTimelineNavigator,
   renderTimelineIntoView,
   sourceForReference,
   timelineGroupsFromMarkdown,
+  timelineGroupsFromMatches,
+  timelineGroupsFromView,
   timelineSummary
 };
 
