@@ -71,3 +71,20 @@ test('project note paths reuse the existing Vault rename/delete/create lifecycle
   assert.match(runtimeSource, /updateProjectNoteFoldersOnRename/);
   assert.match(runtimeSource, /clearProjectNoteFoldersOnDelete/);
 });
+
+
+test('study launch picker exposes drag-to-study-mode without changing normal click selection', () => {
+  assert.match(uiSource, /go-study-study-mode-drop-target/);
+  assert.match(uiSource, /拖入/);
+  assert.match(uiSource, /右侧小窗/);
+  assert.match(uiSource, /学习模式/);
+  assert.match(uiSource, /draggable/);
+  assert.match(uiSource, /chooseStudyMode/);
+  assert.match(uiSource, /studyMode: true/);
+  assert.match(uiSource, /studyMode: false/);
+});
+
+test('search results and project notes share the same draggable study-mode entry', () => {
+  const occurrences = (uiSource.match(/studyRowButton\(/g) || []).length;
+  assert.ok(occurrences >= 4);
+});

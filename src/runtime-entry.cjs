@@ -10,6 +10,7 @@ const { installFreeformBrowserModifier } = require('./freeform-link-ui.cjs');
 const { GoStudySettingsTab } = require('./product-settings-tab.cjs');
 const { currentProductSettings, ensureProductSettings } = require('./product-settings.cjs');
 const { registerCompanionNoteCommands } = require('./companion-note-window.cjs');
+const { enterStudyMode, exitStudyMode, studyModeState } = require('./study-mode.cjs');
 const { pruneStateBackups } = require('./release-hardening.cjs');
 const {
   clearProjectNoteFoldersOnDelete,
@@ -68,8 +69,20 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
 
     const choice = await chooseStudyNote(this, projectId, resource);
     if (choice?.cancelled) return false;
+
+    let enteredStudyMode = false;
+    if (choice?.studyMode && choice?.note) {
+      await enterStudyMode(this, { note: choice.note, resource, projectId });
+      enteredStudyMode = true;
+    } else if (studyModeState(this).active) {
+      await exitStudyMode(this, { closeCompanion: true });
+    }
+
     const opened = await super.openResourceAction(resource, actionType, target, options);
-    if (!opened) return false;
+    if (!opened) {
+      if (enteredStudyMode) await exitStudyMode(this, { closeCompanion: true });
+      return false;
+    }
 
     recordRecentStudy(this.state, projectId, resource.id, choice?.note?.id || '');
     await this.persist();

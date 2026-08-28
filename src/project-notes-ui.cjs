@@ -255,6 +255,9 @@ class ProjectNoteFolderPickerModal extends Modal {
   }
 
   onClose() {
+    this.studyDropEl?.remove?.();
+    this.studyDropEl = null;
+    this.dragSelection = null;
     this.contentEl.empty();
     if (!this.settled) {
       this.settled = true;
@@ -294,6 +297,25 @@ function rowButton(container, file, secondary, onClick) {
   body.createEl('strong', { text: noteDisplayName(file) });
   body.createEl('small', { text: secondary || file.path });
   row.addEventListener('click', () => void onClick());
+  return row;
+}
+
+function studyRowButton(container, file, secondary, onClick, options = {}) {
+  const row = rowButton(container, file, secondary, onClick);
+  row.addClass?.('go-study-study-note-row');
+  row.setAttribute?.('draggable', 'true');
+  row.addEventListener('dragstart', (event) => {
+    options.onDragStart?.({ file, note: options.note || null, row, event });
+    try {
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(file?.path || ''));
+    } catch {}
+    row.addClass?.('is-dragging');
+  });
+  row.addEventListener('dragend', () => {
+    row.removeClass?.('is-dragging');
+    options.onDragEnd?.();
+  });
   return row;
 }
 
@@ -397,6 +419,113 @@ function installPickerUxStyles(plugin, doc = globalThis.document) {
   scrollbar-gutter: stable;
 }
 .rh-next-vault-picker-modal .rh-next-vault-path-quick { max-height: 86px; overflow: auto; scrollbar-gutter: stable; }
+
+.modal.go-study-study-note-picker-modal {
+  overflow: visible;
+}
+.go-study-study-note-row[draggable="true"] {
+  cursor: grab;
+}
+.go-study-study-note-row[draggable="true"]:active,
+.go-study-study-note-row.is-dragging {
+  cursor: grabbing;
+}
+.go-study-study-note-row.is-dragging {
+  opacity: .64;
+  transform: scale(.995);
+}
+.go-study-study-mode-drop-target {
+  position: absolute;
+  left: calc(100% + 16px);
+  top: 52%;
+  z-index: 12;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 52px;
+  align-items: center;
+  gap: 8px;
+  width: 142px;
+  min-height: 104px;
+  padding: 13px 12px;
+  box-sizing: border-box;
+  border: 1px dashed color-mix(in srgb, var(--interactive-accent) 58%, var(--background-modifier-border));
+  border-radius: 12px;
+  color: var(--text-muted);
+  background:
+    radial-gradient(circle at 82% 22%, color-mix(in srgb, var(--interactive-accent) 10%, transparent), transparent 48%),
+    var(--background-secondary);
+  box-shadow: 0 10px 30px rgba(0,0,0,.18);
+  transform: translateY(-50%) rotate(.35deg);
+  transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease, background .14s ease;
+}
+.go-study-study-mode-drop-target.is-active {
+  border-color: var(--interactive-accent);
+  background:
+    radial-gradient(circle at 82% 22%, color-mix(in srgb, var(--interactive-accent) 24%, transparent), transparent 52%),
+    color-mix(in srgb, var(--background-secondary) 90%, var(--interactive-accent));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--interactive-accent) 18%, transparent), 0 14px 38px rgba(0,0,0,.24);
+  transform: translateY(-50%) rotate(0deg) scale(1.035);
+}
+.go-study-study-mode-drop-copy {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  line-height: 1.22;
+  font-size: 12px;
+}
+.go-study-study-mode-drop-copy span {
+  color: var(--text-muted);
+}
+.go-study-study-mode-drop-copy strong {
+  margin-top: 3px;
+  color: var(--text-accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+.go-study-study-mode-doodle {
+  position: relative;
+  width: 48px;
+  height: 62px;
+  color: color-mix(in srgb, var(--text-normal) 82%, var(--interactive-accent));
+  transform: rotate(3deg);
+}
+.go-study-study-mode-note-icon {
+  position: absolute;
+  inset: 4px 2px auto auto;
+  width: 42px;
+  height: 42px;
+}
+.go-study-study-mode-note-icon svg {
+  width: 42px;
+  height: 42px;
+  stroke-width: 1.45;
+}
+.go-study-study-mode-hand-icon {
+  position: absolute;
+  right: 27px;
+  bottom: 0;
+  width: 22px;
+  height: 22px;
+  color: var(--interactive-accent);
+  transform: rotate(-18deg);
+}
+.go-study-study-mode-hand-icon svg {
+  width: 22px;
+  height: 22px;
+  stroke-width: 1.55;
+}
+@media (max-width: 1050px) {
+  .go-study-study-mode-drop-target {
+    left: auto;
+    right: 14px;
+    top: auto;
+    bottom: 56px;
+    width: 126px;
+    min-height: 92px;
+    transform: none;
+    opacity: .96;
+  }
+  .go-study-study-mode-drop-target.is-active { transform: scale(1.03); }
+}
 @media (max-width: 620px) {
   .modal.go-study-project-note-box-modal,
   .modal.go-study-study-note-picker-modal,
@@ -573,6 +702,8 @@ class StudyNotePickerModal extends Modal {
     this.query = '';
     this.settled = false;
     this.bodyEl = null;
+    this.dragSelection = null;
+    this.studyDropEl = null;
   }
 
   onOpen() {
@@ -587,18 +718,74 @@ class StudyNotePickerModal extends Modal {
     this.close();
   }
 
+  async resolveSelectedNote(note, file = null) {
+    let selected = note;
+    if (!selected && file) selected = linkProjectNote(this.plugin.state, this.projectId, file.path).note;
+    if (!selected) return null;
+    setRecentProjectNote(this.plugin.state, this.projectId, selected.id);
+    await this.plugin.persist?.();
+    return selected;
+  }
+
   async chooseNote(note, file = null) {
     try {
-      let selected = note;
-      if (!selected && file) selected = linkProjectNote(this.plugin.state, this.projectId, file.path).note;
-      if (!selected) return this.finish({ cancelled: false, note: null });
+      const selected = await this.resolveSelectedNote(note, file);
+      if (!selected) return this.finish({ cancelled: false, note: null, studyMode: false });
       const opened = await openProjectNote(this.plugin, selected, { prepareForStudy: true });
       if (!opened) return;
       await this.plugin.workbenchLeaf?.view?.render?.();
-      this.finish({ cancelled: false, note: selected });
+      this.finish({ cancelled: false, note: selected, studyMode: false });
     } catch (error) {
       new Notice(`打开学习笔记失败：${error instanceof Error ? error.message : String(error)}`, 5000);
     }
+  }
+
+  async chooseStudyMode(note, file = null) {
+    try {
+      const selected = await this.resolveSelectedNote(note, file);
+      if (!selected) return;
+      await this.plugin.workbenchLeaf?.view?.render?.();
+      this.finish({ cancelled: false, note: selected, studyMode: true });
+    } catch (error) {
+      new Notice(`进入学习模式失败：${error instanceof Error ? error.message : String(error)}`, 5000);
+    }
+  }
+
+  createStudyModeDropTarget() {
+    this.studyDropEl?.remove?.();
+    const target = this.modalEl.createDiv({ cls: 'go-study-study-mode-drop-target' });
+    target.setAttribute?.('aria-label', '拖入笔记，进入学习模式');
+
+    const copy = target.createDiv({ cls: 'go-study-study-mode-drop-copy' });
+    copy.createSpan({ text: '拖入' });
+    copy.createSpan({ text: '右侧小窗' });
+    copy.createEl('strong', { text: '学习模式' });
+
+    const doodle = target.createDiv({ cls: 'go-study-study-mode-doodle' });
+    const noteIcon = doodle.createSpan({ cls: 'go-study-study-mode-note-icon' });
+    const handIcon = doodle.createSpan({ cls: 'go-study-study-mode-hand-icon' });
+    try { setIcon(noteIcon, 'notebook-pen'); } catch {}
+    try { setIcon(handIcon, 'mouse-pointer-2'); } catch {}
+
+    const activate = (event) => {
+      event.preventDefault();
+      target.addClass?.('is-active');
+      try { event.dataTransfer.dropEffect = 'move'; } catch {}
+    };
+    target.addEventListener('dragenter', activate);
+    target.addEventListener('dragover', activate);
+    target.addEventListener('dragleave', (event) => {
+      if (!target.contains?.(event.relatedTarget)) target.removeClass?.('is-active');
+    });
+    target.addEventListener('drop', (event) => {
+      event.preventDefault();
+      target.removeClass?.('is-active');
+      const selection = this.dragSelection;
+      this.dragSelection = null;
+      if (selection?.file) void this.chooseStudyMode(selection.note, selection.file);
+    });
+    this.studyDropEl = target;
+    return target;
   }
 
   render() {
@@ -611,6 +798,7 @@ class StudyNotePickerModal extends Modal {
       placeholder: '搜索 Markdown…'
     });
     this.bodyEl = ui.body;
+    this.createStudyModeDropTarget();
     ui.search.value = this.query;
     ui.search.addEventListener('input', () => {
       this.query = ui.search.value;
@@ -640,7 +828,11 @@ class StudyNotePickerModal extends Modal {
       recentSection.createEl('strong', { cls: 'go-study-picker-section-title', text: '最近使用' });
       const list = recentSection.createDiv({ cls: 'rh-next-picker-list' });
       const file = resolveNoteFile(this.plugin, recent);
-      if (file) rowButton(list, file, `${recent.path} · 上次使用`, () => this.chooseNote(recent));
+      if (file) studyRowButton(list, file, `${recent.path} · 上次使用`, () => this.chooseNote(recent), {
+        note: recent,
+        onDragStart: (selection) => { this.dragSelection = selection; },
+        onDragEnd: () => { this.studyDropEl?.removeClass?.('is-active'); }
+      });
     }
 
     const projectSection = container.createDiv({ cls: 'go-study-picker-section' });
@@ -650,7 +842,11 @@ class StudyNotePickerModal extends Modal {
     if (!visible.length) list.createEl('p', { cls: 'rh-next-empty-inline', text: recent ? '没有其他项目笔记。输入上方搜索框可从整个 Vault 选择。' : '笔记盒还是空的。输入上方搜索框可从整个 Vault 选择。' });
     for (const note of visible) {
       const file = resolveNoteFile(this.plugin, note);
-      if (file) rowButton(list, file, note.path, () => this.chooseNote(note));
+      if (file) studyRowButton(list, file, note.path, () => this.chooseNote(note), {
+        note,
+        onDragStart: (selection) => { this.dragSelection = selection; },
+        onDragEnd: () => { this.studyDropEl?.removeClass?.('is-active'); }
+      });
     }
   }
 
@@ -667,7 +863,11 @@ class StudyNotePickerModal extends Modal {
     }
     for (const file of matches) {
       const linked = findProjectNoteByPath(this.plugin.state, this.projectId, file.path);
-      rowButton(results, file, linked ? `${file.path} · 已在笔记盒` : `${file.path} · 选择后加入笔记盒`, () => this.chooseNote(linked, file));
+      studyRowButton(results, file, linked ? `${file.path} · 已在笔记盒` : `${file.path} · 选择后加入笔记盒`, () => this.chooseNote(linked, file), {
+        note: linked,
+        onDragStart: (selection) => { this.dragSelection = selection; },
+        onDragEnd: () => { this.studyDropEl?.removeClass?.('is-active'); }
+      });
     }
   }
 

@@ -12,7 +12,8 @@ const {
   listCompanionLayouts,
   normalizeCompanionScale,
   openCompanionNoteWindow,
-  saveCurrentCompanionLayout
+  saveCurrentCompanionLayout,
+  setCompanionAlwaysOnTop
 } = require('../src/companion-note-window.cjs');
 
 function fakeClassList() {
@@ -167,4 +168,35 @@ test('applying a saved layout updates state and live window geometry', async () 
   assert.equal(win.outerWidth, 420);
   assert.equal(win.outerHeight, 780);
   assert.equal(companionWindowState(plugin).scale, 0.9);
+});
+
+
+test('companion defaults to topmost, keeps a short note-only title, and can unpin', async () => {
+  const { plugin, file, win } = pluginFixture();
+  const calls = [];
+  const nativeWindow = {
+    title: 'old title',
+    getBounds() {
+      return { x: win.screenX, y: win.screenY, width: win.outerWidth, height: win.outerHeight };
+    },
+    getTitle() { return this.title; },
+    setTitle(value) { this.title = value; calls.push(['title', value]); },
+    setAlwaysOnTop(value) { calls.push(['top', value]); }
+  };
+
+  const result = await openCompanionNoteWindow(plugin, {
+    filePath: file.path,
+    workArea: { x: 0, y: 0, width: 1600, height: 900 },
+    forceLayout: true,
+    nativeWindow
+  });
+
+  assert.equal(result.alwaysOnTop, true);
+  assert.equal(win.document.title, 'Course');
+  assert.equal(nativeWindow.title, 'Course');
+  assert.ok(calls.some(([kind, value]) => kind === 'top' && value === true));
+
+  await setCompanionAlwaysOnTop(plugin, false, { nativeWindow });
+  assert.equal(plugin.state.uiState.companionNoteWindow.alwaysOnTop, false);
+  assert.ok(calls.some(([kind, value]) => kind === 'top' && value === false));
 });
