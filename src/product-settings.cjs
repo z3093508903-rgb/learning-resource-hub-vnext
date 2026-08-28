@@ -18,7 +18,7 @@ const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   captureFolder: 'GoStudy/Captures',
   backupRetention: 10,
   timeDisplayFormat: 'smart',
-  backlinkTemplate: '[↗ {title} · {time}]({uri})',
+  backlinkTemplate: '[{time}]({uri})',
   noteTemplate: '{note}\n\n{backlink}',
   captureTemplate: '{image}\n\n{backlink}',
   captureNoteTemplate: '{image}\n\n{note}\n\n{backlink}',
@@ -125,6 +125,14 @@ function safeOutputTemplate(key, value) {
   catch { return DEFAULT_PRODUCT_SETTINGS[key]; }
 }
 
+const LEGACY_DEFAULT_BACKLINK_TEMPLATE = '[↗ {title} · {time}]({uri})';
+
+function normalizedBacklinkTemplate(value) {
+  const raw = String(value ?? '');
+  if (raw === LEGACY_DEFAULT_BACKLINK_TEMPLATE) return DEFAULT_PRODUCT_SETTINGS.backlinkTemplate;
+  return safeOutputTemplate('backlinkTemplate', raw || DEFAULT_PRODUCT_SETTINGS.backlinkTemplate);
+}
+
 function currentProductSettings(plugin) {
   const ui = plugin?.state?.uiState || {};
   let captureFolder = DEFAULT_PRODUCT_SETTINGS.captureFolder;
@@ -152,7 +160,7 @@ function currentProductSettings(plugin) {
     captureFolder,
     backupRetention: clampInteger(ui.backupRetention, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention),
     timeDisplayFormat: normalizeTimeDisplayFormat(ui.timeDisplayFormat),
-    backlinkTemplate: safeOutputTemplate('backlinkTemplate', ui.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate),
+    backlinkTemplate: normalizedBacklinkTemplate(ui.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate),
     noteTemplate: safeOutputTemplate('noteTemplate', ui.noteTemplate ?? DEFAULT_PRODUCT_SETTINGS.noteTemplate),
     captureTemplate: safeOutputTemplate('captureTemplate', ui.captureTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureTemplate),
     captureNoteTemplate: safeOutputTemplate('captureNoteTemplate', ui.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate),
@@ -209,6 +217,7 @@ async function resetOutputTemplates(plugin) {
 
 module.exports = {
   DEFAULT_PRODUCT_SETTINGS,
+  LEGACY_DEFAULT_BACKLINK_TEMPLATE,
   TEMPLATE_RULES,
   clampInteger,
   currentProductSettings,
@@ -217,6 +226,7 @@ module.exports = {
   normalizeActionHudShortcut,
   normalizeCaptureFolder,
   normalizeOutputTemplate,
+  normalizedBacklinkTemplate,
   normalizeShortcutMode,
   normalizeTimeDisplayFormat,
   outputTemplateTokens,

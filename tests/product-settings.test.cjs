@@ -7,6 +7,7 @@ const {
   DEFAULT_PRODUCT_SETTINGS,
   currentProductSettings,
   ensureProductSettings,
+  LEGACY_DEFAULT_BACKLINK_TEMPLATE,
   normalizeCaptureFolder,
   normalizeOutputTemplate,
   resetOutputTemplates,
@@ -130,4 +131,16 @@ test('HUD mode, delay and direction recipes normalize safely', async () => {
     down: 'time',
     center: 'all'
   });
+});
+
+
+test('legacy default backlink presentation migrates to timestamp-only without overwriting custom templates', () => {
+  const legacyPlugin = { state: { uiState: { backlinkTemplate: LEGACY_DEFAULT_BACKLINK_TEMPLATE } } };
+  const migrated = ensureProductSettings(legacyPlugin);
+  assert.equal(migrated.changed, true);
+  assert.equal(legacyPlugin.state.uiState.backlinkTemplate, '[{time}]({uri})');
+
+  const customPlugin = { state: { uiState: { backlinkTemplate: '🎬 [{time}]({uri}) · {title}' } } };
+  const custom = currentProductSettings(customPlugin);
+  assert.equal(custom.backlinkTemplate, '🎬 [{time}]({uri}) · {title}');
 });

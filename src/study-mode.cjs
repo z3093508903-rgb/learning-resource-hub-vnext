@@ -16,11 +16,18 @@ function ensureStudyModeState(plugin) {
   if (!plugin?.state) throw new Error('Go Study 状态不可用。');
   plugin.state.uiState ||= {};
   const raw = objectOr(plugin.state.uiState.studyMode);
+  const media = objectOr(raw.freeformMedia);
   Object.assign(raw, {
     active: Boolean(raw.active),
+    mode: ['managed', 'freeform', 'note'].includes(String(raw.mode || '')) ? String(raw.mode) : 'note',
     notePath: String(raw.notePath || ''),
     resourceId: String(raw.resourceId || ''),
     projectId: String(raw.projectId || ''),
+    freeformMedia: media.path ? {
+      path: String(media.path || ''),
+      title: String(media.title || ''),
+      positionSeconds: Number.isFinite(Number(media.positionSeconds)) ? Number(media.positionSeconds) : 0
+    } : null,
     alwaysOnTop: raw.alwaysOnTop !== false,
     enteredAt: String(raw.enteredAt || '')
   });
@@ -41,10 +48,17 @@ async function enterStudyMode(plugin, options = {}) {
   if (!filePath) throw new Error('进入学习模式前需要选择一篇 Markdown 笔记。');
 
   const state = ensureStudyModeState(plugin);
+  const freeformMedia = objectOr(options.freeformMedia, null);
   state.active = true;
   state.notePath = filePath;
   state.resourceId = String(options.resource?.id || options.resourceId || '');
   state.projectId = String(options.projectId || '');
+  state.mode = state.resourceId ? 'managed' : freeformMedia?.path ? 'freeform' : 'note';
+  state.freeformMedia = freeformMedia?.path ? {
+    path: String(freeformMedia.path || ''),
+    title: String(freeformMedia.title || ''),
+    positionSeconds: Number.isFinite(Number(freeformMedia.positionSeconds)) ? Number(freeformMedia.positionSeconds) : 0
+  } : null;
   state.alwaysOnTop = options.alwaysOnTop == null ? state.alwaysOnTop : Boolean(options.alwaysOnTop);
   state.enteredAt = new Date().toISOString();
 
@@ -69,16 +83,20 @@ async function enterStudyMode(plugin, options = {}) {
     plugin._goStudyStudyMode = {
       active: true,
       notePath: filePath,
+      mode: state.mode,
       resourceId: state.resourceId,
       projectId: state.projectId,
+      freeformMedia: state.freeformMedia ? { ...state.freeformMedia } : null,
       enteredAt: Date.now()
     };
     return { ...result, studyMode: true, alwaysOnTop: state.alwaysOnTop };
   } catch (error) {
     state.active = false;
+    state.mode = 'note';
     state.notePath = '';
     state.resourceId = '';
     state.projectId = '';
+    state.freeformMedia = null;
     state.enteredAt = '';
     plugin._goStudyStudyMode = null;
     await plugin.persist?.();
@@ -89,9 +107,11 @@ async function enterStudyMode(plugin, options = {}) {
 async function exitStudyMode(plugin, options = {}) {
   const state = ensureStudyModeState(plugin);
   state.active = false;
+  state.mode = 'note';
   state.notePath = '';
   state.resourceId = '';
   state.projectId = '';
+  state.freeformMedia = null;
   state.enteredAt = '';
   plugin._goStudyStudyMode = null;
   if (options.closeCompanion) await closeCompanionNoteWindow(plugin, { persist: false });

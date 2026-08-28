@@ -350,11 +350,12 @@ function renderTimelineIntoView(plugin, view, groups) {
   nav.setAttribute('data-go-study-timeline-ready', 'true');
 
   const rail = element(doc, 'div', 'go-study-timeline-rail');
-  const flattened = groups.flatMap((group) => group.items.map((item) => ({ group, item })));
-  flattened.slice(0, 18).forEach(({ group }, index) => {
+  const sourceNodes = groups.slice(0, 18);
+  sourceNodes.forEach((group, index) => {
     const node = element(doc, 'span', 'go-study-timeline-node');
-    node.style.setProperty('--go-study-node-y', `${((index + 1) / (Math.min(flattened.length, 18) + 1)) * 100}%`);
+    node.style.setProperty('--go-study-node-y', `${((index + 1) / (sourceNodes.length + 1)) * 100}%`);
     node.dataset.sourceKind = group.kind;
+    node.dataset.sourceKey = group.key;
     rail.appendChild(node);
   });
   nav.appendChild(rail);

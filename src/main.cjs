@@ -1685,8 +1685,14 @@ class ResourceHubNextView extends ItemView {
       if (recentCollapsed) return;
       const recentList = parent.createDiv({ cls: 'rh-next-project-file-list is-recent' });
       for (const entry of recent.slice(0, 3)) {
-        const row = recentList.createDiv({ cls: 'rh-next-project-file-row is-recent' });
-        const icon = row.createSpan({ cls: 'rh-next-project-file-icon' }); setIcon(icon, this.plugin.vaultFileKind(entry) === 'canvas' ? 'layout-dashboard' : 'file-text');
+        const recentKind = this.plugin.vaultFileKind(entry);
+        const row = recentList.createDiv({
+          cls: 'rh-next-project-file-row is-recent',
+          attr: recentKind === 'markdown'
+            ? { draggable: 'true', 'data-go-study-study-note-path': entry.path, 'data-go-study-study-project-id': project.id }
+            : {}
+        });
+        const icon = row.createSpan({ cls: 'rh-next-project-file-icon' }); setIcon(icon, recentKind === 'canvas' ? 'layout-dashboard' : 'file-text');
         const copy = row.createDiv({ cls: 'rh-next-project-file-copy' }); copy.createSpan({ text: entry.name || entry.path.split('/').pop() });
         copy.createEl('small', { text: `${entry.path} · ${new Date(entry.stat.mtime).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` });
         row.addEventListener('click', () => void this.plugin.openVaultEntry(entry));
@@ -1744,7 +1750,18 @@ class ResourceHubNextView extends ItemView {
     const folder = ref.entryType === 'folder';
     this.expandedProjectVaultFolders ||= new Set();
     const expanded = folder && this.expandedProjectVaultFolders.has(ref.path);
-    const row = parent.createDiv({ cls: `rh-next-project-file-row ${missing ? 'is-missing' : ''}`, attr: { 'data-depth': String(depth) } });
+    const draggableStudyNote = !missing && ref.entryType === 'file' && ref.fileKind === 'markdown';
+    const row = parent.createDiv({
+      cls: `rh-next-project-file-row ${missing ? 'is-missing' : ''}`,
+      attr: {
+        'data-depth': String(depth),
+        ...(draggableStudyNote ? {
+          draggable: 'true',
+          'data-go-study-study-note-path': ref.path,
+          'data-go-study-study-project-id': project.id
+        } : {})
+      }
+    });
     row.style.setProperty('--rh-file-depth', String(depth));
     const disclosure = row.createSpan({ cls: 'rh-next-project-file-disclosure' });
     if (folder && !missing) setIcon(disclosure, expanded ? 'chevron-down' : 'chevron-right');

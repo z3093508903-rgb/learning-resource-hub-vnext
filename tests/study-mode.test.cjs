@@ -30,3 +30,11 @@ test('closing the companion exits Study Mode without owning player shutdown', ()
   assert.match(companionSource, /studyMode\.resourceId = ''/);
   assert.doesNotMatch(source, /kill|taskkill|closePotPlayer|stopPotPlayer/i);
 });
+
+
+test('Study Mode can bind a current loose PotPlayer video without turning it into a permanent Resource', () => {
+  assert.match(source, /state\.mode = state\.resourceId \? 'managed' : freeformMedia\?\.path \? 'freeform' : 'note'/);
+  assert.match(source, /state\.freeformMedia = freeformMedia\?\.path/);
+  assert.match(source, /path: String\(freeformMedia\.path/);
+  assert.doesNotMatch(source, /createResource|addInboxResource|linkResource/i);
+});

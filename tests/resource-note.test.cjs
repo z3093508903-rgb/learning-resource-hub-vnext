@@ -21,7 +21,7 @@ const {
 test('position markdown uses the permanent Go Study URI and readable clock', () => {
   const resource = { id: 'resource-123', title: '高等数学 [极限]' };
   const markdown = buildPositionMarkdown(resource, { type: 'time', seconds: 5076.9 });
-  assert.ok(markdown.startsWith('[↗ 高等数学 \\[极限\\] · 01:24:36](obsidian://go-study?'));
+  assert.ok(markdown.startsWith('[01:24:36](obsidian://go-study?'));
   const uri = markdown.slice(markdown.indexOf('(') + 1, -1);
   const parsed = parseReferenceUri(uri);
   assert.equal(parsed.resourceId, 'resource-123');
@@ -31,21 +31,21 @@ test('position markdown uses the permanent Go Study URI and readable clock', () 
 test('capture markdown combines a Vault image embed with the same permanent resource backlink', () => {
   const resource = { id: 'resource-123', title: '高数' };
   const markdown = buildCaptureMarkdown(resource, { type: 'time', seconds: 65 }, 'GoStudy/Captures/高数-01-05.png');
-  assert.ok(markdown.startsWith('![[GoStudy/Captures/高数-01-05.png]]\n\n[↗ 回到课程 · 01:05](obsidian://go-study?'));
+  assert.ok(markdown.startsWith('![[GoStudy/Captures/高数-01-05.png]]\n\n[01:05](obsidian://go-study?'));
   assert.throws(() => buildCaptureMarkdown(resource, { type: 'time', seconds: 65 }, '../outside.png'), /Vault 路径/);
 });
 
 test('typed note markdown places user text immediately before the permanent backlink', () => {
   const resource = { id: 'resource-123', title: '高数' };
   const markdown = buildNotePositionMarkdown(resource, { type: 'time', seconds: 88 }, '这里老师解释了导数的几何意义');
-  assert.ok(markdown.startsWith('这里老师解释了导数的几何意义\n\n[↗ 回到课程 · 01:28](obsidian://go-study?'));
+  assert.ok(markdown.startsWith('这里老师解释了导数的几何意义\n\n[01:28](obsidian://go-study?'));
   assert.throws(() => buildNotePositionMarkdown(resource, { type: 'time', seconds: 88 }, '   '), /不能为空/);
 });
 
 test('capture note markdown keeps screenshot, typed note and backlink together', () => {
   const resource = { id: 'resource-123', title: '高数' };
   const markdown = buildCaptureNoteMarkdown(resource, { type: 'time', seconds: 90 }, 'GoStudy/Captures/高数-01-30.png', '这一帧是关键公式');
-  assert.ok(markdown.startsWith('![[GoStudy/Captures/高数-01-30.png]]\n\n这一帧是关键公式\n\n[↗ 回到课程 · 01:30](obsidian://go-study?'));
+  assert.ok(markdown.startsWith('![[GoStudy/Captures/高数-01-30.png]]\n\n这一帧是关键公式\n\n[01:30](obsidian://go-study?'));
 });
 
 test('time display supports smart and fixed HH:MM:SS modes', () => {
@@ -151,4 +151,21 @@ test('freeform generated backlink stores the player media title as hidden metada
   const parsed = parseReferenceUri(uri);
   assert.equal(parsed.title, '学习摄影');
   assert.equal(parsed.name, 'learning-photo.mp4');
+});
+
+
+test('default managed and freeform backlinks show only the time while source metadata stays hidden', () => {
+  const managed = buildPositionMarkdown({ id: 'resource-1', title: '剪辑课第一期' }, { type: 'time', seconds: 35 });
+  assert.match(managed, /^\[00:35\]\(obsidian:\/\/go-study\?/);
+  assert.doesNotMatch(managed, /回到课程|剪辑课第一期/);
+
+  const freeform = buildFreeformPositionMarkdown(
+    { path: 'D:\\Loose\\lesson.mp4', title: '零散视频标题 - PotPlayer' },
+    { type: 'time', seconds: 128 }
+  );
+  assert.match(freeform, /^\[02:08\]\(obsidian:\/\/go-study\?/);
+  assert.doesNotMatch(freeform, /回到课程/);
+  const uri = freeform.match(/\((obsidian:\/\/go-study\?[^)]+)\)/)?.[1];
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.title, '零散视频标题');
 });

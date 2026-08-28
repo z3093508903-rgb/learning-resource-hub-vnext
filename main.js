@@ -657,9 +657,11 @@ function cleanupCompanionSession(plugin, session, options = {}) {
   const studyMode = plugin?.state?.uiState?.studyMode;
   if (studyMode?.active && (!studyMode.notePath || studyMode.notePath === session.filePath)) {
     studyMode.active = false;
+    studyMode.mode = 'note';
     studyMode.notePath = '';
     studyMode.resourceId = '';
     studyMode.projectId = '';
+    studyMode.freeformMedia = null;
     studyMode.enteredAt = '';
     plugin._goStudyStudyMode = null;
   }
@@ -4164,8 +4166,14 @@ class ResourceHubNextView extends ItemView {
       if (recentCollapsed) return;
       const recentList = parent.createDiv({ cls: 'rh-next-project-file-list is-recent' });
       for (const entry of recent.slice(0, 3)) {
-        const row = recentList.createDiv({ cls: 'rh-next-project-file-row is-recent' });
-        const icon = row.createSpan({ cls: 'rh-next-project-file-icon' }); setIcon(icon, this.plugin.vaultFileKind(entry) === 'canvas' ? 'layout-dashboard' : 'file-text');
+        const recentKind = this.plugin.vaultFileKind(entry);
+        const row = recentList.createDiv({
+          cls: 'rh-next-project-file-row is-recent',
+          attr: recentKind === 'markdown'
+            ? { draggable: 'true', 'data-go-study-study-note-path': entry.path, 'data-go-study-study-project-id': project.id }
+            : {}
+        });
+        const icon = row.createSpan({ cls: 'rh-next-project-file-icon' }); setIcon(icon, recentKind === 'canvas' ? 'layout-dashboard' : 'file-text');
         const copy = row.createDiv({ cls: 'rh-next-project-file-copy' }); copy.createSpan({ text: entry.name || entry.path.split('/').pop() });
         copy.createEl('small', { text: `${entry.path} · ${new Date(entry.stat.mtime).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}` });
         row.addEventListener('click', () => void this.plugin.openVaultEntry(entry));
@@ -4223,7 +4231,18 @@ class ResourceHubNextView extends ItemView {
     const folder = ref.entryType === 'folder';
     this.expandedProjectVaultFolders ||= new Set();
     const expanded = folder && this.expandedProjectVaultFolders.has(ref.path);
-    const row = parent.createDiv({ cls: `rh-next-project-file-row ${missing ? 'is-missing' : ''}`, attr: { 'data-depth': String(depth) } });
+    const draggableStudyNote = !missing && ref.entryType === 'file' && ref.fileKind === 'markdown';
+    const row = parent.createDiv({
+      cls: `rh-next-project-file-row ${missing ? 'is-missing' : ''}`,
+      attr: {
+        'data-depth': String(depth),
+        ...(draggableStudyNote ? {
+          draggable: 'true',
+          'data-go-study-study-note-path': ref.path,
+          'data-go-study-study-project-id': project.id
+        } : {})
+      }
+    });
     row.style.setProperty('--rh-file-depth', String(depth));
     const disclosure = row.createSpan({ cls: 'rh-next-project-file-disclosure' });
     if (folder && !missing) setIcon(disclosure, expanded ? 'chevron-down' : 'chevron-right');
@@ -10160,7 +10179,7 @@ const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   captureFolder: 'GoStudy/Captures',
   backupRetention: 10,
   timeDisplayFormat: 'smart',
-  backlinkTemplate: '[↗ {title} · {time}]({uri})',
+  backlinkTemplate: '[{time}]({uri})',
   noteTemplate: '{note}\n\n{backlink}',
   captureTemplate: '{image}\n\n{backlink}',
   captureNoteTemplate: '{image}\n\n{note}\n\n{backlink}',
@@ -10267,6 +10286,14 @@ function safeOutputTemplate(key, value) {
   catch { return DEFAULT_PRODUCT_SETTINGS[key]; }
 }
 
+const LEGACY_DEFAULT_BACKLINK_TEMPLATE = '[↗ {title} · {time}]({uri})';
+
+function normalizedBacklinkTemplate(value) {
+  const raw = String(value ?? '');
+  if (raw === LEGACY_DEFAULT_BACKLINK_TEMPLATE) return DEFAULT_PRODUCT_SETTINGS.backlinkTemplate;
+  return safeOutputTemplate('backlinkTemplate', raw || DEFAULT_PRODUCT_SETTINGS.backlinkTemplate);
+}
+
 function currentProductSettings(plugin) {
   const ui = plugin?.state?.uiState || {};
   let captureFolder = DEFAULT_PRODUCT_SETTINGS.captureFolder;
@@ -10294,7 +10321,7 @@ function currentProductSettings(plugin) {
     captureFolder,
     backupRetention: clampInteger(ui.backupRetention, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention),
     timeDisplayFormat: normalizeTimeDisplayFormat(ui.timeDisplayFormat),
-    backlinkTemplate: safeOutputTemplate('backlinkTemplate', ui.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate),
+    backlinkTemplate: normalizedBacklinkTemplate(ui.backlinkTemplate ?? DEFAULT_PRODUCT_SETTINGS.backlinkTemplate),
     noteTemplate: safeOutputTemplate('noteTemplate', ui.noteTemplate ?? DEFAULT_PRODUCT_SETTINGS.noteTemplate),
     captureTemplate: safeOutputTemplate('captureTemplate', ui.captureTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureTemplate),
     captureNoteTemplate: safeOutputTemplate('captureNoteTemplate', ui.captureNoteTemplate ?? DEFAULT_PRODUCT_SETTINGS.captureNoteTemplate),
@@ -10351,6 +10378,7 @@ async function resetOutputTemplates(plugin) {
 
 module.exports = {
   DEFAULT_PRODUCT_SETTINGS,
+  LEGACY_DEFAULT_BACKLINK_TEMPLATE,
   TEMPLATE_RULES,
   clampInteger,
   currentProductSettings,
@@ -10359,6 +10387,7 @@ module.exports = {
   normalizeActionHudShortcut,
   normalizeCaptureFolder,
   normalizeOutputTemplate,
+  normalizedBacklinkTemplate,
   normalizeShortcutMode,
   normalizeTimeDisplayFormat,
   outputTemplateTokens,
@@ -10389,6 +10418,8 @@ const {
 } = __rhLoad("project-notes.cjs");
 const { currentProductSettings } = __rhLoad("product-settings.cjs");
 const { rememberNoteTarget } = __rhLoad("note-target.cjs");
+const { requestNativePotPlayer } = __rhLoad("native-potplayer.cjs");
+const { enterStudyMode } = __rhLoad("study-mode.cjs");
 
 function markdownFiles(plugin) {
   const vault = plugin?.app?.vault;
@@ -10689,6 +10720,78 @@ function studyRowButton(container, file, secondary, onClick, options = {}) {
   return row;
 }
 
+async function enterCurrentPotPlayerStudyMode(plugin, filePath, projectId = '') {
+  const path = String(filePath || '').trim();
+  const file = plugin?.app?.vault?.getAbstractFileByPath?.(path);
+  if (!file || Array.isArray(file.children) || String(file.extension || '').toLowerCase() !== 'md') {
+    throw new Error('只能把 Markdown 笔记拖入学习小窗。');
+  }
+  const current = await requestNativePotPlayer('current', { foregroundOnly: false });
+  if (!current?.media?.path) throw new Error('没有读取到当前 PotPlayer 视频。');
+  const result = await enterStudyMode(plugin, {
+    filePath: file.path,
+    projectId,
+    freeformMedia: current.media,
+    alwaysOnTop: true
+  });
+  return { ...result, media: current.media };
+}
+
+function workbenchStudyDropTarget(doc, parent, onDrop) {
+  const target = parent.createDiv
+    ? parent.createDiv({ cls: 'go-study-study-mode-drop-target is-workbench' })
+    : (() => {
+        const el = doc.createElement('div');
+        el.className = 'go-study-study-mode-drop-target is-workbench';
+        parent.appendChild(el);
+        return el;
+      })();
+  target.setAttribute?.('aria-label', '拖入笔记，使用当前 PotPlayer 视频进入学习模式');
+
+  const copy = target.createDiv ? target.createDiv({ cls: 'go-study-study-mode-drop-copy' }) : (() => {
+    const el = doc.createElement('div'); el.className = 'go-study-study-mode-drop-copy'; target.appendChild(el); return el;
+  })();
+  const makeText = (tag, text) => {
+    if (copy.createEl) return copy.createEl(tag, { text });
+    const el = doc.createElement(tag); el.textContent = text; copy.appendChild(el); return el;
+  };
+  makeText('span', '拖入');
+  makeText('span', '右侧小窗');
+  makeText('strong', '学习模式');
+
+  const doodle = target.createDiv ? target.createDiv({ cls: 'go-study-study-mode-doodle' }) : (() => {
+    const el = doc.createElement('div'); el.className = 'go-study-study-mode-doodle'; target.appendChild(el); return el;
+  })();
+  const noteIcon = doodle.createSpan ? doodle.createSpan({ cls: 'go-study-study-mode-note-icon' }) : (() => {
+    const el = doc.createElement('span'); el.className = 'go-study-study-mode-note-icon'; doodle.appendChild(el); return el;
+  })();
+  const handIcon = doodle.createSpan ? doodle.createSpan({ cls: 'go-study-study-mode-hand-icon' }) : (() => {
+    const el = doc.createElement('span'); el.className = 'go-study-study-mode-hand-icon'; doodle.appendChild(el); return el;
+  })();
+  try { setIcon(noteIcon, 'notebook-pen'); } catch {}
+  try { setIcon(handIcon, 'mouse-pointer-2'); } catch {}
+
+  const activate = (event) => {
+    event.preventDefault();
+    target.addClass?.('is-active') || target.classList?.add?.('is-active');
+    try { event.dataTransfer.dropEffect = 'move'; } catch {}
+  };
+  target.addEventListener('dragenter', activate);
+  target.addEventListener('dragover', activate);
+  target.addEventListener('dragleave', (event) => {
+    if (!target.contains?.(event.relatedTarget)) {
+      target.removeClass?.('is-active') || target.classList?.remove?.('is-active');
+    }
+  });
+  target.addEventListener('drop', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    target.removeClass?.('is-active') || target.classList?.remove?.('is-active');
+    void onDrop?.(event);
+  });
+  return target;
+}
+
 function pickerHeading(container, title, description) {
   const heading = container.createDiv({ cls: 'rh-next-modal-heading go-study-picker-heading' });
   const copy = heading.createDiv();
@@ -10826,6 +10929,17 @@ function installPickerUxStyles(plugin, doc = globalThis.document) {
   box-shadow: 0 10px 30px rgba(0,0,0,.18);
   transform: translateY(-50%) rotate(.35deg);
   transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease, background .14s ease;
+}
+.go-study-study-mode-drop-target.is-workbench {
+  position: fixed;
+  left: auto;
+  right: 24px;
+  top: 50%;
+  z-index: 2147481000;
+  transform: translateY(-50%) rotate(.35deg);
+}
+.go-study-study-mode-drop-target.is-workbench.is-active {
+  transform: translateY(-50%) rotate(0deg) scale(1.035);
 }
 .go-study-study-mode-drop-target.is-active {
   border-color: var(--interactive-accent);
@@ -11258,12 +11372,63 @@ function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
   if (!doc?.querySelectorAll || !plugin?.manifest?.id) return null;
   installPickerUxStyles(plugin, doc);
   const selector = `.workspace-leaf-content[data-type="${plugin.manifest.id}-workbench"]`;
+  let draggedStudyNote = null;
+  let workbenchDropEl = null;
+
+  const removeWorkbenchDrop = () => {
+    workbenchDropEl?.remove?.();
+    workbenchDropEl = null;
+  };
+
+  const showWorkbenchDrop = (leaf) => {
+    removeWorkbenchDrop();
+    workbenchDropEl = workbenchStudyDropTarget(doc, leaf, async () => {
+      const selection = draggedStudyNote;
+      draggedStudyNote = null;
+      removeWorkbenchDrop();
+      if (!selection?.path) return;
+      try {
+        const result = await enterCurrentPotPlayerStudyMode(plugin, selection.path, selection.projectId);
+        new Notice(`已进入学习模式 · ${noteDisplayName({ path: selection.path })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
+      } catch (error) {
+        new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      }
+    });
+  };
+
+  const bindWorkbenchStudyRows = (leaf) => {
+    for (const row of leaf.querySelectorAll?.('[data-go-study-study-note-path]') || []) {
+      if (row.dataset?.goStudyStudyDragBound === 'true') continue;
+      row.dataset.goStudyStudyDragBound = 'true';
+      row.setAttribute?.('draggable', 'true');
+      row.classList?.add?.('go-study-study-note-row');
+      row.addEventListener('dragstart', (event) => {
+        draggedStudyNote = {
+          path: String(row.dataset?.goStudyStudyNotePath || ''),
+          projectId: String(row.dataset?.goStudyStudyProjectId || '')
+        };
+        try {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', draggedStudyNote.path);
+        } catch {}
+        row.classList?.add?.('is-dragging');
+        showWorkbenchDrop(leaf);
+      });
+      row.addEventListener('dragend', () => {
+        row.classList?.remove?.('is-dragging');
+        draggedStudyNote = null;
+        removeWorkbenchDrop();
+      });
+    }
+  };
+
   const inject = () => {
     const projectId = String(plugin.state?.uiState?.currentProjectId || '');
     if (plugin.state?.uiState?.route !== 'project' || !plugin.state?.projects?.[projectId]) return;
     const study = recentStudy(plugin.state, projectId);
     const noteCount = projectNotes(plugin.state, projectId).length;
     for (const leaf of doc.querySelectorAll(selector)) {
+      bindWorkbenchStudyRows(leaf);
       const actions = leaf.querySelector?.('.rh-next-project-heading .rh-next-section-actions');
       if (!actions || actions.querySelector?.('[data-go-study-project-notes]')) continue;
       const noteButton = createActionButton(doc, noteCount ? `笔记 ${noteCount}` : '笔记', 'notebook-tabs');
@@ -11283,8 +11448,11 @@ function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
   const Observer = doc.defaultView?.MutationObserver || globalThis.MutationObserver;
   const observer = Observer ? new Observer(inject) : null;
   observer?.observe?.(doc.body, { childList: true, subtree: true });
-  plugin.register?.(() => observer?.disconnect?.());
-  return { inject, observer };
+  plugin.register?.(() => {
+    observer?.disconnect?.();
+    removeWorkbenchDrop();
+  });
+  return { inject, observer, removeWorkbenchDrop };
 }
 
 module.exports = {
@@ -11295,6 +11463,7 @@ module.exports = {
   chooseStudyNote,
   createPickerShell,
   createProjectNote,
+  enterCurrentPotPlayerStudyMode,
   installPickerUxStyles,
   focusProjectNoteAtEnd,
   installProjectNoteEntryPoints,
@@ -13561,11 +13730,18 @@ function ensureStudyModeState(plugin) {
   if (!plugin?.state) throw new Error('Go Study 状态不可用。');
   plugin.state.uiState ||= {};
   const raw = objectOr(plugin.state.uiState.studyMode);
+  const media = objectOr(raw.freeformMedia);
   Object.assign(raw, {
     active: Boolean(raw.active),
+    mode: ['managed', 'freeform', 'note'].includes(String(raw.mode || '')) ? String(raw.mode) : 'note',
     notePath: String(raw.notePath || ''),
     resourceId: String(raw.resourceId || ''),
     projectId: String(raw.projectId || ''),
+    freeformMedia: media.path ? {
+      path: String(media.path || ''),
+      title: String(media.title || ''),
+      positionSeconds: Number.isFinite(Number(media.positionSeconds)) ? Number(media.positionSeconds) : 0
+    } : null,
     alwaysOnTop: raw.alwaysOnTop !== false,
     enteredAt: String(raw.enteredAt || '')
   });
@@ -13586,10 +13762,17 @@ async function enterStudyMode(plugin, options = {}) {
   if (!filePath) throw new Error('进入学习模式前需要选择一篇 Markdown 笔记。');
 
   const state = ensureStudyModeState(plugin);
+  const freeformMedia = objectOr(options.freeformMedia, null);
   state.active = true;
   state.notePath = filePath;
   state.resourceId = String(options.resource?.id || options.resourceId || '');
   state.projectId = String(options.projectId || '');
+  state.mode = state.resourceId ? 'managed' : freeformMedia?.path ? 'freeform' : 'note';
+  state.freeformMedia = freeformMedia?.path ? {
+    path: String(freeformMedia.path || ''),
+    title: String(freeformMedia.title || ''),
+    positionSeconds: Number.isFinite(Number(freeformMedia.positionSeconds)) ? Number(freeformMedia.positionSeconds) : 0
+  } : null;
   state.alwaysOnTop = options.alwaysOnTop == null ? state.alwaysOnTop : Boolean(options.alwaysOnTop);
   state.enteredAt = new Date().toISOString();
 
@@ -13614,16 +13797,20 @@ async function enterStudyMode(plugin, options = {}) {
     plugin._goStudyStudyMode = {
       active: true,
       notePath: filePath,
+      mode: state.mode,
       resourceId: state.resourceId,
       projectId: state.projectId,
+      freeformMedia: state.freeformMedia ? { ...state.freeformMedia } : null,
       enteredAt: Date.now()
     };
     return { ...result, studyMode: true, alwaysOnTop: state.alwaysOnTop };
   } catch (error) {
     state.active = false;
+    state.mode = 'note';
     state.notePath = '';
     state.resourceId = '';
     state.projectId = '';
+    state.freeformMedia = null;
     state.enteredAt = '';
     plugin._goStudyStudyMode = null;
     await plugin.persist?.();
@@ -13634,9 +13821,11 @@ async function enterStudyMode(plugin, options = {}) {
 async function exitStudyMode(plugin, options = {}) {
   const state = ensureStudyModeState(plugin);
   state.active = false;
+  state.mode = 'note';
   state.notePath = '';
   state.resourceId = '';
   state.projectId = '';
+  state.freeformMedia = null;
   state.enteredAt = '';
   plugin._goStudyStudyMode = null;
   if (options.closeCompanion) await closeCompanionNoteWindow(plugin, { persist: false });
@@ -14015,11 +14204,12 @@ function renderTimelineIntoView(plugin, view, groups) {
   nav.setAttribute('data-go-study-timeline-ready', 'true');
 
   const rail = element(doc, 'div', 'go-study-timeline-rail');
-  const flattened = groups.flatMap((group) => group.items.map((item) => ({ group, item })));
-  flattened.slice(0, 18).forEach(({ group }, index) => {
+  const sourceNodes = groups.slice(0, 18);
+  sourceNodes.forEach((group, index) => {
     const node = element(doc, 'span', 'go-study-timeline-node');
-    node.style.setProperty('--go-study-node-y', `${((index + 1) / (Math.min(flattened.length, 18) + 1)) * 100}%`);
+    node.style.setProperty('--go-study-node-y', `${((index + 1) / (sourceNodes.length + 1)) * 100}%`);
     node.dataset.sourceKind = group.kind;
+    node.dataset.sourceKey = group.key;
     rail.appendChild(node);
   });
   nav.appendChild(rail);

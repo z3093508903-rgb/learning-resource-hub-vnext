@@ -308,3 +308,13 @@ test('Timeline Navigator no longer owns playback or browser-opening semantics', 
   assert.doesNotMatch(source, /openExternal|browserUrlAtPosition|openResourceReference/);
   assert.match(source, /点击定位到笔记/);
 });
+
+
+test('collapsed timeline rail uses one dot per video source, not one dot per timestamp', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'timeline-navigator.cjs'), 'utf8');
+  assert.match(source, /const sourceNodes = groups\.slice\(0, 18\)/);
+  assert.match(source, /sourceNodes\.forEach\(\(group, index\)/);
+  assert.doesNotMatch(source, /flattened\.slice\(0, 18\)/);
+});

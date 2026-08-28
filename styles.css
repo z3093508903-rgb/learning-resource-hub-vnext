@@ -1233,3 +1233,35 @@ body.go-study-companion-window .go-study-timeline-hover {
     box-shadow: inset 2px 0 transparent;
   }
 }
+
+/* beta20.6 · compact timestamp capsule */
+.markdown-reading-view a[href^="obsidian://go-study"],
+.markdown-source-view.mod-cm6 a[href^="obsidian://go-study"] {
+  display: inline-flex;
+  align-items: center;
+  min-height: 1.45em;
+  padding: 0 0.42em !important;
+  border: 1px solid color-mix(in srgb, var(--interactive-accent) 24%, transparent);
+  border-radius: 0.46em;
+  background-color: color-mix(in srgb, var(--interactive-accent) 9%, transparent);
+  background-image: none !important;
+  color: var(--text-accent);
+  text-decoration: none !important;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.2;
+  vertical-align: baseline;
+  box-shadow: none;
+}
+
+.markdown-reading-view a[href^="obsidian://go-study"]:hover,
+.markdown-source-view.mod-cm6 a[href^="obsidian://go-study"]:hover {
+  border-color: color-mix(in srgb, var(--interactive-accent) 42%, transparent);
+  background-color: color-mix(in srgb, var(--interactive-accent) 14%, transparent);
+  color: var(--text-accent-hover, var(--text-accent));
+}
+
+.markdown-reading-view a[href^="obsidian://go-study"].external-link,
+.markdown-source-view.mod-cm6 a[href^="obsidian://go-study"].external-link {
+  padding-inline-end: 0.42em !important;
+  background-image: none !important;
+}
