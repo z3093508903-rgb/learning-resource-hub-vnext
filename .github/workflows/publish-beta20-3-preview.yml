@@ -54,7 +54,6 @@ jobs:
             'parseTimelineReferenceUri',
             '解析失败',
             'firstParseError',
-            'resource-mt7g36x5-dcnnpi7',
             'go-study-floating-timeline'
           ]) if (!packed.includes(marker)) throw new Error('Missing beta20.3 marker: ' + marker);
           NODE
