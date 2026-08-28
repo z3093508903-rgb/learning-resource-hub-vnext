@@ -1,6 +1,7 @@
 'use strict';
 
-const { shell } = require('electron');
+let shell = null;
+try { shell = require('electron').shell; } catch {}
 const { parseReferenceUri } = require('./resource-reference.cjs');
 
 function stopLinkEvent(event) {
@@ -51,6 +52,7 @@ function browserUrlAtPosition(rawUrl, position) {
 function installFreeformBrowserModifier(plugin, doc = globalThis.document, options = {}) {
   if (!doc?.addEventListener) return null;
   const shellImpl = options.shell || shell;
+  if (!shellImpl?.openExternal) return null;
   const onClick = (event) => {
     const target = event?.target?.closest?.('a[href]');
     if (!target) return;
