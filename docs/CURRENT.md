@@ -451,3 +451,30 @@ Hotfix：
 - 时间点 7
 - 解析失败 0
 - 挂载 1
+
+
+## beta20.4：Timeline Hover Stability Hotfix
+
+Windows 实机 beta20.3 已能正常显示悬浮时间线，但鼠标移入后出现快速闪烁 / 展开收起循环。
+
+根因确认：
+- beta20.2 为了追踪 Markdown DOM 变化，对整个 document.body 使用 MutationObserver；
+- Timeline 自己在刷新时 remove/add overlay；
+- 这些自身 DOM 变化又触发 MutationObserver；
+- observer 再次 schedule refresh，形成自激刷新循环；
+- Hover 中 DOM 被反复重建，因此表现为闪烁。
+
+修复：
+- MutationObserver 忽略仅由 Timeline 自身 overlay 引起的 mutation；
+- 为当前 source/time 模型生成稳定 signature；
+- signature 未变化时复用已有 Timeline DOM，只做位置同步；
+- routine refresh 不再销毁正在 hover 的 rail；
+- 视觉方案保持透明、轻量、Hover 展开。
+
+Hotfix：
+- branch `fix/timeline-hover-stability-beta20-4`
+- Draft PR #33
+- Preview `Go Study Preview 0.3.0-beta.20.4`
+- CI #232 PASS
+- **334 / 334 tests PASS**
+- ZIP SHA256 `4a54df0bfd288fdb47709b2fda740cc1656e92b56d4afc23623f405a49e7a6b0`
