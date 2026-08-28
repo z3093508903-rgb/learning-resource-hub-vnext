@@ -88,3 +88,24 @@ test('search results and project notes share the same draggable study-mode entry
   const occurrences = (uiSource.match(/studyRowButton\(/g) || []).length;
   assert.ok(occurrences >= 4);
 });
+
+
+test('project navigation Markdown rows can be dragged into the same right-rail Study Mode for current loose video', () => {
+  const mainSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main.cjs'), 'utf8');
+  assert.match(mainSource, /data-go-study-study-note-path/);
+  assert.match(mainSource, /draggable: 'true'/);
+  assert.match(uiSource, /workbenchStudyDropTarget/);
+  assert.match(uiSource, /is-workbench/);
+  assert.match(uiSource, /requestNativePotPlayer\('current', \{ foregroundOnly: false \}\)/);
+  assert.match(uiSource, /enterStudyMode\(plugin, \{/);
+  assert.match(uiSource, /freeformMedia: current\.media/);
+  assert.match(uiSource, /进入零散视频学习模式失败/);
+});
+
+test('dragging a navigation note into freeform Study Mode does not reopen or restart PotPlayer', () => {
+  const start = uiSource.indexOf('async function enterCurrentPotPlayerStudyMode');
+  const end = uiSource.indexOf('function workbenchStudyDropTarget', start);
+  const block = uiSource.slice(start, end);
+  assert.match(block, /requestNativePotPlayer\('current'/);
+  assert.doesNotMatch(block, /openResource|openPositionedPlayTarget|nativePlay|requestNativePotPlayer\('play'/);
+});
