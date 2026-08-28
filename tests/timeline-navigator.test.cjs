@@ -8,10 +8,12 @@ const {
   activeMarkdownView,
   diagnoseTimelineNavigator,
   extractGoStudyReferenceUris,
+  mutationOnlyTouchesTimelineUi,
   renderedReferenceUris,
   parseTimelineReferenceUri,
   timelineGroupsFromMarkdown,
   timelineGroupsFromView,
+  timelineSignature,
   timelineSummary
 } = require('../src/timeline-navigator.cjs');
 const {
@@ -219,4 +221,46 @@ test('timeline groups the real seven-link note into four managed sources even if
   const groups = timelineGroupsFromMarkdown(markdown, plugin);
   assert.equal(groups.length, 4);
   assert.equal(timelineSummary(groups).timestampCount, 7);
+});
+
+
+test('timeline signature stays stable when the source/time model has not changed', () => {
+  const groups = [{
+    key: 'managed:r1',
+    title: '学习摄影',
+    kind: 'managed',
+    items: [
+      { seconds: 14, uri: 'obsidian://go-study?resource=r1&position=time%3A14&v=1' },
+      { seconds: 86, uri: 'obsidian://go-study?resource=r1&position=time%3A86&v=1' }
+    ]
+  }];
+  assert.equal(timelineSignature(groups), timelineSignature(JSON.parse(JSON.stringify(groups))));
+});
+
+test('timeline mutation observer ignores its own overlay insertion/removal', () => {
+  const timelineNode = {
+    nodeType: 1,
+    matches(selector) { return selector === '.go-study-floating-timeline'; },
+    closest() { return null; }
+  };
+  const body = { nodeType: 1, matches() { return false; }, closest() { return null; } };
+  assert.equal(mutationOnlyTouchesTimelineUi({
+    target: body,
+    addedNodes: [timelineNode],
+    removedNodes: []
+  }), true);
+  assert.equal(mutationOnlyTouchesTimelineUi({
+    target: body,
+    addedNodes: [],
+    removedNodes: [timelineNode]
+  }), true);
+});
+
+test('stable timeline render reuses unchanged DOM instead of rebuilding on every refresh', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'timeline-navigator.cjs'), 'utf8');
+  assert.match(source, /goStudyTimelineSignature === signature/);
+  assert.match(source, /positionTimelineOverlay\(existing, host, doc\)/);
+  assert.match(source, /records\.every\(mutationOnlyTouchesTimelineUi\)/);
 });
