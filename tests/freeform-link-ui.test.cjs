@@ -28,3 +28,27 @@ test('runtime upgrades freeform to managed before platform fallback', () => {
   assert.match(entry, /openPortableFreeformReference/);
   assert.match(entry, /resourceId:\s*portableManaged\.id/);
 });
+
+
+const {
+  bilibiliUrlAtPosition,
+  browserUrlAtPosition
+} = require('../src/freeform-link-ui.cjs');
+
+test('Bilibili browser adapter preserves multi-P and adds captured seconds', () => {
+  assert.equal(
+    bilibiliUrlAtPosition('https://www.bilibili.com/video/BV1TEST?p=2', { type: 'time', seconds: 65.9 }),
+    'https://www.bilibili.com/video/BV1TEST?p=2&t=65'
+  );
+  assert.equal(
+    bilibiliUrlAtPosition('https://www.bilibili.com/video/BV1TEST?t=3', { type: 'time', seconds: 90 }),
+    'https://www.bilibili.com/video/BV1TEST?t=90'
+  );
+});
+
+test('non-Bilibili Ctrl-click browser fallback stays unchanged', () => {
+  assert.equal(
+    browserUrlAtPosition('https://example.com/video?id=1', { type: 'time', seconds: 65 }),
+    'https://example.com/video?id=1'
+  );
+});
