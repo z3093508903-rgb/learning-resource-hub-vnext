@@ -1,5 +1,7 @@
 'use strict';
 
+const { setIcon = () => {} } = require('obsidian');
+
 function resolveRemote(options = {}) {
   if (options.remote) return options.remote;
   try { return require('@electron/remote'); } catch { return null; }
@@ -61,6 +63,7 @@ function ensureCompanionWindowState(plugin) {
   const next = {
     notePath: String(raw.notePath || ''),
     locked: raw.locked !== false,
+    alwaysOnTop: raw.alwaysOnTop !== false,
     scale: normalizeCompanionScale(raw.scale),
     activeLayoutId: String(raw.activeLayoutId || DEFAULT_LAYOUT_ID),
     lastGeometry: normalizeStoredGeometry(raw.lastGeometry),
@@ -232,6 +235,109 @@ function leafWindow(leaf) {
   return el?.win || el?.ownerDocument?.defaultView || el?.doc?.defaultView || null;
 }
 
+function companionTitle(fileOrPath) {
+  const path = String(fileOrPath?.path || fileOrPath || '');
+  return path.split('/').pop()?.replace(/\.md$/i, '') || '学习笔记';
+}
+
+function nativeWindowScore(nativeWindow, win) {
+  if (!nativeWindow?.getBounds || !win) return Number.POSITIVE_INFINITY;
+  try {
+    const bounds = nativeWindow.getBounds();
+    const expected = {
+      x: Number(win.screenX),
+      y: Number(win.screenY),
+      width: Number(win.outerWidth),
+      height: Number(win.outerHeight)
+    };
+    if (!Object.values(expected).every(Number.isFinite)) return Number.POSITIVE_INFINITY;
+    return Math.abs(Number(bounds.x) - expected.x)
+      + Math.abs(Number(bounds.y) - expected.y)
+      + Math.abs(Number(bounds.width) - expected.width)
+      + Math.abs(Number(bounds.height) - expected.height);
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function resolveNativeCompanionWindow(win, options = {}) {
+  if (options.nativeWindow?.setAlwaysOnTop) return options.nativeWindow;
+  const remote = options.remote || resolveRemote(options);
+  let windows = [];
+  try { windows = remote?.BrowserWindow?.getAllWindows?.() || []; } catch {}
+  let best = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  for (const candidate of windows) {
+    const score = nativeWindowScore(candidate, win);
+    if (score < bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  }
+  return bestScore <= 180 ? best : null;
+}
+
+function syncCompanionNativeState(plugin, session, options = {}) {
+  const win = session?.win;
+  if (!win) return false;
+  const state = companionWindowState(plugin);
+  const title = companionTitle(session.filePath);
+  try { if (win.document) win.document.title = title; } catch {}
+  try {
+    const viewTitle = win.document?.querySelector?.('.view-header-title');
+    if (viewTitle) viewTitle.textContent = title;
+  } catch {}
+
+  const nativeWindow = session.nativeWindow || resolveNativeCompanionWindow(win, options);
+  if (!nativeWindow) return false;
+  session.nativeWindow = nativeWindow;
+  try {
+    if (typeof nativeWindow.setTitle === 'function' && nativeWindow.getTitle?.() !== title) nativeWindow.setTitle(title);
+  } catch {}
+  try {
+    if (typeof nativeWindow.setAlwaysOnTop === 'function') nativeWindow.setAlwaysOnTop(Boolean(state.alwaysOnTop));
+  } catch {}
+  return true;
+}
+
+function updatePinButton(plugin, session) {
+  const button = session?.pinButton;
+  if (!button) return;
+  const pinned = companionWindowState(plugin).alwaysOnTop;
+  button.classList?.toggle?.('is-active', pinned);
+  button.setAttribute?.('aria-label', pinned ? '取消置顶学习笔记小窗' : '置顶学习笔记小窗');
+  button.setAttribute?.('title', pinned ? '已置顶 · 点击取消' : '未置顶 · 点击置顶');
+  button.empty?.();
+  try { setIcon(button, pinned ? 'pin' : 'pin-off'); } catch {}
+}
+
+function installCompanionPinControl(plugin, session) {
+  const doc = session?.win?.document;
+  if (!doc?.createElement) return null;
+  const header = doc.querySelector?.('.view-header');
+  const actions = header?.querySelector?.('.view-actions') || header;
+  if (!actions) return null;
+  const existing = actions.querySelector?.('[data-go-study-companion-pin]');
+  if (existing) {
+    session.pinButton = existing;
+    updatePinButton(plugin, session);
+    return existing;
+  }
+  const button = doc.createElement('button');
+  button.type = 'button';
+  button.className = 'clickable-icon go-study-companion-pin';
+  button.setAttribute('data-go-study-companion-pin', 'true');
+  button.addEventListener('click', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    void setCompanionAlwaysOnTop(plugin, !companionWindowState(plugin).alwaysOnTop);
+  });
+  actions.prepend?.(button);
+  session.pinButton = button;
+  updatePinButton(plugin, session);
+  return button;
+}
+
 function applyCompanionChrome(win, scale) {
   const doc = win?.document;
   if (!doc?.body) return false;
@@ -270,6 +376,15 @@ function cleanupCompanionSession(plugin, session, options = {}) {
   }
   if (plugin?._goStudyCompanionWindow === session) plugin._goStudyCompanionWindow = null;
   if (plugin?._goStudyCompanionTarget?.leaf === session.leaf) detachCompanionTarget(plugin);
+  const studyMode = plugin?.state?.uiState?.studyMode;
+  if (studyMode?.active && (!studyMode.notePath || studyMode.notePath === session.filePath)) {
+    studyMode.active = false;
+    studyMode.notePath = '';
+    studyMode.resourceId = '';
+    studyMode.projectId = '';
+    studyMode.enteredAt = '';
+    plugin._goStudyStudyMode = null;
+  }
   if (options.persist !== false && plugin?.state) void persistCompanionState(plugin).catch(() => {});
 }
 
@@ -287,6 +402,7 @@ function installGeometryTracking(plugin, session) {
     void persistCompanionState(plugin).catch(() => {});
   };
   const captureGeometry = () => {
+    syncCompanionNativeState(plugin, session);
     const geometry = currentWindowGeometry(plugin);
     if (!geometry) return;
     const same = last && ['x','y','width','height'].every((key) => geometry[key] === last[key]);
@@ -352,6 +468,7 @@ async function openCompanionNoteWindow(plugin, options = {}) {
 
   state.notePath = file.path;
   state.locked = options.locked == null ? state.locked : Boolean(options.locked);
+  state.alwaysOnTop = options.alwaysOnTop == null ? state.alwaysOnTop : Boolean(options.alwaysOnTop);
   const layout = resolveLayout(plugin, options.layoutId || state.activeLayoutId, options);
   state.activeLayoutId = layout.id;
   const scale = normalizeCompanionScale(options.scale ?? state.scale ?? layout.scale);
@@ -367,7 +484,7 @@ async function openCompanionNoteWindow(plugin, options = {}) {
   applyGeometry(win, geometry);
   try { win.focus?.(); } catch {}
 
-  const session = { leaf, win, filePath: file.path, cleaned: false, timer: null };
+  const session = { leaf, win, filePath: file.path, cleaned: false, timer: null, nativeWindow: null, pinButton: null };
   plugin._goStudyCompanionWindow = session;
   plugin._goStudyCompanionTarget = {
     editor: view.editor,
@@ -376,9 +493,35 @@ async function openCompanionNoteWindow(plugin, options = {}) {
     locked: state.locked,
     openedAt: Date.now()
   };
+  syncCompanionNativeState(plugin, session, options);
+  installCompanionPinControl(plugin, session);
   installGeometryTracking(plugin, session);
   await persistCompanionState(plugin);
-  return { leaf, win, file, editor: view.editor, geometry, scale, locked: state.locked, layoutId: state.activeLayoutId };
+  return {
+    leaf,
+    win,
+    file,
+    editor: view.editor,
+    geometry,
+    scale,
+    locked: state.locked,
+    alwaysOnTop: state.alwaysOnTop,
+    layoutId: state.activeLayoutId
+  };
+}
+
+async function setCompanionAlwaysOnTop(plugin, value, options = {}) {
+  const state = companionWindowState(plugin);
+  state.alwaysOnTop = Boolean(value);
+  const session = currentCompanionWindow(plugin);
+  if (session?.win) {
+    syncCompanionNativeState(plugin, session, options);
+    try { session.nativeWindow?.setAlwaysOnTop?.(state.alwaysOnTop); } catch {}
+    updatePinButton(plugin, session);
+  }
+  if (plugin?.state?.uiState?.studyMode) plugin.state.uiState.studyMode.alwaysOnTop = state.alwaysOnTop;
+  await persistCompanionState(plugin);
+  return state.alwaysOnTop;
 }
 
 async function setCompanionLocked(plugin, value) {
@@ -508,7 +651,10 @@ module.exports = {
   registerCompanionNoteCommands,
   resolveCompanionNotePath,
   resolveLayout,
+  resolveNativeCompanionWindow,
   saveCurrentCompanionLayout,
+  setCompanionAlwaysOnTop,
   setCompanionLocked,
-  setCompanionScale
+  setCompanionScale,
+  syncCompanionNativeState
 };
