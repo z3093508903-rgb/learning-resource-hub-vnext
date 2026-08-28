@@ -263,3 +263,23 @@ CI：
 beta19-A 不实现 Player Session / 后台 Capture。
 
 因此如果用户主动点击 Companion 并把焦点交给笔记窗口，当前 HUD 仍可能因为 PotPlayer 不在前台而拒绝 Capture。这是已确认的方案 A 边界，后续是否进入 beta19-B 再根据真实使用频率决定。
+
+
+## beta19-A Windows 实机验收通过
+
+用户在 Windows / Obsidian 实机确认 beta19-A：
+
+- Study Mode 拖拽入口工作正常；
+- Companion 右侧小窗流程顺手；
+- 默认置顶 + 图钉切换符合预期；
+- 普通点击与拖拽学习模式语义没有冲突；
+- 当前整体工作流已符合预期，可进入下一阶段。
+
+结论：
+
+**beta19-A core = ACCEPTED-AS-BEHAVIOR（Windows）**
+
+后续不再继续扩展 beta19-A 功能，进入 beta19-B：
+- Freeform / 未收录零散视频工作流补齐；
+- Web 时间戳兼容性，优先 Bilibili；
+- 继续保持 HUD-first，不引入 Player Session，除非实机再次证明必要。
