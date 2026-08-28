@@ -283,3 +283,37 @@ beta19-A 不实现 Player Session / 后台 Capture。
 - Freeform / 未收录零散视频工作流补齐；
 - Web 时间戳兼容性，优先 Bilibili；
 - 继续保持 HUD-first，不引入 Player Session，除非实机再次证明必要。
+
+
+## beta19-B Freeform Web Timeline
+
+开发分支：
+
+`work/study-mode-beta19b`
+
+Draft PR：
+
+`#28 Go Study beta19-B: Freeform web timeline compatibility`
+
+当前已完成第一切片：
+
+- Freeform v2 可在永久回链中保存可选 `web` source；
+- Ctrl+点击 Freeform HTTP(S) 仍打开浏览器；
+- Bilibili 常规视频 URL 会保留现有 query（包括 `p`）并写入 `t=<captured seconds>`；
+- 非 Bilibili HTTP(S) Ctrl+点击保持原 URL，不冒充支持时间跳转；
+- 普通点击的 Windows PotPlayer/JV 精确回链行为不变。
+
+最终当前 HEAD：
+
+`ee0b7fc8f3045ecaf92bda75745f7d634b3cd849`
+
+CI：
+
+- run #202 ✅
+- **318 / 318 tests PASS**
+- committed `main.js` current ✅
+
+仍未完成：
+
+- 未收录零散视频如何通过 Study Mode UI 绑定当前已打开的 PotPlayer，会在下一切片处理；
+- 如果 PotPlayer 只暴露 Bilibili CDN/媒体流 URL，而不是 Bilibili 页面 URL，当前无法凭空恢复 canonical page。
