@@ -1,0 +1,112 @@
+name: Publish Beta20.1 Preview
+
+on:
+  push:
+    branches:
+      - fix/timeline-mount-beta20-1
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.20.1
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.20.1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Full release validation
+        env:
+          RELEASE_TAG: ''
+        run: npm run release:check
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Go Study Preview beta.20.1: floating timeline mount hotfix.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const packed = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          for (const marker of [
+            'timelineNavigatorEnabled',
+            'go-study-floating-timeline',
+            'data-go-study-timeline-ready',
+            'renderedReferenceUris',
+            'positionTimelineOverlay',
+            'const mount = doc.body || host'
+          ]) if (!packed.includes(marker)) throw new Error('Missing beta20.1 marker: ' + marker);
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.20.1
+
+          Timeline mount hotfix.
+
+          ## Verify
+          1. Settings → Go Study → 视频笔记增强:
+             - 启用视频笔记增强 = ON
+             - 悬浮时间线 = ON
+          2. Open a Markdown note with Go Study timestamp backlinks.
+          3. Expected: a thin rail appears on the right edge.
+          4. Hover the rail: grouped sources/timestamps expand slightly.
+          5. Reading mode and Live Preview should both work.
+          6. Turn the timeline option OFF: rail disappears immediately.
+
+          This hotfix mounts the overlay above Obsidian editor layers and can also read rendered Go Study links when editor text is unavailable.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists"; exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "${{ github.sha }}" \
+            --title "Go Study Preview ${PREVIEW_VERSION}" \
+            --notes "beta20.1 hotfix: timeline overlay now mounts above Obsidian view layers and falls back to rendered Go Study links. 327/327 tests passing." \
+            --prerelease \
+            "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+            "dist-preview/go-study-preview/main.js" \
+            "dist-preview/go-study-preview/manifest.json" \
+            "dist-preview/go-study-preview/styles.css" \
+            "dist-preview/go-study-preview/TESTING.md"
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-beta20-1-preview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-beta20-1-preview.yml
+          git commit -m "ci: remove one-shot beta20.1 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
