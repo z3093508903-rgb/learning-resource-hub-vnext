@@ -36,8 +36,11 @@ test('runtime registers companion note commands after project state normalizatio
 
 
 test('runtime enters study mode only for the drag-to-study-mode choice before launching video', () => {
-  assert.match(runtimeSource, /choice\?\.studyMode/);
-  assert.match(runtimeSource, /enterStudyMode\(this, \{ note: choice\.note, resource, projectId \}\)/);
-  assert.ok(runtimeSource.indexOf('enterStudyMode(this') < runtimeSource.indexOf('super.openResourceAction(resource, actionType, target, options)'));
-  assert.match(runtimeSource, /exitStudyMode\(this, \{ closeCompanion: true \}\)/);
+  const start = runtimeSource.indexOf('const choice = await chooseStudyNote');
+  const end = runtimeSource.indexOf('recordRecentStudy(this.state, projectId, resource.id', start);
+  const block = runtimeSource.slice(start, end);
+  assert.match(block, /choice\?\.studyMode/);
+  assert.match(block, /enterStudyMode\(this, \{ note: choice\.note, resource, projectId \}\)/);
+  assert.ok(block.indexOf('enterStudyMode(this') < block.indexOf('super.openResourceAction(resource, actionType, target, options)'));
+  assert.match(block, /exitStudyMode\(this, \{ closeCompanion: true \}\)/);
 });
