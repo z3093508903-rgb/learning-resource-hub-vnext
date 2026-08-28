@@ -615,6 +615,11 @@ function registerCompanionNoteCommands(plugin) {
     callback: () => void setCompanionLocked(plugin, !companionWindowState(plugin).locked)
   });
   plugin.addCommand?.({
+    id: 'toggle-companion-note-always-on-top',
+    name: '切换学习笔记小窗置顶',
+    callback: () => void setCompanionAlwaysOnTop(plugin, !companionWindowState(plugin).alwaysOnTop)
+  });
+  plugin.addCommand?.({
     id: 'save-companion-note-layout',
     name: '保存当前学习笔记小窗布局',
     checkCallback: (checking) => {
