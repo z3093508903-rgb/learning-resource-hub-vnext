@@ -33,3 +33,11 @@ test('runtime registers companion note commands after project state normalizatio
   assert.match(runtimeSource, /registerCompanionNoteCommands/);
   assert.ok(runtimeSource.indexOf('ensureProjectNotesState(this.state)') < runtimeSource.indexOf('registerCompanionNoteCommands(this)'));
 });
+
+
+test('runtime enters study mode only for the drag-to-study-mode choice before launching video', () => {
+  assert.match(runtimeSource, /choice\?\.studyMode/);
+  assert.match(runtimeSource, /enterStudyMode\(this, \{ note: choice\.note, resource, projectId \}\)/);
+  assert.ok(runtimeSource.indexOf('enterStudyMode(this') < runtimeSource.indexOf('super.openResourceAction(resource, actionType, target, options)'));
+  assert.match(runtimeSource, /exitStudyMode\(this, \{ closeCompanion: true \}\)/);
+});
