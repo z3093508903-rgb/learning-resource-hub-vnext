@@ -311,3 +311,53 @@ Preview：
 - macOS real-machine acceptance。
 
 **注意：自动化只能证明状态逻辑与构建完整性，不能证明真实 Obsidian pop-out 的窗口几何、CSS、编辑器光标与 OS 行为。**
+
+
+## HUD-first 学习模式
+
+产品方向（2026-08-28 确认）：
+
+学习笔记小窗不是一个需要频繁切换焦点的第二编辑器。正常视频学习流程应以 HUD Capture 为主，小窗负责持续可视化真实 Markdown；只有需要长篇整理时才主动点击小窗。
+
+原则：
+
+> 看视频时，不离开视频。窗口切换是例外，HUD Capture 是默认。
+
+### 一键进入学习模式
+
+在“播放视频 → 选择学习笔记”的现有路口增加“进入学习模式”。
+
+进入后一次完成：
+
+1. 打开所选视频；
+2. 将所选真实 Markdown 作为 Companion Note Window 打开；
+3. 应用右侧栏布局；
+4. 自动锁定为 Capture Target；
+5. 学习模式期间启用小窗 Always-on-top；
+6. 建立当前 Resource / Player / Note 的 Study Pair；
+7. 最终把输入焦点留给 PotPlayer，使 HUD 快捷键成为主交互。
+
+### Always-on-top 边界
+
+Always-on-top 的目的不是让小窗抢焦点，而是：
+
+- PotPlayer 保持前台并正常接收自身快捷键；
+- Companion Note 仍然可见；
+- 两个窗口优先采用不重叠的并排布局；
+- 若 PotPlayer 自身也置顶，需要真实 Windows 验证两者 Z-order；不应一开始就使用过高的窗口层级。
+
+退出学习模式时应解除学习模式专属置顶、Capture 锁定和 Player Session 绑定。
+
+### 后台 Player Target
+
+HUD-first 可以大幅减少焦点切换，但仍应保留 Player Target / Study Session 的后续方向：
+
+- 用户偶尔点击 Companion Note 后，Capture 不应因为 PotPlayer 暂时失焦就失效；
+- 当前学习播放器应由 Study Session 绑定，而不是永久依赖 Windows 前台焦点；
+- 没有明确 Study Session 时，继续保留“PotPlayer 必须前台”的安全门以避免误采集。
+
+### 入口优先级
+
+P0：播放视频时的一键“进入学习模式”。
+
+P1：手动拖动已弹出的笔记到屏幕右侧后吸附为 Companion，可作为辅助入口；不替代一键学习模式。
