@@ -9759,9 +9759,11 @@ class GoStudySettingsTab extends PluginSettingTab {
               `渲染链接 ${d.renderedLinkCount}`,
               `来源 ${d.sourceCount}`,
               `时间点 ${d.timestampCount}`,
+              `解析失败 ${d.parseErrorCount}`,
               `挂载 ${d.mounted}`
             ].join(' · ');
-            new Notice(`时间线诊断：${summary}`, 10000);
+            const detail = d.firstParseError ? ` · 首个错误：${d.firstParseError}` : '';
+            new Notice(`时间线诊断：${summary}${detail}`, 12000);
             console.info('Go Study timeline diagnostic', d);
           } catch (error) {
             new Notice(commandErrorText('时间线诊断失败', error), 8000);
@@ -13663,7 +13665,10 @@ module.exports = {
 "timeline-navigator.cjs": (module, exports, require) => {
 'use strict';
 
-const { parseReferenceUri } = __rhLoad("resource-reference.cjs");
+const {
+  parseProtocolParams,
+  parseReferenceUri
+} = __rhLoad("resource-reference.cjs");
 const { formatPositionClock } = __rhLoad("resource-note.cjs");
 const { browserUrlAtPosition, httpLocator } = __rhLoad("freeform-link-ui.cjs");
 const {
@@ -13744,14 +13749,14 @@ function sourceForReference(plugin, reference) {
   return freeformSource(reference);
 }
 
-function timelineGroupsFromMarkdown(markdown, plugin) {
-  return timelineGroupsFromMatches(extractGoStudyReferenceUris(markdown), plugin);
+function timelineGroupsFromMarkdown(markdown, plugin, diagnostics = null) {
+  return timelineGroupsFromMatches(extractGoStudyReferenceUris(markdown), plugin, diagnostics);
 }
 
-function timelineGroupsFromView(view, markdown, plugin) {
-  const fromMarkdown = timelineGroupsFromMarkdown(markdown, plugin);
+function timelineGroupsFromView(view, markdown, plugin, diagnostics = null) {
+  const fromMarkdown = timelineGroupsFromMarkdown(markdown, plugin, diagnostics);
   if (timelineSummary(fromMarkdown).timestampCount) return fromMarkdown;
-  return timelineGroupsFromMatches(renderedReferenceUris(view), plugin);
+  return timelineGroupsFromMatches(renderedReferenceUris(view), plugin, diagnostics);
 }
 
 function timelineSummary(groups) {
@@ -13808,12 +13813,39 @@ function renderedReferenceUris(view) {
   })).filter((entry) => entry.uri);
 }
 
-function timelineGroupsFromMatches(matches, plugin) {
+function parseTimelineReferenceUri(rawUri) {
+  const raw = String(rawUri || '').trim();
+  try {
+    return parseReferenceUri(raw);
+  } catch (strictError) {
+    // Electron/Chromium custom-scheme URL parsing has differed across versions.
+    // Timeline only accepts the exact Go Study query form and then delegates
+    // validation to the same protocol validator used by Obsidian callbacks.
+    const prefix = 'obsidian://go-study?';
+    if (!raw.startsWith(prefix) || raw.includes('#')) throw strictError;
+    const query = raw.slice(prefix.length);
+    const params = new URLSearchParams(query);
+    const source = { action: 'go-study' };
+    for (const key of new Set([...params.keys()])) {
+      const values = params.getAll(key);
+      source[key] = values.length === 1 ? values[0] : values;
+    }
+    return parseProtocolParams(source);
+  }
+}
+
+function timelineGroupsFromMatches(matches, plugin, diagnostics = null) {
   const groups = new Map();
   for (const match of matches || []) {
     let reference;
-    try { reference = parseReferenceUri(match.uri); }
-    catch { continue; }
+    try { reference = parseTimelineReferenceUri(match.uri); }
+    catch (error) {
+      diagnostics?.parseErrors?.push?.({
+        uri: String(match.uri || '').slice(0, 240),
+        error: error instanceof Error ? error.message : String(error)
+      });
+      continue;
+    }
     const seconds = Number(reference?.position?.seconds);
     if (!Number.isFinite(seconds) || seconds < 0) continue;
     const source = sourceForReference(plugin, reference);
@@ -14026,7 +14058,8 @@ async function diagnoseTimelineNavigator(plugin) {
   const markdown = view ? await markdownTextForView(plugin, view) : '';
   const rawMatches = extractGoStudyReferenceUris(markdown);
   const renderedMatches = view ? renderedReferenceUris(view) : [];
-  const groups = view ? timelineGroupsFromView(view, markdown, plugin) : [];
+  const parserDiagnostics = { parseErrors: [] };
+  const groups = view ? timelineGroupsFromView(view, markdown, plugin, parserDiagnostics) : [];
   let mounted = 0;
   if (view && settings.videoEnhancementEnabled && settings.timelineNavigatorEnabled) {
     renderTimelineIntoView(plugin, view, groups);
@@ -14044,6 +14077,9 @@ async function diagnoseTimelineNavigator(plugin) {
     renderedLinkCount: renderedMatches.length,
     sourceCount: groups.length,
     timestampCount: timelineSummary(groups).timestampCount,
+    parseErrorCount: parserDiagnostics.parseErrors.length,
+    firstParseError: parserDiagnostics.parseErrors[0]?.error || '',
+    firstParseErrorUri: parserDiagnostics.parseErrors[0]?.uri || '',
     hostVisible: Boolean(rect),
     hostWidth: rect ? Math.round(rect.width) : 0,
     hostHeight: rect ? Math.round(rect.height) : 0,
@@ -14140,6 +14176,7 @@ module.exports = {
   managedSource,
   markdownViewText,
   renderedReferenceUris,
+  parseTimelineReferenceUri,
   refreshTimelineNavigator,
   renderTimelineIntoView,
   sourceForReference,
