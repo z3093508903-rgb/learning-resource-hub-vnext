@@ -1217,3 +1217,19 @@ body.go-study-companion-window .go-study-timeline-hover {
     width: 110px;
   }
 }
+
+
+.go-study-timeline-target-pulse {
+  animation: go-study-timeline-target-pulse 900ms ease-out;
+}
+
+@keyframes go-study-timeline-target-pulse {
+  0% {
+    background: color-mix(in srgb, var(--interactive-accent) 16%, transparent);
+    box-shadow: inset 2px 0 color-mix(in srgb, var(--interactive-accent) 58%, transparent);
+  }
+  100% {
+    background: transparent;
+    box-shadow: inset 2px 0 transparent;
+  }
+}
