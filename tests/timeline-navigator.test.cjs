@@ -9,6 +9,7 @@ const {
   diagnoseTimelineNavigator,
   extractGoStudyReferenceUris,
   renderedReferenceUris,
+  parseTimelineReferenceUri,
   timelineGroupsFromMarkdown,
   timelineGroupsFromView,
   timelineSummary
@@ -183,4 +184,39 @@ test('runtime source installs timeline before later DOM entry-point hooks', () =
   const path = require('node:path');
   const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'runtime-entry.cjs'), 'utf8');
   assert.ok(source.indexOf('installTimelineNavigator(this)') < source.indexOf('installProjectNoteEntryPoints(this)'));
+});
+
+
+test('timeline parses the exact managed v1 backlink shape from real Obsidian notes', () => {
+  const samples = [
+    'obsidian://go-study?resource=resource-mt7g36x5-dcnnpi7&position=time%3A16.594&v=1',
+    'obsidian://go-study?resource=resource-mt7g36x6-30v540g&position=time%3A14.937&v=1',
+    'obsidian://go-study?resource=resource-mt7g36x6-30v540g&position=time%3A86.497&v=1',
+    'obsidian://go-study?resource=resource-mt7g36x6-30v540g&position=time%3A112.945&v=1',
+    'obsidian://go-study?resource=resource-mtbx3iac-nusq2e9&position=time%3A8795.174&v=1',
+    'obsidian://go-study?resource=resource-mt7g36x5-emnzwlq&position=time%3A20.788&v=1',
+    'obsidian://go-study?resource=resource-mt7g36x5-emnzwlq&position=time%3A57.397&v=1'
+  ];
+  for (const uri of samples) {
+    const parsed = parseTimelineReferenceUri(uri);
+    assert.equal(parsed.version, 1);
+    assert.equal(parsed.position.type, 'time');
+    assert.ok(parsed.position.seconds >= 0);
+  }
+});
+
+test('timeline groups the real seven-link note into four managed sources even if resources are missing', () => {
+  const plugin = { state: { resources: {} } };
+  const markdown = [
+    '[↗ 回到课程 · 00:16](obsidian://go-study?resource=resource-mt7g36x5-dcnnpi7&position=time%3A16.594&v=1)',
+    '[↗ 回到课程 · 00:14](obsidian://go-study?resource=resource-mt7g36x6-30v540g&position=time%3A14.937&v=1)',
+    '[↗ 回到课程 · 01:26](obsidian://go-study?resource=resource-mt7g36x6-30v540g&position=time%3A86.497&v=1)',
+    '[↗ 回到课程 · 01:52](obsidian://go-study?resource=resource-mt7g36x6-30v540g&position=time%3A112.945&v=1)',
+    '[↗ 回到课程 · 02:26:35](obsidian://go-study?resource=resource-mtbx3iac-nusq2e9&position=time%3A8795.174&v=1)',
+    '[↗ 回到课程 · 00:20](obsidian://go-study?resource=resource-mt7g36x5-emnzwlq&position=time%3A20.788&v=1)',
+    '[↗ 回到课程 · 00:57](obsidian://go-study?resource=resource-mt7g36x5-emnzwlq&position=time%3A57.397&v=1)'
+  ].join('\n');
+  const groups = timelineGroupsFromMarkdown(markdown, plugin);
+  assert.equal(groups.length, 4);
+  assert.equal(timelineSummary(groups).timestampCount, 7);
 });
