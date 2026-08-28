@@ -345,9 +345,11 @@ class GoStudySettingsTab extends PluginSettingTab {
               `渲染链接 ${d.renderedLinkCount}`,
               `来源 ${d.sourceCount}`,
               `时间点 ${d.timestampCount}`,
+              `解析失败 ${d.parseErrorCount}`,
               `挂载 ${d.mounted}`
             ].join(' · ');
-            new Notice(`时间线诊断：${summary}`, 10000);
+            const detail = d.firstParseError ? ` · 首个错误：${d.firstParseError}` : '';
+            new Notice(`时间线诊断：${summary}${detail}`, 12000);
             console.info('Go Study timeline diagnostic', d);
           } catch (error) {
             new Notice(commandErrorText('时间线诊断失败', error), 8000);
