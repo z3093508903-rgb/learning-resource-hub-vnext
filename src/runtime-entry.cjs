@@ -11,6 +11,7 @@ const { GoStudySettingsTab } = require('./product-settings-tab.cjs');
 const { currentProductSettings, ensureProductSettings } = require('./product-settings.cjs');
 const { registerCompanionNoteCommands } = require('./companion-note-window.cjs');
 const { enterStudyMode, exitStudyMode, studyModeState } = require('./study-mode.cjs');
+const { installTimelineNavigator } = require('./timeline-navigator.cjs');
 const { pruneStateBackups } = require('./release-hardening.cjs');
 const {
   clearProjectNoteFoldersOnDelete,
@@ -55,6 +56,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     installLearningControls(this);
     installFreeformBrowserModifier(this);
     installProjectNoteEntryPoints(this);
+    installTimelineNavigator(this);
   }
 
   async openResourceAction(resource, actionType, target, options = {}) {
