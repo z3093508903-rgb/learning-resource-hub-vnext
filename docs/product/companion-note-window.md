@@ -361,3 +361,33 @@ HUD-first 可以大幅减少焦点切换，但仍应保留 Player Target / Study
 P0：播放视频时的一键“进入学习模式”。
 
 P1：手动拖动已弹出的笔记到屏幕右侧后吸附为 Companion，可作为辅助入口；不替代一键学习模式。
+
+
+## beta19-A 交互落地
+
+“开始学习”选择笔记页面采用两种明确语义：
+
+- **点击笔记**：普通学习；
+- **拖动笔记到弹窗右侧独立小卡片**：进入 Study Mode。
+
+独立小卡片常驻在选择弹窗右侧，不依赖列表空白高度，因此笔记数量很多时仍保持稳定入口。
+
+推荐文案：
+
+```text
+拖入
+右侧小窗
+学习模式
+```
+
+进入 Study Mode 后：
+
+1. Companion 使用真实 Markdown；
+2. 使用 right-rail 布局；
+3. 自动锁定 Capture；
+4. 默认 Always-on-top；
+5. 图钉可切换置顶；
+6. 视频随后打开，焦点优先停留在 PotPlayer；
+7. 关闭 Companion 退出 Study Mode，但播放器继续存在。
+
+当前采用 HUD-first 方案 A：正常学习不点击 Companion；需要深度整理时可主动点击，之后手动回到 PotPlayer 焦点。Player Session / 后台 Capture 不属于 beta19-A。
