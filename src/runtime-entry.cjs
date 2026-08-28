@@ -49,6 +49,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     const hadProjectNotes = Boolean(this.state.projectNotes && this.state.uiState?.recentStudyByProject);
     ensureProjectNotesState(this.state);
     if (normalized.changed || !hadProjectNotes) await this.persist();
+    installTimelineNavigator(this);
     registerRememberedNoteTarget(this);
     registerCompanionNoteCommands(this);
     registerImmersiveHotkeys(this);
@@ -56,7 +57,6 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     installLearningControls(this);
     installFreeformBrowserModifier(this);
     installProjectNoteEntryPoints(this);
-    installTimelineNavigator(this);
   }
 
   async openResourceAction(resource, actionType, target, options = {}) {

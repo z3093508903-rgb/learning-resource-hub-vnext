@@ -20,7 +20,10 @@ const {
   updateImmersiveShortcut
 } = require('./immersive-hotkeys.cjs');
 const { immersiveShortcuts } = require('./native-potplayer.cjs');
-const { refreshTimelineNavigator } = require('./timeline-navigator.cjs');
+const {
+  diagnoseTimelineNavigator,
+  refreshTimelineNavigator
+} = require('./timeline-navigator.cjs');
 const {
   applyCompanionLayout,
   companionStatusText,
@@ -323,6 +326,35 @@ class GoStudySettingsTab extends PluginSettingTab {
           await refreshTimelineNavigator(this.plugin);
         });
       });
+
+    new Setting(containerEl)
+      .setName('时间线诊断')
+      .setDesc('如果悬浮时间线没有出现，检查当前笔记是否被识别、是否找到 Go Study 时间戳，以及 UI 是否成功挂载。')
+      .addButton((button) => button
+        .setButtonText('检查当前笔记')
+        .setDisabled(!enabled || !settings.timelineNavigatorEnabled)
+        .onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const d = await diagnoseTimelineNavigator(this.plugin);
+            const summary = [
+              `增强 ${d.videoEnhancementEnabled ? 'ON' : 'OFF'}`,
+              `时间线 ${d.timelineNavigatorEnabled ? 'ON' : 'OFF'}`,
+              `Markdown ${d.activeMarkdown ? 'YES' : 'NO'}`,
+              `原始链接 ${d.rawLinkCount}`,
+              `渲染链接 ${d.renderedLinkCount}`,
+              `来源 ${d.sourceCount}`,
+              `时间点 ${d.timestampCount}`,
+              `挂载 ${d.mounted}`
+            ].join(' · ');
+            new Notice(`时间线诊断：${summary}`, 10000);
+            console.info('Go Study timeline diagnostic', d);
+          } catch (error) {
+            new Notice(commandErrorText('时间线诊断失败', error), 8000);
+          } finally {
+            button.setDisabled(false);
+          }
+        }));
 
     new Setting(containerEl)
       .setName('快捷键操作方式')

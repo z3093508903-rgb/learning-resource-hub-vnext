@@ -9434,7 +9434,10 @@ const {
   updateImmersiveShortcut
 } = __rhLoad("immersive-hotkeys.cjs");
 const { immersiveShortcuts } = __rhLoad("native-potplayer.cjs");
-const { refreshTimelineNavigator } = __rhLoad("timeline-navigator.cjs");
+const {
+  diagnoseTimelineNavigator,
+  refreshTimelineNavigator
+} = __rhLoad("timeline-navigator.cjs");
 const {
   applyCompanionLayout,
   companionStatusText,
@@ -9737,6 +9740,35 @@ class GoStudySettingsTab extends PluginSettingTab {
           await refreshTimelineNavigator(this.plugin);
         });
       });
+
+    new Setting(containerEl)
+      .setName('时间线诊断')
+      .setDesc('如果悬浮时间线没有出现，检查当前笔记是否被识别、是否找到 Go Study 时间戳，以及 UI 是否成功挂载。')
+      .addButton((button) => button
+        .setButtonText('检查当前笔记')
+        .setDisabled(!enabled || !settings.timelineNavigatorEnabled)
+        .onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const d = await diagnoseTimelineNavigator(this.plugin);
+            const summary = [
+              `增强 ${d.videoEnhancementEnabled ? 'ON' : 'OFF'}`,
+              `时间线 ${d.timelineNavigatorEnabled ? 'ON' : 'OFF'}`,
+              `Markdown ${d.activeMarkdown ? 'YES' : 'NO'}`,
+              `原始链接 ${d.rawLinkCount}`,
+              `渲染链接 ${d.renderedLinkCount}`,
+              `来源 ${d.sourceCount}`,
+              `时间点 ${d.timestampCount}`,
+              `挂载 ${d.mounted}`
+            ].join(' · ');
+            new Notice(`时间线诊断：${summary}`, 10000);
+            console.info('Go Study timeline diagnostic', d);
+          } catch (error) {
+            new Notice(commandErrorText('时间线诊断失败', error), 8000);
+          } finally {
+            button.setDisabled(false);
+          }
+        }));
 
     new Setting(containerEl)
       .setName('快捷键操作方式')
@@ -13375,6 +13407,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     const hadProjectNotes = Boolean(this.state.projectNotes && this.state.uiState?.recentStudyByProject);
     ensureProjectNotesState(this.state);
     if (normalized.changed || !hadProjectNotes) await this.persist();
+    installTimelineNavigator(this);
     registerRememberedNoteTarget(this);
     registerCompanionNoteCommands(this);
     registerImmersiveHotkeys(this);
@@ -13382,7 +13415,6 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     installLearningControls(this);
     installFreeformBrowserModifier(this);
     installProjectNoteEntryPoints(this);
-    installTimelineNavigator(this);
   }
 
   async openResourceAction(resource, actionType, target, options = {}) {
@@ -13949,9 +13981,30 @@ async function refreshTimelineView(plugin, view) {
   return groups;
 }
 
+function isMarkdownView(view) {
+  if (!view) return false;
+  try {
+    if (view.getViewType?.() === 'markdown') return true;
+  } catch {}
+  return String(view?.file?.extension || '').toLowerCase() === 'md';
+}
+
 function markdownLeaves(plugin) {
-  try { return plugin?.app?.workspace?.getLeavesOfType?.('markdown') || []; }
-  catch { return []; }
+  const workspace = plugin?.app?.workspace;
+  const leaves = [];
+  try {
+    for (const leaf of workspace?.getLeavesOfType?.('markdown') || []) {
+      if (leaf && !leaves.includes(leaf)) leaves.push(leaf);
+    }
+  } catch {}
+  const activeLeaf = workspace?.activeLeaf;
+  if (activeLeaf && isMarkdownView(activeLeaf.view) && !leaves.includes(activeLeaf)) leaves.unshift(activeLeaf);
+  return leaves;
+}
+
+function activeMarkdownView(plugin) {
+  const view = plugin?.app?.workspace?.activeLeaf?.view || null;
+  return isMarkdownView(view) ? view : null;
 }
 
 async function refreshTimelineNavigator(plugin) {
@@ -13959,16 +14012,51 @@ async function refreshTimelineNavigator(plugin) {
   const results = [];
   for (const leaf of leaves) {
     const view = leaf?.view;
-    if (!view) continue;
+    if (!isMarkdownView(view)) continue;
     results.push(await refreshTimelineView(plugin, view));
   }
   return results;
+}
+
+async function diagnoseTimelineNavigator(plugin) {
+  const settings = plugin?.state?.uiState || {};
+  const view = activeMarkdownView(plugin);
+  const host = markdownViewHost(view);
+  const doc = host?.ownerDocument || view?.containerEl?.ownerDocument || null;
+  const markdown = view ? await markdownTextForView(plugin, view) : '';
+  const rawMatches = extractGoStudyReferenceUris(markdown);
+  const renderedMatches = view ? renderedReferenceUris(view) : [];
+  const groups = view ? timelineGroupsFromView(view, markdown, plugin) : [];
+  let mounted = 0;
+  if (view && settings.videoEnhancementEnabled && settings.timelineNavigatorEnabled) {
+    renderTimelineIntoView(plugin, view, groups);
+    const owner = timelineOwnerId(view);
+    mounted = doc?.querySelectorAll?.(`.go-study-floating-timeline[data-go-study-owner="${owner}"]`)?.length || 0;
+  }
+  const rect = visibleRect(host);
+  return {
+    videoEnhancementEnabled: Boolean(settings.videoEnhancementEnabled),
+    timelineNavigatorEnabled: Boolean(settings.timelineNavigatorEnabled),
+    activeMarkdown: Boolean(view),
+    activeFile: String(view?.file?.path || ''),
+    markdownLength: markdown.length,
+    rawLinkCount: rawMatches.length,
+    renderedLinkCount: renderedMatches.length,
+    sourceCount: groups.length,
+    timestampCount: timelineSummary(groups).timestampCount,
+    hostVisible: Boolean(rect),
+    hostWidth: rect ? Math.round(rect.width) : 0,
+    hostHeight: rect ? Math.round(rect.height) : 0,
+    viewportWidth: Number(doc?.documentElement?.clientWidth || doc?.defaultView?.innerWidth || 0),
+    mounted
+  };
 }
 
 function installTimelineNavigator(plugin) {
   const manager = {
     timer: null,
     observers: [],
+    observedDocs: new Set(),
     schedule(delay = 70) {
       if (this.timer) clearTimeout(this.timer);
       this.timer = setTimeout(() => {
@@ -13977,6 +14065,25 @@ function installTimelineNavigator(plugin) {
       }, delay);
     },
     refresh() { return refreshTimelineNavigator(plugin); },
+    ensureDocument(doc) {
+      if (!doc?.body || this.observedDocs.has(doc)) return;
+      this.observedDocs.add(doc);
+      const win = doc.defaultView;
+      const onViewport = () => this.schedule(0);
+      try {
+        win?.addEventListener?.('resize', onViewport, { passive: true });
+        doc.addEventListener?.('scroll', onViewport, true);
+        const Observer = win?.MutationObserver || globalThis.MutationObserver;
+        const observer = Observer ? new Observer(() => this.schedule(90)) : null;
+        observer?.observe?.(doc.body, { childList: true, subtree: true });
+        this.observers.push(() => {
+          observer?.disconnect?.();
+          win?.removeEventListener?.('resize', onViewport);
+          doc.removeEventListener?.('scroll', onViewport, true);
+          this.observedDocs.delete(doc);
+        });
+      } catch {}
+    },
     destroy() {
       if (this.timer) clearTimeout(this.timer);
       this.timer = null;
@@ -14003,19 +14110,17 @@ function installTimelineNavigator(plugin) {
     } catch {}
   }
 
-  const docs = new Set(markdownLeaves(plugin).map((leaf) => markdownViewHost(leaf?.view)?.ownerDocument).filter(Boolean));
-  for (const doc of docs) {
-    const win = doc.defaultView;
-    const onViewport = () => manager.schedule(0);
-    try {
-      win?.addEventListener?.('resize', onViewport, { passive: true });
-      doc?.addEventListener?.('scroll', onViewport, true);
-      manager.observers.push(() => {
-        win?.removeEventListener?.('resize', onViewport);
-        doc?.removeEventListener?.('scroll', onViewport, true);
-      });
-    } catch {}
+  for (const leaf of markdownLeaves(plugin)) {
+    manager.ensureDocument(markdownViewHost(leaf?.view)?.ownerDocument);
   }
+
+  const originalSchedule = manager.schedule.bind(manager);
+  manager.schedule = (delay = 70) => {
+    for (const leaf of markdownLeaves(plugin)) {
+      manager.ensureDocument(markdownViewHost(leaf?.view)?.ownerDocument);
+    }
+    return originalSchedule(delay);
+  };
 
   plugin.register?.(() => manager.destroy());
   manager.schedule(0);
@@ -14024,11 +14129,14 @@ function installTimelineNavigator(plugin) {
 
 module.exports = {
   activateTimelineReference,
+  activeMarkdownView,
   browserUrlForTimelineReference,
   cleanSourceTitle,
   extractGoStudyReferenceUris,
+  diagnoseTimelineNavigator,
   freeformSource,
   installTimelineNavigator,
+  isMarkdownView,
   managedSource,
   markdownViewText,
   renderedReferenceUris,
