@@ -388,3 +388,27 @@ Timeline 不把所有时间混为一根伪时间轴，而是读取 Go Study 回�
 - Bilibili → 保留 `p` 并应用 `t=<seconds>`。
 
 当前仍处于真实 Obsidian UI 验收阶段，PR 不合并。
+
+
+## beta20.1：Timeline Mount Hotfix
+
+Windows 实机反馈：beta20 中“启用视频笔记增强”和“悬浮时间线”均已开启，当前 Markdown 也包含多条 Go Study 时间戳，但右侧 rail 完全没有出现。
+
+已按 Obsidian 实机挂载问题修复：
+
+- 优先使用真实 Markdown `.view-content`；
+- 当 editor/source text 不可用时，从渲染后的 `obsidian://go-study` anchors 回退解析；
+- Timeline 不再挂在 CodeMirror / Markdown preview 内部，而是挂到对应窗口的 `document.body`；
+- 使用 fixed positioning 对齐当前 Markdown view rect，避免 overflow / stacking context 把 rail 裁掉或压在编辑器下；
+- scroll / resize 时重新定位；
+- 透明、Hover 轻展开的视觉规则保持不变。
+
+Hotfix：
+- branch `fix/timeline-mount-beta20-1`
+- Draft PR #30
+- Preview `Go Study Preview 0.3.0-beta.20.1`
+- CI #213 PASS
+- **327 / 327 tests PASS**
+- ZIP SHA256 `d7d6f9fe2c868e168b4086fee52809f26452dcb6e99d1ffa52a3f3d554ec18d4`
+
+仍需用户 Windows / Obsidian 实机复验，PR 不合并。
