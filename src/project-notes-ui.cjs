@@ -565,7 +565,6 @@ class ProjectNoteBoxModal extends Modal {
       placeholder: '搜索整个 Vault 的 Markdown…'
     });
     this.bodyEl = ui.body;
-    this.createStudyModeDropTarget();
     ui.search.value = this.query;
     ui.search.addEventListener('input', () => {
       this.query = ui.search.value;
@@ -799,6 +798,7 @@ class StudyNotePickerModal extends Modal {
       placeholder: '搜索 Markdown…'
     });
     this.bodyEl = ui.body;
+    this.createStudyModeDropTarget();
     ui.search.value = this.query;
     ui.search.addEventListener('input', () => {
       this.query = ui.search.value;
