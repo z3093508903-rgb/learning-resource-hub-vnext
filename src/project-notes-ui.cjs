@@ -19,6 +19,8 @@ const {
 } = require('./project-notes.cjs');
 const { currentProductSettings } = require('./product-settings.cjs');
 const { rememberNoteTarget } = require('./note-target.cjs');
+const { requestNativePotPlayer } = require('./native-potplayer.cjs');
+const { enterStudyMode } = require('./study-mode.cjs');
 
 function markdownFiles(plugin) {
   const vault = plugin?.app?.vault;
@@ -319,6 +321,78 @@ function studyRowButton(container, file, secondary, onClick, options = {}) {
   return row;
 }
 
+async function enterCurrentPotPlayerStudyMode(plugin, filePath, projectId = '') {
+  const path = String(filePath || '').trim();
+  const file = plugin?.app?.vault?.getAbstractFileByPath?.(path);
+  if (!file || Array.isArray(file.children) || String(file.extension || '').toLowerCase() !== 'md') {
+    throw new Error('只能把 Markdown 笔记拖入学习小窗。');
+  }
+  const current = await requestNativePotPlayer('current', { foregroundOnly: false });
+  if (!current?.media?.path) throw new Error('没有读取到当前 PotPlayer 视频。');
+  const result = await enterStudyMode(plugin, {
+    filePath: file.path,
+    projectId,
+    freeformMedia: current.media,
+    alwaysOnTop: true
+  });
+  return { ...result, media: current.media };
+}
+
+function workbenchStudyDropTarget(doc, parent, onDrop) {
+  const target = parent.createDiv
+    ? parent.createDiv({ cls: 'go-study-study-mode-drop-target is-workbench' })
+    : (() => {
+        const el = doc.createElement('div');
+        el.className = 'go-study-study-mode-drop-target is-workbench';
+        parent.appendChild(el);
+        return el;
+      })();
+  target.setAttribute?.('aria-label', '拖入笔记，使用当前 PotPlayer 视频进入学习模式');
+
+  const copy = target.createDiv ? target.createDiv({ cls: 'go-study-study-mode-drop-copy' }) : (() => {
+    const el = doc.createElement('div'); el.className = 'go-study-study-mode-drop-copy'; target.appendChild(el); return el;
+  })();
+  const makeText = (tag, text) => {
+    if (copy.createEl) return copy.createEl(tag, { text });
+    const el = doc.createElement(tag); el.textContent = text; copy.appendChild(el); return el;
+  };
+  makeText('span', '拖入');
+  makeText('span', '右侧小窗');
+  makeText('strong', '学习模式');
+
+  const doodle = target.createDiv ? target.createDiv({ cls: 'go-study-study-mode-doodle' }) : (() => {
+    const el = doc.createElement('div'); el.className = 'go-study-study-mode-doodle'; target.appendChild(el); return el;
+  })();
+  const noteIcon = doodle.createSpan ? doodle.createSpan({ cls: 'go-study-study-mode-note-icon' }) : (() => {
+    const el = doc.createElement('span'); el.className = 'go-study-study-mode-note-icon'; doodle.appendChild(el); return el;
+  })();
+  const handIcon = doodle.createSpan ? doodle.createSpan({ cls: 'go-study-study-mode-hand-icon' }) : (() => {
+    const el = doc.createElement('span'); el.className = 'go-study-study-mode-hand-icon'; doodle.appendChild(el); return el;
+  })();
+  try { setIcon(noteIcon, 'notebook-pen'); } catch {}
+  try { setIcon(handIcon, 'mouse-pointer-2'); } catch {}
+
+  const activate = (event) => {
+    event.preventDefault();
+    target.addClass?.('is-active') || target.classList?.add?.('is-active');
+    try { event.dataTransfer.dropEffect = 'move'; } catch {}
+  };
+  target.addEventListener('dragenter', activate);
+  target.addEventListener('dragover', activate);
+  target.addEventListener('dragleave', (event) => {
+    if (!target.contains?.(event.relatedTarget)) {
+      target.removeClass?.('is-active') || target.classList?.remove?.('is-active');
+    }
+  });
+  target.addEventListener('drop', (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    target.removeClass?.('is-active') || target.classList?.remove?.('is-active');
+    void onDrop?.(event);
+  });
+  return target;
+}
+
 function pickerHeading(container, title, description) {
   const heading = container.createDiv({ cls: 'rh-next-modal-heading go-study-picker-heading' });
   const copy = heading.createDiv();
@@ -456,6 +530,17 @@ function installPickerUxStyles(plugin, doc = globalThis.document) {
   box-shadow: 0 10px 30px rgba(0,0,0,.18);
   transform: translateY(-50%) rotate(.35deg);
   transition: border-color .14s ease, box-shadow .14s ease, transform .14s ease, background .14s ease;
+}
+.go-study-study-mode-drop-target.is-workbench {
+  position: fixed;
+  left: auto;
+  right: 24px;
+  top: 50%;
+  z-index: 2147481000;
+  transform: translateY(-50%) rotate(.35deg);
+}
+.go-study-study-mode-drop-target.is-workbench.is-active {
+  transform: translateY(-50%) rotate(0deg) scale(1.035);
 }
 .go-study-study-mode-drop-target.is-active {
   border-color: var(--interactive-accent);
@@ -888,12 +973,63 @@ function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
   if (!doc?.querySelectorAll || !plugin?.manifest?.id) return null;
   installPickerUxStyles(plugin, doc);
   const selector = `.workspace-leaf-content[data-type="${plugin.manifest.id}-workbench"]`;
+  let draggedStudyNote = null;
+  let workbenchDropEl = null;
+
+  const removeWorkbenchDrop = () => {
+    workbenchDropEl?.remove?.();
+    workbenchDropEl = null;
+  };
+
+  const showWorkbenchDrop = (leaf) => {
+    removeWorkbenchDrop();
+    workbenchDropEl = workbenchStudyDropTarget(doc, leaf, async () => {
+      const selection = draggedStudyNote;
+      draggedStudyNote = null;
+      removeWorkbenchDrop();
+      if (!selection?.path) return;
+      try {
+        const result = await enterCurrentPotPlayerStudyMode(plugin, selection.path, selection.projectId);
+        new Notice(`已进入学习模式 · ${noteDisplayName({ path: selection.path })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
+      } catch (error) {
+        new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      }
+    });
+  };
+
+  const bindWorkbenchStudyRows = (leaf) => {
+    for (const row of leaf.querySelectorAll?.('[data-go-study-study-note-path]') || []) {
+      if (row.dataset?.goStudyStudyDragBound === 'true') continue;
+      row.dataset.goStudyStudyDragBound = 'true';
+      row.setAttribute?.('draggable', 'true');
+      row.classList?.add?.('go-study-study-note-row');
+      row.addEventListener('dragstart', (event) => {
+        draggedStudyNote = {
+          path: String(row.dataset?.goStudyStudyNotePath || ''),
+          projectId: String(row.dataset?.goStudyStudyProjectId || '')
+        };
+        try {
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', draggedStudyNote.path);
+        } catch {}
+        row.classList?.add?.('is-dragging');
+        showWorkbenchDrop(leaf);
+      });
+      row.addEventListener('dragend', () => {
+        row.classList?.remove?.('is-dragging');
+        draggedStudyNote = null;
+        removeWorkbenchDrop();
+      });
+    }
+  };
+
   const inject = () => {
     const projectId = String(plugin.state?.uiState?.currentProjectId || '');
     if (plugin.state?.uiState?.route !== 'project' || !plugin.state?.projects?.[projectId]) return;
     const study = recentStudy(plugin.state, projectId);
     const noteCount = projectNotes(plugin.state, projectId).length;
     for (const leaf of doc.querySelectorAll(selector)) {
+      bindWorkbenchStudyRows(leaf);
       const actions = leaf.querySelector?.('.rh-next-project-heading .rh-next-section-actions');
       if (!actions || actions.querySelector?.('[data-go-study-project-notes]')) continue;
       const noteButton = createActionButton(doc, noteCount ? `笔记 ${noteCount}` : '笔记', 'notebook-tabs');
@@ -913,8 +1049,11 @@ function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
   const Observer = doc.defaultView?.MutationObserver || globalThis.MutationObserver;
   const observer = Observer ? new Observer(inject) : null;
   observer?.observe?.(doc.body, { childList: true, subtree: true });
-  plugin.register?.(() => observer?.disconnect?.());
-  return { inject, observer };
+  plugin.register?.(() => {
+    observer?.disconnect?.();
+    removeWorkbenchDrop();
+  });
+  return { inject, observer, removeWorkbenchDrop };
 }
 
 module.exports = {
@@ -925,6 +1064,7 @@ module.exports = {
   chooseStudyNote,
   createPickerShell,
   createProjectNote,
+  enterCurrentPotPlayerStudyMode,
   installPickerUxStyles,
   focusProjectNoteAtEnd,
   installProjectNoteEntryPoints,
