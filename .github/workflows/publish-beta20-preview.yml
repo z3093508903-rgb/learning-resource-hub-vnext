@@ -1,0 +1,171 @@
+name: Publish Beta20 Preview
+
+on:
+  push:
+    branches:
+      - work/timeline-navigator-beta20
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.20
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Full release validation
+        env:
+          RELEASE_TAG: ''
+        run: npm run release:check
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Go Study Preview beta.20: lightweight floating timeline navigator.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+
+          const packed = fs.readFileSync(path.join(out, 'main.js'), 'utf8');
+          for (const marker of [
+            'go-study-preview-workbench',
+            'timelineNavigatorEnabled',
+            'go-study-floating-timeline',
+            '悬浮时间线',
+            'Ctrl 点击网页',
+            'browserUrlAtPosition',
+            'title'
+          ]) {
+            if (!packed.includes(marker)) throw new Error('Missing beta.20 marker: ' + marker);
+          }
+          if (packed.includes(oldView)) throw new Error('Preview view isolation failed.');
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.20
+
+          beta20 acceptance build: lightweight optional floating timeline.
+
+          ## Install / upgrade
+          1. Keep your existing data.json.
+          2. Replace main.js, manifest.json, styles.css in:
+             .obsidian/plugins/go-study-preview/
+          3. Reload Obsidian.
+          4. Confirm Community plugins shows Go Study Preview 0.3.0-beta.20.
+
+          ## Enable
+          Settings → Go Study → 视频笔记增强:
+          - 启用视频笔记增强 = ON
+          - 悬浮时间线 = ON
+
+          ## Core acceptance
+          1. Open a Markdown note containing Go Study timestamp backlinks.
+          2. Expected: at the right edge only a very thin rail and small dots appear.
+          3. Move the mouse to that rail.
+             Expected: it expands only slightly; background remains transparent and no card panel appears.
+          4. For a note containing timestamps from multiple videos:
+             Expected: timestamps are grouped under separate source names.
+          5. Click a local/Managed timestamp.
+             Expected: Go Study reuses existing playback and jumps to that source/time.
+          6. Ctrl+click a Bilibili-backed timestamp.
+             Expected: system browser opens the Bilibili page at the captured t=<seconds>, preserving p= when present.
+          7. Capture a new Freeform local video timestamp.
+             Expected: visible Markdown remains clean (“回到课程 · time”), while the rail can show the remembered video title / file origin.
+          8. Turn 悬浮时间线 OFF.
+             Expected: all rails disappear immediately.
+          9. Open a normal note without Go Study timestamps.
+             Expected: no timeline UI appears.
+
+          ## Regression
+          - beta19-A Study Mode drag flow
+          - Companion always-on-top pin
+          - Alt+S HUD and legacy capture
+          - Managed / Freeform click playback
+          - Freeform Ctrl-click browser behavior
+          - Bilibili p + t browser jump
+
+          ## Intentional boundary
+          - Timeline is optional and default OFF.
+          - It does not rewrite visible Markdown.
+          - It does not introduce a second playback protocol.
+          - Player Session/background capture remains out of scope.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release tag already exists; refusing to overwrite."
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "${{ github.sha }}" \
+            --title "Go Study Preview ${PREVIEW_VERSION}" \
+            --notes "Final functional enhancement preview: optional transparent right-edge Timeline Navigator, mixed-video source grouping, click-to-jump, Ctrl-click web/Bilibili time jump, and hidden Freeform source-title metadata. Draft acceptance build; do not merge until real Obsidian testing passes." \
+            --prerelease \
+            "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+            "dist-preview/go-study-preview/main.js" \
+            "dist-preview/go-study-preview/manifest.json" \
+            "dist-preview/go-study-preview/styles.css" \
+            "dist-preview/go-study-preview/TESTING.md"
+
+      - name: Verify release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release view "$RELEASE_TAG" --json tagName,isPrerelease,assets > release.json
+          node <<'NODE'
+          const fs = require('node:fs');
+          const r = JSON.parse(fs.readFileSync('release.json', 'utf8'));
+          if (r.tagName !== process.env.RELEASE_TAG || !r.isPrerelease) throw new Error('Release metadata mismatch.');
+          const names = new Set(r.assets.map(x => x.name));
+          for (const name of [
+            'go-study-preview-' + process.env.PREVIEW_VERSION + '.zip',
+            'main.js', 'manifest.json', 'styles.css', 'TESTING.md'
+          ]) if (!names.has(name)) throw new Error('Missing asset: ' + name);
+          NODE
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-beta20-preview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-beta20-preview.yml
+          git commit -m "ci: remove one-shot beta.20 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
