@@ -192,3 +192,22 @@ registerObsidianProtocolHandler('go-study', ...)
 4. 再决定是否为 legacy Next 做条件注册 / 兼容迁移。
 
 在真实兼容方案确定前，不声称两个插件支持共存。
+
+
+## Companion HUD-first Study Mode
+
+beta18 实机验收暴露的体验问题：
+
+- PotPlayer 置顶/获焦点后，普通 Companion popout 会被压到后方；
+- 若反复点击笔记和播放器，则回到 Alt+Tab / 焦点切换工作流，削弱小窗价值；
+- 当前 Capture 仍把 PotPlayer 前台状态当作学习上下文的一部分。
+
+已确认产品方向：
+
+- 学习模式期间 Companion 应支持 Always-on-top，保持可见但不抢焦点；
+- “播放视频 → 选择笔记”处增加“一键进入学习模式”；
+- 一键流程自动打开右侧 Companion、锁定 Capture Target、打开视频并建立 Study Pair；
+- 日常学习以 HUD 快捷键为主，小窗负责实时显示，深度编辑才主动获取焦点；
+- Player Target / 后台 Capture 作为后续稳健性补全，避免用户偶尔点击小窗后 HUD 失效。
+
+当前优先级：先验证 Windows 下 Companion Always-on-top + PotPlayer 置顶的真实 Z-order，再决定是否需要更高窗口层级。
