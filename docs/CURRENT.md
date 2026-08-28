@@ -157,3 +157,38 @@ Go Study 设置页新增“学习笔记小窗”：
 2. 将 Companion Note Window MVP 标记 accepted behavior；
 3. 更新 ADR-008；
 4. 再决定是否 Merge / 进入下一轮。
+
+
+## Legacy Next 共存冲突
+
+Windows 实机发现：
+
+- `go-study-preview` 与 `learning-resource-hub-next` 同时启用时，Go Study 可能无法完成启动；
+- 关闭 `learning-resource-hub-next` 后，Go Study 可立即正常启用；
+- 新 Vault 仅启用 Go Study 时同一 Preview 正常。
+
+用户本地代码排查定位到：
+
+```text
+REFERENCE_ACTION = 'go-study'
+registerObsidianProtocolHandler('go-study', ...)
+```
+
+两代插件均注册同一 Obsidian protocol action，冷启动 / 完整 reload 时可能发生重复注册冲突。
+
+这解释了“昨晚曾共存、今天重载后失败”：之前的会话可能没有触发相同冷启动顺序，或其中一方没有重新执行 protocol registration。
+
+当前临时策略：
+
+- **只启用一个版本**；
+- 推荐停用 legacy `learning-resource-hub-next`，保留 Go Study Preview；
+- 不通过重命名现有 `obsidian://go-study` 协议来仓促修复，因为会影响已有笔记回链兼容。
+
+后续最小修复候选：
+
+1. Go Study 启动时检测 legacy Next 共存；
+2. protocol registration 必须 fail-safe，重复注册不能让整个插件启动失败；
+3. 检测到冲突时显示明确的兼容提示；
+4. 再决定是否为 legacy Next 做条件注册 / 兼容迁移。
+
+在真实兼容方案确定前，不声称两个插件支持共存。
