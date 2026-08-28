@@ -211,3 +211,55 @@ beta18 实机验收暴露的体验问题：
 - Player Target / 后台 Capture 作为后续稳健性补全，避免用户偶尔点击小窗后 HUD 失效。
 
 当前优先级：先验证 Windows 下 Companion Always-on-top + PotPlayer 置顶的真实 Z-order，再决定是否需要更高窗口层级。
+
+
+## beta19-A：Study Mode Shell 已实现
+
+开发分支：
+
+`work/study-mode-beta19a`
+
+Draft PR：
+
+`#27 Go Study beta19-A: HUD-first Study Mode shell`
+
+最终当前分支 HEAD：
+
+`7002b1c14fcd97e15f4578dbd921e41e5c06a999`
+
+CI：
+
+- run #195 ✅
+- release checks ✅
+- committed `main.js` current ✅
+- **314 / 314 tests PASS**
+
+### 已实现
+
+- “开始学习”现有 UI 保持主体结构不变；
+- 点击笔记仍走普通学习模式；
+- 最近笔记、项目笔记、Vault 搜索结果均可拖动；
+- 弹窗右侧增加一个独立的小型 Study Mode Drop Target：
+  - 拖入
+  - 右侧小窗
+  - 学习模式
+- 将笔记拖到该小卡片后：
+  - 选择该笔记作为本次学习目标；
+  - 打开真实 Markdown Companion Window；
+  - 应用现有 right-rail 布局；
+  - 自动锁定 Capture Target；
+  - 默认 Always-on-top；
+  - 随后启动视频，使最终焦点自然回到 PotPlayer。
+- Companion 增加图钉控制：
+  - 默认置顶；
+  - 可手动取消 / 恢复置顶；
+  - 同时增加命令“切换学习笔记小窗置顶”。
+- Companion native title 尝试缩短为纯笔记名，不再显示 Vault / Obsidian 冗余标题。
+- 关闭 Companion = 退出 Study Mode；
+- 退出 Study Mode 不关闭 PotPlayer。
+
+### 明确未做
+
+beta19-A 不实现 Player Session / 后台 Capture。
+
+因此如果用户主动点击 Companion 并把焦点交给笔记窗口，当前 HUD 仍可能因为 PotPlayer 不在前台而拒绝 Capture。这是已确认的方案 A 边界，后续是否进入 beta19-B 再根据真实使用频率决定。
