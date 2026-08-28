@@ -44,3 +44,9 @@ test('runtime enters study mode only for the drag-to-study-mode choice before la
   assert.ok(block.indexOf('enterStudyMode(this') < block.indexOf('super.openResourceAction(resource, actionType, target, options)'));
   assert.match(block, /exitStudyMode\(this, \{ closeCompanion: true \}\)/);
 });
+
+
+test('runtime mounts optional floating timeline after settings normalization', () => {
+  assert.match(runtimeSource, /installTimelineNavigator/);
+  assert.ok(runtimeSource.indexOf('ensureProductSettings(this)') < runtimeSource.indexOf('installTimelineNavigator(this)'));
+});
