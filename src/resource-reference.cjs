@@ -3,7 +3,7 @@
 const REFERENCE_ACTION = 'go-study';
 const REFERENCE_VERSION = 1;
 const FREEFORM_REFERENCE_VERSION = 2;
-const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v', 'mode', 'locator', 'name', 'path', 'web']);
+const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v', 'mode', 'locator', 'name', 'title', 'path', 'web']);
 const ALLOWED_PROTOCOL_META_KEYS = new Set(['action']);
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
 
@@ -75,6 +75,15 @@ function freeformLocatorName(value) {
   return normalizePortableMediaName(tail);
 }
 
+function normalizeOptionalMediaTitle(value) {
+  const title = String(value || '').replace(/[\r\n\t]+/g, ' ').trim();
+  if (!title) return '';
+  if (title.length > 512 || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(title)) {
+    throw new Error('Go Study 自由回链中的媒体标题无效。');
+  }
+  return title;
+}
+
 function normalizeOptionalWebLocator(value) {
   const raw = String(value || '').trim();
   if (!raw) return '';
@@ -99,10 +108,12 @@ function validateFreeformReferenceData(input) {
   const source = input && typeof input === 'object' ? input : {};
   const locator = normalizeFreeformLocator(source.locator ?? source.path);
   const version = normalizeReferenceVersion(source.version ?? source.v ?? FREEFORM_REFERENCE_VERSION);
+  const title = normalizeOptionalMediaTitle(source.title);
   return {
     mode: 'freeform',
     locator,
     name: normalizePortableMediaName(source.name || freeformLocatorName(locator)),
+    ...(title ? { title } : {}),
     web: normalizeOptionalWebLocator(source.web),
     position: normalizeReferencePosition(source.position),
     version
@@ -124,6 +135,7 @@ function buildFreeformReferenceUri(input) {
   url.searchParams.set('mode', 'freeform');
   url.searchParams.set('locator', reference.locator);
   url.searchParams.set('name', reference.name);
+  if (reference.title) url.searchParams.set('title', reference.title);
   if (reference.web) url.searchParams.set('web', reference.web);
   url.searchParams.set('position', serializeReferencePosition(reference.position));
   url.searchParams.set('v', String(reference.version));
@@ -143,12 +155,13 @@ function parseQueryEntries(searchParams) {
       mode: 'freeform',
       locator: searchParams.get('locator') || searchParams.get('path'),
       name: searchParams.get('name') || '',
+      title: searchParams.get('title') || '',
       web: searchParams.get('web'),
       position: searchParams.get('position'),
       v: searchParams.get('v')
     });
   }
-  if (searchParams.has('mode') || searchParams.has('locator') || searchParams.has('name') || searchParams.has('path') || searchParams.has('web')) {
+  if (searchParams.has('mode') || searchParams.has('locator') || searchParams.has('name') || searchParams.has('title') || searchParams.has('path') || searchParams.has('web')) {
     throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
   }
   return validateReferenceData({
@@ -189,7 +202,7 @@ function parseProtocolParams(params) {
     if (source.locator != null && source.path != null) throw new Error('Go Study 自由回链不能同时包含 locator 与旧 path 参数。');
     return validateFreeformReferenceData(source);
   }
-  if (source.mode != null || source.locator != null || source.name != null || source.path != null || source.web != null) {
+  if (source.mode != null || source.locator != null || source.name != null || source.title != null || source.path != null || source.web != null) {
     throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
   }
   return validateReferenceData({
@@ -209,6 +222,7 @@ module.exports = {
   buildReferenceUri,
   freeformLocatorName,
   normalizeFreeformLocator,
+  normalizeOptionalMediaTitle,
   normalizeOptionalWebLocator,
   normalizePortableMediaName,
   normalizeReferencePosition,

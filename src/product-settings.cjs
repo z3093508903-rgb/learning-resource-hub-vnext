@@ -5,6 +5,7 @@ const { DEFAULT_HUD_SLOTS, normalizeHudSlots } = require('./capture-actions.cjs'
 const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   autoCollapseSidebar: true,
   videoEnhancementEnabled: false,
+  timelineNavigatorEnabled: false,
   videoResumeAfterSave: true,
   videoResumeAfterCancel: true,
   videoSuccessFeedback: true,
@@ -135,6 +136,7 @@ function currentProductSettings(plugin) {
   return {
     autoCollapseSidebar: boolOr(ui.autoCollapseSidebar, DEFAULT_PRODUCT_SETTINGS.autoCollapseSidebar),
     videoEnhancementEnabled: boolOr(ui.videoEnhancementEnabled, DEFAULT_PRODUCT_SETTINGS.videoEnhancementEnabled),
+    timelineNavigatorEnabled: boolOr(ui.timelineNavigatorEnabled, DEFAULT_PRODUCT_SETTINGS.timelineNavigatorEnabled),
     videoResumeAfterSave: boolOr(ui.videoResumeAfterSave, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterSave),
     videoResumeAfterCancel: boolOr(ui.videoResumeAfterCancel, DEFAULT_PRODUCT_SETTINGS.videoResumeAfterCancel),
     videoSuccessFeedback: boolOr(ui.videoSuccessFeedback, DEFAULT_PRODUCT_SETTINGS.videoSuccessFeedback),

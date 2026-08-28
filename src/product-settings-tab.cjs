@@ -20,6 +20,7 @@ const {
   updateImmersiveShortcut
 } = require('./immersive-hotkeys.cjs');
 const { immersiveShortcuts } = require('./native-potplayer.cjs');
+const { refreshTimelineNavigator } = require('./timeline-navigator.cjs');
 const {
   applyCompanionLayout,
   companionStatusText,
@@ -308,6 +309,18 @@ class GoStudySettingsTab extends PluginSettingTab {
         toggle.setDisabled?.(!enabled);
         toggle.onChange(async (value) => {
           await updateProductSetting(this.plugin, 'freeformVideoNotesEnabled', value);
+        });
+      });
+
+    new Setting(containerEl)
+      .setName('悬浮时间线')
+      .setDesc('可选视频功能增强。只在包含 Go Study 时间戳的 Markdown 右侧显示一条极轻量时间线；鼠标移到右边缘才展开来源与时间点。')
+      .addToggle((toggle) => {
+        toggle.setValue(settings.timelineNavigatorEnabled);
+        toggle.setDisabled?.(!enabled);
+        toggle.onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'timelineNavigatorEnabled', value);
+          await refreshTimelineNavigator(this.plugin);
         });
       });
 

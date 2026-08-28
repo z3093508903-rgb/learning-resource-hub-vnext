@@ -140,3 +140,15 @@ test('freeform web captures keep their browser URL in the permanent v2 backlink'
   assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1TEST?p=2');
   assert.equal(parsed.position.seconds, 65);
 });
+
+
+test('freeform generated backlink stores the player media title as hidden metadata', () => {
+  const markdown = buildFreeformPositionMarkdown(
+    { path: 'D:\\Loose\\learning-photo.mp4', title: '学习摄影 - PotPlayer' },
+    { type: 'time', seconds: 42 }
+  );
+  const uri = markdown.match(/\((obsidian:\/\/go-study\?[^)]+)\)/)?.[1];
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.title, '学习摄影');
+  assert.equal(parsed.name, 'learning-photo.mp4');
+});

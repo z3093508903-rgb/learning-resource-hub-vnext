@@ -1,0 +1,93 @@
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  activateTimelineReference,
+  extractGoStudyReferenceUris,
+  timelineGroupsFromMarkdown,
+  timelineSummary
+} = require('../src/timeline-navigator.cjs');
+const {
+  buildFreeformReferenceUri,
+  buildReferenceUri
+} = require('../src/resource-reference.cjs');
+
+function pluginFixture() {
+  return {
+    state: {
+      resources: {
+        r1: { id: 'r1', title: '学习摄影', kind: 'video' },
+        r2: { id: 'r2', title: '构图基础', kind: 'video' }
+      }
+    },
+    resourceActions(resource) {
+      if (resource.id === 'r1') {
+        return {
+          playTarget: { type: 'uri', uri: 'https://www.bilibili.com/video/BV1PHOTO' },
+          webTarget: 'https://www.bilibili.com/video/BV1PHOTO'
+        };
+      }
+      return { playTarget: { type: 'potplayer', target: 'D:\\Video\\composition.mp4' } };
+    },
+    async openResourceReference(reference) {
+      this.lastReference = reference;
+      return true;
+    }
+  };
+}
+
+test('timeline extracts Go Study links and groups mixed-video timestamps by source', () => {
+  const plugin = pluginFixture();
+  const a = buildReferenceUri({ resourceId: 'r1', position: { type: 'time', seconds: 86 }, version: 1 });
+  const b = buildReferenceUri({ resourceId: 'r2', position: { type: 'time', seconds: 42 }, version: 1 });
+  const c = buildReferenceUri({ resourceId: 'r1', position: { type: 'time', seconds: 14 }, version: 1 });
+  const markdown = [
+    `[第一处](${a})`,
+    `[第二处](${b})`,
+    `[第三处](${c})`
+  ].join('\n');
+
+  assert.equal(extractGoStudyReferenceUris(markdown).length, 3);
+  const groups = timelineGroupsFromMarkdown(markdown, plugin);
+  assert.equal(groups.length, 2);
+  assert.equal(groups[0].title, '学习摄影');
+  assert.deepEqual(groups[0].items.map((item) => item.time), ['00:14', '01:26']);
+  assert.equal(groups[1].title, '构图基础');
+  assert.deepEqual(timelineSummary(groups), { sourceCount: 2, timestampCount: 3 });
+});
+
+test('freeform timeline uses hidden media title metadata instead of exposing the locator', () => {
+  const plugin = pluginFixture();
+  const uri = buildFreeformReferenceUri({
+    locator: 'D:\\Loose\\learning-photo.mp4',
+    name: 'learning-photo.mp4',
+    title: '学习摄影',
+    position: { type: 'time', seconds: 65 }
+  });
+  const groups = timelineGroupsFromMarkdown(`[回到课程](${uri})`, plugin);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].kind, 'freeform');
+  assert.equal(groups[0].title, '学习摄影');
+  assert.equal(groups[0].items[0].time, '01:05');
+});
+
+test('Ctrl-click on a managed Bilibili timeline item opens browser at the captured time', async () => {
+  const plugin = pluginFixture();
+  const opened = [];
+  const reference = { resourceId: 'r1', position: { type: 'time', seconds: 65 }, version: 1 };
+  const result = await activateTimelineReference(plugin, reference, { ctrlKey: true }, {
+    shell: { openExternal: async (url) => opened.push(url) }
+  });
+  assert.equal(result.transport, 'browser');
+  assert.equal(opened[0], 'https://www.bilibili.com/video/BV1PHOTO?t=65');
+});
+
+test('ordinary timeline click reuses Go Study reference playback', async () => {
+  const plugin = pluginFixture();
+  const reference = { resourceId: 'r2', position: { type: 'time', seconds: 42 }, version: 1 };
+  const result = await activateTimelineReference(plugin, reference, {});
+  assert.equal(result.transport, 'go-study');
+  assert.deepEqual(plugin.lastReference, reference);
+});
