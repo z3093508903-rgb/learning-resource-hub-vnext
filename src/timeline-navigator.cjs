@@ -5,15 +5,11 @@ const {
   parseReferenceUri
 } = require('./resource-reference.cjs');
 const { formatPositionClock } = require('./resource-note.cjs');
-const { browserUrlAtPosition, httpLocator } = require('./freeform-link-ui.cjs');
 const {
   matchingManagedResource,
   matchingManagedResourceByPortableName
 } = require('./media-session.cjs');
 
-function optionalElectronShell() {
-  try { return require('electron').shell; } catch { return null; }
-}
 
 function cleanSourceTitle(value) {
   const title = String(value || '').replace(/[\r\n\t]+/g, ' ').trim();
@@ -26,7 +22,14 @@ function extractGoStudyReferenceUris(markdown) {
   const matches = [];
   const pattern = /obsidian:\/\/go-study\?[^)\s<>"']+/g;
   let match;
-  while ((match = pattern.exec(text))) matches.push({ uri: match[0], index: match.index });
+  let scannedTo = 0;
+  let line = 0;
+  while ((match = pattern.exec(text))) {
+    const between = text.slice(scannedTo, match.index);
+    line += (between.match(/\n/g) || []).length;
+    matches.push({ uri: match[0], index: match.index, line });
+    scannedTo = match.index;
+  }
   return matches;
 }
 
@@ -108,39 +111,9 @@ function timelineSignature(groups) {
       group.key,
       group.title,
       group.kind,
-      ...(group.items || []).map((item) => `${item.seconds}:${item.uri}`)
+      ...(group.items || []).map((item) => `${item.seconds}:${item.line ?? ''}:${item.uri}`)
     ].join('|'))
     .join('||');
-}
-
-async function browserUrlForTimelineReference(plugin, reference) {
-  if (!reference) return '';
-  if (reference.mode === 'freeform') {
-    const raw = reference.web || httpLocator(reference.locator);
-    return raw ? browserUrlAtPosition(raw, reference.position) : '';
-  }
-  const resource = plugin?.state?.resources?.[reference.resourceId];
-  if (!resource || resource.deletedAt) return '';
-  const actions = plugin?.resourceActions?.(resource) || {};
-  const raw = actions.webTarget
-    || (actions.playTarget?.type === 'uri' ? actions.playTarget.uri : '');
-  return raw ? browserUrlAtPosition(raw, reference.position) : '';
-}
-
-async function activateTimelineReference(plugin, reference, event = {}, options = {}) {
-  const modified = Boolean(event.ctrlKey || event.metaKey);
-  if (modified) {
-    const browserUrl = await browserUrlForTimelineReference(plugin, reference);
-    if (browserUrl) {
-      const shell = options.shell || optionalElectronShell();
-      if (shell?.openExternal) {
-        await shell.openExternal(browserUrl);
-        return { transport: 'browser', url: browserUrl };
-      }
-    }
-  }
-  const opened = await plugin?.openResourceReference?.(reference);
-  return { transport: 'go-study', opened: opened !== false };
 }
 
 function markdownViewHost(view) {
@@ -155,7 +128,8 @@ function renderedReferenceUris(view) {
   const anchors = host?.querySelectorAll?.('a[href^="obsidian://go-study"]') || [];
   return [...anchors].map((anchor, index) => ({
     uri: String(anchor.getAttribute?.('href') || anchor.href || ''),
-    index
+    index,
+    anchor
   })).filter((entry) => entry.uri);
 }
 
@@ -202,7 +176,9 @@ function timelineGroupsFromMatches(matches, plugin, diagnostics = null) {
       reference,
       seconds,
       time: formatPositionClock(reference.position),
-      index: match.index
+      index: match.index,
+      line: Number.isInteger(match.line) ? match.line : null,
+      anchor: match.anchor || null
     });
   }
   return [...groups.values()]
@@ -219,6 +195,52 @@ function markdownViewText(view) {
     if (typeof text === 'string') return text;
   } catch {}
   return '';
+}
+
+function pulseTimelineTarget(element) {
+  if (!element?.classList) return;
+  const target = element.closest?.('p, li, blockquote, .cm-line') || element;
+  target.classList?.add?.('go-study-timeline-target-pulse');
+  const win = target.ownerDocument?.defaultView;
+  const later = win?.setTimeout || setTimeout;
+  later(() => target.classList?.remove?.('go-study-timeline-target-pulse'), 900);
+}
+
+function renderedAnchorForItem(view, item) {
+  if (item?.anchor?.isConnected !== false && item?.anchor?.scrollIntoView) return item.anchor;
+  const host = markdownViewHost(view);
+  const anchors = host?.querySelectorAll?.('a[href^="obsidian://go-study"]') || [];
+  return [...anchors].find((anchor) =>
+    String(anchor.getAttribute?.('href') || anchor.href || '') === String(item?.uri || '')
+  ) || null;
+}
+
+function navigateTimelineItem(view, item) {
+  if (!view || !item) return { transport: 'note', found: false };
+
+  const line = Number(item.line);
+  const editor = view.editor;
+  if (editor && Number.isInteger(line) && line >= 0) {
+    const target = { line, ch: 0 };
+    try {
+      editor.scrollIntoView?.({ from: target, to: target }, true);
+      editor.setCursor?.(target);
+      const anchor = renderedAnchorForItem(view, item);
+      if (anchor) pulseTimelineTarget(anchor);
+      return { transport: 'note', mode: 'editor', line, found: true };
+    } catch {}
+  }
+
+  const anchor = renderedAnchorForItem(view, item);
+  if (anchor) {
+    try {
+      anchor.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+      pulseTimelineTarget(anchor);
+      return { transport: 'note', mode: 'rendered', line: Number.isInteger(line) ? line : null, found: true };
+    } catch {}
+  }
+
+  return { transport: 'note', line: Number.isInteger(line) ? line : null, found: false };
 }
 
 function timelineOwnerId(view) {
@@ -241,6 +263,33 @@ function removeTimelineFromView(view) {
   const owner = timelineOwnerId(view);
   doc?.querySelectorAll?.(`.go-study-floating-timeline[data-go-study-owner="${owner}"]`)
     .forEach?.((el) => el.remove?.());
+}
+
+function timelineDocuments(plugin) {
+  const docs = new Set();
+  for (const leaf of markdownLeaves(plugin)) {
+    const doc = markdownViewHost(leaf?.view)?.ownerDocument || leaf?.view?.containerEl?.ownerDocument;
+    if (doc) docs.add(doc);
+  }
+  for (const doc of plugin?._goStudyTimelineNavigator?.observedDocs || []) docs.add(doc);
+  return docs;
+}
+
+function clearTimelinesExcept(plugin, activeView = null) {
+  const activeHost = markdownViewHost(activeView);
+  const activeDoc = activeHost?.ownerDocument || activeView?.containerEl?.ownerDocument || null;
+  const activeOwner = activeView ? timelineOwnerId(activeView) : '';
+  for (const doc of timelineDocuments(plugin)) {
+    for (const nav of doc?.querySelectorAll?.('.go-study-floating-timeline') || []) {
+      const keep = Boolean(activeView)
+        && doc === activeDoc
+        && nav.dataset?.goStudyOwner === activeOwner;
+      if (!keep) nav.remove?.();
+    }
+  }
+  for (const leaf of markdownLeaves(plugin)) {
+    if (leaf?.view !== activeView) markdownViewHost(leaf?.view)?.classList?.remove?.('go-study-timeline-host');
+  }
 }
 
 function element(doc, tag, cls, text = '') {
@@ -327,11 +376,11 @@ function renderTimelineIntoView(plugin, view, groups) {
     for (const item of group.items.slice(0, 14)) {
       const button = element(doc, 'button', 'go-study-timeline-item', item.time);
       button.type = 'button';
-      button.title = `${group.title} · ${item.time}${group.kind === 'freeform' ? ' · 临时视频' : ''}`;
+      button.title = `${group.title} · ${item.time} · 定位到笔记`;
       button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        void activateTimelineReference(plugin, item.reference, event);
+        navigateTimelineItem(view, item);
       });
       items.appendChild(button);
     }
@@ -340,7 +389,7 @@ function renderTimelineIntoView(plugin, view, groups) {
     hover.appendChild(groupEl);
   }
 
-  const hint = element(doc, 'div', 'go-study-timeline-hint', '点击跳转 · Ctrl 点击网页');
+  const hint = element(doc, 'div', 'go-study-timeline-hint', '点击定位到笔记');
   hover.appendChild(hint);
   nav.appendChild(hover);
 
@@ -404,14 +453,10 @@ function activeMarkdownView(plugin) {
 }
 
 async function refreshTimelineNavigator(plugin) {
-  const leaves = markdownLeaves(plugin);
-  const results = [];
-  for (const leaf of leaves) {
-    const view = leaf?.view;
-    if (!isMarkdownView(view)) continue;
-    results.push(await refreshTimelineView(plugin, view));
-  }
-  return results;
+  const view = activeMarkdownView(plugin);
+  clearTimelinesExcept(plugin, view);
+  if (!view) return [];
+  return [await refreshTimelineView(plugin, view)];
 }
 
 async function diagnoseTimelineNavigator(plugin) {
@@ -425,6 +470,7 @@ async function diagnoseTimelineNavigator(plugin) {
   const parserDiagnostics = { parseErrors: [] };
   const groups = view ? timelineGroupsFromView(view, markdown, plugin, parserDiagnostics) : [];
   let mounted = 0;
+  clearTimelinesExcept(plugin, view);
   if (view && settings.videoEnhancementEnabled && settings.timelineNavigatorEnabled) {
     renderTimelineIntoView(plugin, view, groups);
     const owner = timelineOwnerId(view);
@@ -511,6 +557,7 @@ function installTimelineNavigator(plugin) {
       for (const stop of this.observers.splice(0)) {
         try { stop(); } catch {}
       }
+      clearTimelinesExcept(plugin, null);
       for (const leaf of markdownLeaves(plugin)) removeTimelineFromView(leaf?.view);
     }
   };
@@ -549,10 +596,9 @@ function installTimelineNavigator(plugin) {
 }
 
 module.exports = {
-  activateTimelineReference,
   activeMarkdownView,
-  browserUrlForTimelineReference,
   cleanSourceTitle,
+  clearTimelinesExcept,
   extractGoStudyReferenceUris,
   diagnoseTimelineNavigator,
   existingTimelineForView,
@@ -561,6 +607,7 @@ module.exports = {
   isMarkdownView,
   managedSource,
   markdownViewText,
+  navigateTimelineItem,
   mutationOnlyTouchesTimelineUi,
   nodeIsTimelineUi,
   renderedReferenceUris,
@@ -571,6 +618,7 @@ module.exports = {
   timelineGroupsFromMarkdown,
   timelineGroupsFromMatches,
   timelineGroupsFromView,
+  timelineDocuments,
   timelineSignature,
   timelineSummary
 };
