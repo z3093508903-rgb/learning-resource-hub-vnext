@@ -206,3 +206,17 @@ test('freeform v2 can preserve an optional browser source beside the playback lo
   assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1TEST?p=2');
   assert.equal(parsed.position.seconds, 65);
 });
+
+
+test('freeform v2 can remember a human media title without changing portable identity', () => {
+  const uri = buildFreeformReferenceUri({
+    locator: 'D:\\Loose\\learning-photo.mp4',
+    name: 'learning-photo.mp4',
+    title: '学习摄影',
+    position: { type: 'time', seconds: 42 }
+  });
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.name, 'learning-photo.mp4');
+  assert.equal(parsed.title, '学习摄影');
+  assert.equal(parsed.locator, 'D:\\Loose\\learning-photo.mp4');
+});
