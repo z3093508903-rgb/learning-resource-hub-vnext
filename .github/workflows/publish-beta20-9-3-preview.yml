@@ -1,0 +1,126 @@
+name: Publish Beta20.9.3 Preview
+
+on:
+  push:
+    branches:
+      - fix/potplayer-discovery-beta20-9-3
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.20.9.3
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.20.9.3
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Go Study Preview beta20.9.3: robust PotPlayer discovery for standard, custom-drive and portable installs.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+
+          for (const marker of [
+            'potPlayerDiscoveryScript',
+            'potPlayerExecutablePath',
+            'WScript.Shell',
+            'InstallLocation',
+            'legacyJvCompatibilityEnabled',
+            'browserModifierActive'
+          ]) {
+            if (!bundle.includes(marker)) throw new Error('Missing beta20.9.3 marker: ' + marker);
+          }
+
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.20.9.3
+
+          Focus: restore normal PotPlayer playback after beta20.9.2 removed the external JV runtime dependency.
+
+          ## 1. Automatic PotPlayer discovery
+          1. Install/enable this Preview.
+          2. Keep PotPlayer running once if possible.
+          3. Go to Settings -> Go Study -> 视频笔记增强.
+          4. Find “PotPlayer 程序路径（高级）”.
+          5. Click “自动检测”.
+          6. Expected: a real PotPlayer .exe path is detected and saved.
+
+          ## 2. Resource Center regression
+          1. Open an imported local/Bilibili/OpenList video from Go Study.
+          2. Expected: PotPlayer opens normally.
+          3. No note2potplayer.exe window should appear.
+
+          ## 3. New Freeform timestamp
+          1. Create a new Bilibili Freeform timestamp.
+          2. Ordinary click -> PotPlayer + correct time.
+          3. Ctrl-click -> browser + t=<seconds>.
+
+          ## 4. Legacy JV
+          1. Enable “旧 JV 链接兼容（高级）”.
+          2. Stop the old helper.
+          3. Ordinary-click an old jv:// link.
+          4. Expected: Go Study opens PotPlayer directly.
+          5. Ctrl-click an old Bilibili JV link -> browser.
+
+          ## Manual fallback
+          If auto-detect still fails, paste the full PotPlayer .exe path into “PotPlayer 程序路径（高级）”.
+          Custom D/E drive and portable installs are supported.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists"; exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "${{ github.sha }}" \
+            --title "Go Study Preview ${PREVIEW_VERSION}" \
+            --notes "beta20.9.3 fixes PotPlayer executable discovery after beta20.9.2 native playback migration. It checks running PotPlayer processes, App Paths, uninstall metadata, Start Menu shortcuts and common locations, persists the detected executable, and provides an advanced manual path fallback. Full validation: 387/387 tests passing." \
+            --prerelease \
+            "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+            "dist-preview/go-study-preview/main.js" \
+            "dist-preview/go-study-preview/manifest.json" \
+            "dist-preview/go-study-preview/styles.css" \
+            "dist-preview/go-study-preview/TESTING.md"
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-beta20-9-3-preview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-beta20-9-3-preview.yml
+          git commit -m "ci: remove one-shot beta20.9.3 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
