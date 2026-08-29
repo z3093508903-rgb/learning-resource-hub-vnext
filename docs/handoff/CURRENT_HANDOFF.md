@@ -5,7 +5,7 @@
 
 ## 0. 一句话状态
 
-Go Study 已推进到 **beta20.12 发布前收口 / Bilibili Web Learning & Caret Stabilization 阶段**。
+Go Study 已推进到 **beta20.12.1 发布前收口 / Bilibili Companion Focus Hotfix 阶段**。
 
 核心链路已经成形：
 
@@ -757,6 +757,53 @@ Timestamp：
 10. backlink 应为 B站 URL + 正确 `t=`，普通点击回浏览器；
 11. 截图类 HUD 应明确提示仍需要 PotPlayer。
 
+
+
+## 12D. beta20.12.1 Companion Focus Hotfix
+
+### 真人故障
+
+- B站网页单独前台：HUD 可正常写笔记；
+- Companion Always-on-top：B站仍在播放且仍是 browser active tab，但 browser 丢失 Windows OS focus；
+- beta20.12 因 `document.hasFocus() === false` 拒绝 Web state，导致 HUD 不写。
+
+### 修复
+
+Browser Bridge 0.1.1：
+- background 用 `sender.tab.active` 生成 `activeTab`；
+- 同时附带 tabId / windowId；
+- content `focused` 仍保留为诊断信息。
+
+Go Study：
+- Web source eligibility = fresh + visible + activeTab；
+- **不再要求 document.hasFocus()**；
+- Companion / Obsidian / Quick Note 可拥有 OS focus；
+- 隐藏或非 active B站 tab 仍拒绝。
+
+### 新手入口
+
+Settings：
+- B站网页桥接 started / connected 状态；
+- “下载 / 安装桥接”；
+- “检查连接”。
+
+Workbench header：
+- 原视频增强轻量状态点增加 B站副状态；
+- secondary dot：
+  - listening
+  - connected
+- click / hover 显示完整状态。
+
+自动验证：
+- 405 / 405 tests PASS；
+- Release readiness PASS；
+- Preview `0.3.0-beta.20.12.1`；
+- Bridge `0.1.1`。
+
+### 仍然不是此 hotfix 的能力
+
+B站网页模式暂不自动 pause/resume。
+如果未来做，需要 Browser ← Go Study 双向 control channel，不能假装当前已支持。
 
 ---
 
