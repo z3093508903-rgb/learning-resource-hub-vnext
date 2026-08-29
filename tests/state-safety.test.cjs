@@ -11,6 +11,8 @@ const {
   catastrophicStateDrop,
   markLoadedBaseline,
   meaningfulState,
+  previewMigrationCandidate,
+  protectPreviewMigration,
   protectBeforePersist,
   pruneRecoveryBackups,
   recoveryDirectory,
@@ -122,4 +124,39 @@ test('renaming any snapshot promotes it to a pinned named backup', () => {
   const renamed = renameRecoveryEntry(plugin, automatic.name, '长期保留');
   assert.match(renamed.name, /^saved-长期保留-/);
   assert.equal(recoveryEntries(plugin).find((entry) => entry.name === renamed.name)?.named, true);
+});
+
+
+test('stable go-study imports Preview data only when stable data.json does not exist', () => {
+  const { base, plugin } = fixture();
+  plugin.manifest = { id: 'go-study', dir: path.join('.obsidian', 'plugins', 'go-study') };
+  const stableDir = path.join(base, '.obsidian', 'plugins', 'go-study');
+  const previewDir = path.join(base, '.obsidian', 'plugins', 'go-study-preview');
+  fs.mkdirSync(stableDir, { recursive: true });
+  fs.mkdirSync(previewDir, { recursive: true });
+  fs.writeFileSync(path.join(previewDir, 'data.json'), JSON.stringify(richState()), 'utf8');
+
+  const candidate = previewMigrationCandidate(plugin);
+  assert.equal(candidate.eligible, true);
+  assert.equal(candidate.pluginId, 'go-study-preview');
+  assert.equal(candidate.data.projects.p1.title, '摄影');
+
+  const protectedResult = protectPreviewMigration(plugin, candidate);
+  assert.ok(protectedResult.recoveryPath);
+  assert.match(path.basename(protectedResult.recoveryPath), /^saved-preview-migration-/);
+  assert.deepEqual(JSON.parse(fs.readFileSync(protectedResult.recoveryPath, 'utf8')), richState());
+});
+
+test('stable go-study never replaces an existing stable data.json with Preview data', () => {
+  const { base, plugin } = fixture();
+  plugin.manifest = { id: 'go-study', dir: path.join('.obsidian', 'plugins', 'go-study') };
+  const stableDir = path.join(base, '.obsidian', 'plugins', 'go-study');
+  const previewDir = path.join(base, '.obsidian', 'plugins', 'go-study-preview');
+  fs.mkdirSync(stableDir, { recursive: true });
+  fs.mkdirSync(previewDir, { recursive: true });
+  fs.writeFileSync(path.join(stableDir, 'data.json'), JSON.stringify({ schemaVersion: 8, projects: {}, resources: {}, uiState: { initialized: true } }), 'utf8');
+  fs.writeFileSync(path.join(previewDir, 'data.json'), JSON.stringify(richState()), 'utf8');
+
+  const candidate = previewMigrationCandidate(plugin);
+  assert.equal(candidate.eligible, false);
 });
