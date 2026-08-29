@@ -295,7 +295,7 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
   };
   localInputHandler = (key) => handlers[key]?.();
 
-  if (!focusedWebHud) {
+  const registerTemporaryHandlers = (strict) => {
     const failures = [];
     for (const [accelerator, handler] of Object.entries(handlers)) {
       try {
@@ -306,19 +306,42 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
         failures.push(accelerator);
       }
     }
-    if (failures.length) {
+    if (strict && failures.length) {
       cleanup();
       void feedback(`⚠ 动作盘无法临时接管：${failures.join('、')}`, options);
-      return null;
+      return false;
     }
+    return true;
+  };
+
+  const releaseTemporaryHandlers = () => {
+    while (temporary.length) {
+      const accelerator = temporary.pop();
+      try { api.unregister(accelerator); } catch {}
+    }
+  };
+
+  let delay = Number(settings.actionHudDelayMs || 0);
+  if (focusedWebHud) {
+    // Browser mode is deliberately aggressive:
+    // register the old global directions only as a tiny bootstrap safety net,
+    // then show/focus the HUD immediately and release those global keys as soon
+    // as the HUD can capture them locally.
+    registerTemporaryHandlers(false);
+    delay = 0;
+    visible = true;
+    void Promise.resolve(hud?.show?.()).finally(() => {
+      if (!closed) releaseTemporaryHandlers();
+    });
+  } else {
+    if (!registerTemporaryHandlers(true)) return null;
+    showTimer = setTimeout(() => {
+      if (closed) return;
+      visible = true;
+      void hud?.show?.();
+    }, delay);
   }
 
-  const delay = focusedWebHud ? 0 : Number(settings.actionHudDelayMs || 0);
-  showTimer = setTimeout(() => {
-    if (closed) return;
-    visible = true;
-    void hud?.show?.();
-  }, delay);
   expiryTimer = setTimeout(cleanup, Math.max(8000, delay + 5000));
 
   plugin._goStudyActionHudSession = {
