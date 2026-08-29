@@ -5,7 +5,7 @@
 
 ## 0. 一句话状态
 
-Go Study 已推进到 **beta20.11 发布前收口 / Companion Polish & Standalone Note Window 阶段**。
+Go Study 已推进到 **beta20.12 发布前收口 / Bilibili Web Learning & Caret Stabilization 阶段**。
 
 核心链路已经成形：
 
@@ -696,6 +696,68 @@ beta20.10 已：
 6. 长笔记打开自动聚焦末尾；
 7. HUD Capture 后 Companion 新内容自动滚回可见，但 PotPlayer 仍保持焦点。
 
+
+## 12C. beta20.12 Bilibili Web Learning
+
+### 产品目标
+
+降低 B站用户首用门槛：
+
+- 不要求 PotPlayer 网络视频配置；
+- B站网页直接播放；
+- 仍使用 Go Study 全局 Alt+S HUD；
+- 写入 Companion 或 remembered Markdown；
+- 生成 B站原生 `t=` 时间戳 URL。
+
+### 实现边界
+
+外部浏览器 DOM 对 Obsidian 插件不可见，因此使用可选 MV3 Browser Bridge。
+
+文件：
+- `src/bilibili-web-bridge.cjs`
+- `browser-extension/bilibili-bridge/manifest.json`
+- `browser-extension/bilibili-bridge/background.js`
+- `browser-extension/bilibili-bridge/content.js`
+
+Loopback：
+- `127.0.0.1:27124`
+- endpoint `POST /v1/state`
+- state max age 2500ms
+- HUD 只接受 visible + focused B站标签页
+
+HUD：
+- time ✅
+- note ✅
+- timeNote ✅
+- image / imageNote / all：网页模式明确不支持，仍需要 PotPlayer
+
+Timestamp：
+- Web origin 不生成 `obsidian://go-study`
+- 直接生成 `https://www.bilibili.com/video/...?...&t=<fractional-seconds>`
+- 保留 `p=`
+
+验证：
+- 402 / 402 tests PASS
+- extension syntax PASS
+- release readiness PASS
+- Preview `0.3.0-beta.20.12`
+- Bridge `0.1.0`
+
+### 真人验收
+
+1. 完全退出 PotPlayer；
+2. 安装 beta20.12 Preview；
+3. 解压并 Load unpacked `go-study-bilibili-bridge-0.1.0.zip`；
+4. 前台打开 B站视频；
+5. Settings → Go Study → 视频笔记增强应显示 B站网页桥接已连接；
+6. 锁定 Companion / 打开 Markdown；
+7. Alt+S → only timestamp；
+8. Alt+S → pure note；
+9. Alt+S → note + timestamp；
+10. backlink 应为 B站 URL + 正确 `t=`，普通点击回浏览器；
+11. 截图类 HUD 应明确提示仍需要 PotPlayer。
+
+
 ---
 
 ## 13. Companion caret 问题
@@ -710,7 +772,17 @@ beta20.7 已处理：
 
 但之后没有明确收到“完全通过”。
 
-状态：**NEEDS REAL-MACHINE RECHECK**
+beta20.11 真人反馈：自动聚焦 / reveal 在长笔记手工输入时有“持续刷新、抽搐”感。
+
+beta20.12 已重写为 event-driven：
+- 移除强制 scrollHeight；
+- 移除 requestAnimationFrame 二次 reveal；
+- open 后只 schedule 一次；
+- programmatic insert 后记录 expected caret；
+- 用户继续输入 / 点击 / 移动 caret 时，scheduled reveal 自动取消；
+- reveal 永不主动抢焦点。
+
+状态：**beta20.12 NEEDS REAL-MACHINE RECHECK**
 
 ---
 
