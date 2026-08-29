@@ -104,12 +104,15 @@ test('project navigation Markdown rows open Companion with optional PotPlayer st
   assert.match(uiSource, /companionMode: 'note'/);
 });
 
-test('dragged-note Companion never starts or restarts PotPlayer', () => {
+test('dragged-note Companion only reads current PotPlayer state and never starts or restarts it', () => {
+  const probeStart = uiSource.indexOf('async function optionalCurrentPotPlayerMedia');
+  const probeEnd = uiSource.indexOf('async function openDraggedNoteCompanion', probeStart);
+  const probeBlock = uiSource.slice(probeStart, probeEnd);
   const start = uiSource.indexOf('async function openDraggedNoteCompanion');
   const end = uiSource.indexOf('async function enterCurrentPotPlayerStudyMode', start);
   const block = uiSource.slice(start, end);
-  assert.match(block, /requestNativePotPlayer\('current'/);
-  assert.doesNotMatch(block, /openResource|openPositionedPlayTarget|nativePlay|requestNativePotPlayer\('play'/);
+  assert.match(probeBlock, /requestNativePotPlayer\('current'/);
+  assert.doesNotMatch(probeBlock + block, /openResource|openPositionedPlayTarget|nativePlay|requestNativePotPlayer\('play'/);
 });
 
 
