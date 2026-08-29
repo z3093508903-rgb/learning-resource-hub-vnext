@@ -33,6 +33,12 @@ const {
 const { matchingManagedResource, matchingManagedResourceByPortableName } = require('./media-session.cjs');
 const { openPortableFreeformReference } = require('./freeform-playback.cjs');
 const {
+  browserUrlForReference,
+  currentResourceForReference,
+  fallbackFreeformReference,
+  recoveredResourceById
+} = require('./reference-fallback.cjs');
+const {
   applySafeOpenListPathRemap,
   normalizeStrictOpenListPath,
   previewSafeOpenListPathRemap,
@@ -82,19 +88,54 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
 
   async openResourceReference(reference) {
     if (reference?.mode === 'freeform') return this.openFreeformReference(reference);
-    const resolved = resolveReferencePlayback(this.state, reference, (resource) => this.resourceActions(resource));
-    const opened = await this.openPositionedPlayTarget(resolved.resource, resolved.playTarget, resolved.playerTime);
-    if (!opened) return false;
 
-    updateResumePosition(this.state.resources[resolved.resource.id], resolved.position);
-    this.activeMediaSession = {
-      resourceId: resolved.resource.id,
-      startedAt: new Date().toISOString(),
-      lastKnownPosition: { ...resolved.position }
-    };
-    await this.persist();
-    await this.workbenchLeaf?.view?.render?.();
-    return true;
+    const current = currentResourceForReference(this, reference);
+    if (current) {
+      const resolved = resolveReferencePlayback(this.state, {
+        ...reference,
+        resourceId: current.id
+      }, (resource) => this.resourceActions(resource));
+      const opened = await this.openPositionedPlayTarget(resolved.resource, resolved.playTarget, resolved.playerTime);
+      if (!opened) return false;
+
+      updateResumePosition(this.state.resources[resolved.resource.id], resolved.position);
+      this.activeMediaSession = {
+        resourceId: resolved.resource.id,
+        startedAt: new Date().toISOString(),
+        lastKnownPosition: { ...resolved.position }
+      };
+      await this.persist();
+      await this.workbenchLeaf?.view?.render?.();
+      return true;
+    }
+
+    const portable = fallbackFreeformReference(reference);
+    if (portable) {
+      new Notice('Go Study 当前没有这条 Resource，但回链自带来源信息，将按临时视频打开。', 5000);
+      return this.openFreeformReference(portable);
+    }
+
+    const recovered = recoveredResourceById(this, reference?.resourceId);
+    if (recovered?.resource) {
+      try {
+        const actions = model.resolveResourceActions(recovered.resource, recovered.state?.sources || {});
+        if (!actions.playTarget) throw new Error('恢复快照中的资源没有可用播放方式。');
+        const playerTime = formatPotPlayerTime(reference.position);
+        const opened = await this.openPositionedPlayTarget(recovered.resource, actions.playTarget, playerTime);
+        if (opened) {
+          new Notice('已从恢复快照识别这条旧回链；资源尚未重新收录到当前库。', 6000);
+          return true;
+        }
+      } catch (error) {
+        console.warn('Go Study: recovered backlink resource could not be opened.', error);
+      }
+    }
+
+    throw new Error('Go Study 找不到这条旧回链对应的学习资源，而且旧链接没有携带可恢复的来源信息。重新收录该资源后，新生成的回链将可独立兜底。');
+  }
+
+  browserUrlForReference(reference) {
+    return browserUrlForReference(this, reference);
   }
 
   async openFreeformReference(reference) {
