@@ -481,7 +481,7 @@ class ResourceHubNextPlugin extends Plugin {
     const basePath = this.app?.vault?.adapter?.getBasePath?.();
     if (!basePath) throw new Error('当前仓库不支持本地备份。');
     const configDir = this.app?.vault?.configDir || '.obsidian';
-    const fallback = path.join(basePath, configDir, 'plugins', this.manifest?.id || 'learning-resource-hub-next');
+    const fallback = path.join(basePath, configDir, 'plugins', this.manifest?.id || 'go-study');
     const manifestDir = String(this.manifest?.dir || '').trim();
     if (!manifestDir) return fallback;
     const candidate = path.isAbsolute(manifestDir) ? manifestDir : path.join(basePath, manifestDir);
