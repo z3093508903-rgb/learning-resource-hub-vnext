@@ -103,3 +103,14 @@ test('settings expose a beginner-facing Bilibili bridge install and connection e
   assert.match(settingsSource, /shell\.openExternal\(BILIBILI_BRIDGE_RELEASES_URL\)/);
   assert.match(settingsSource, /加载解压缩的扩展/);
 });
+
+
+test('settings expose a quiet open-source support section without gating features', () => {
+  assert.match(settingsSource, /支持 Go Study/);
+  assert.match(settingsSource, /Free & Open Source/);
+  assert.match(settingsSource, /现有核心功能将保持永久免费且开源/);
+  assert.match(settingsSource, /AI、云同步、托管服务/);
+  assert.match(settingsSource, /赞助完全自愿/);
+  assert.match(settingsSource, /GO_STUDY_PROJECT_URL/);
+  assert.match(settingsSource, /shell\.openExternal\(GO_STUDY_PROJECT_URL\)/);
+});
