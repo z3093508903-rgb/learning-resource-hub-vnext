@@ -32,6 +32,8 @@ const {
 } = require('./resource-resolver.cjs');
 const { matchingManagedResource, matchingManagedResourceByPortableName } = require('./media-session.cjs');
 const { openPortableFreeformReference } = require('./freeform-playback.cjs');
+const { launchPotPlayerTarget } = require('./native-potplayer.cjs');
+const { browserModifierActive, browserUrlAtPosition } = require('./freeform-link-ui.cjs');
 const {
   browserUrlForReference,
   currentResourceForReference,
@@ -80,9 +82,25 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async handleResourceReference(params) {
     try {
       const reference = parseProtocolParams(params);
+      if (browserModifierActive(this)) return await this.openReferenceInBrowser(reference);
       return await this.openResourceReference(reference);
     } catch (error) {
       new Notice(`Go Study 回链无法打开：${error instanceof Error ? error.message : String(error)}`, 6000);
+      return false;
+    }
+  }
+
+  async openReferenceInBrowser(reference) {
+    try {
+      const web = await Promise.resolve(this.browserUrlForReference(reference));
+      if (!web) {
+        new Notice('这条 Go Study 回链没有可用的网页来源。', 6000);
+        return false;
+      }
+      await shell.openExternal(browserUrlAtPosition(web, reference.position));
+      return true;
+    } catch (error) {
+      new Notice(`Go Study 浏览器跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
       return false;
     }
   }
@@ -191,13 +209,13 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
         const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
         const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await shell.openExternal(this.toPotPlayerUri(`${baseUrl}/d${encoded}${sign}`, playerTime));
+        await launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, playerTime);
       } else if (target.type === 'potplayer') {
-        await shell.openExternal(this.toPotPlayerUri(target.target, playerTime));
+        await launchPotPlayerTarget(target.target, playerTime);
       } else if (target.type === 'uri') {
         const legacyBili = model.parseBiliVideoUrl(target.uri);
         if (!legacyBili) throw new Error('当前回链只允许跳转到受支持的视频资源。');
-        await shell.openExternal(this.toPotPlayerUri(legacyBili.canonicalUrl, playerTime));
+        await launchPotPlayerTarget(legacyBili.canonicalUrl, playerTime);
       } else {
         throw new Error('当前资源没有支持定位播放的启动方式。');
       }
