@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Go Study Bilibili Bridge",
-  "version": "0.1.0",
-  "description": "Expose the current Bilibili web video position to the local Go Study Obsidian plugin.",
+  "version": "0.1.1",
+  "description": "Expose the active Bilibili web video position to the local Go Study Obsidian plugin, even while Companion owns OS focus.",
   "host_permissions": [
     "http://127.0.0.1:27124/*"
   ],
