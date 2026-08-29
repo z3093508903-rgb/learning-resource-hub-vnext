@@ -8,10 +8,11 @@ const { execFileSync } = require('node:child_process');
 
 const root = path.resolve(__dirname, '..');
 
-test('manifest 使用全新插件 ID 并保持桌面端边界', () => {
+test('manifest uses permanent Go Study identity and keeps desktop-only boundary', () => {
   const manifest = JSON.parse(fs.readFileSync(path.join(root, 'manifest.json'), 'utf8'));
-  assert.equal(manifest.id, 'learning-resource-hub-next');
-  assert.notEqual(manifest.id, 'learning-resource-hub');
+  assert.equal(manifest.id, 'go-study');
+  assert.equal(manifest.name, 'Go Study');
+  assert.equal(manifest.version, '0.3.0');
   assert.equal(manifest.isDesktopOnly, true);
 });
 
