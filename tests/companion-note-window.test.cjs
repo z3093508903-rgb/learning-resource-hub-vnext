@@ -15,6 +15,7 @@ const {
   normalizeCompanionScale,
   openCompanionNoteWindow,
   revealCompanionEditorCursor,
+  scheduleCompanionEditorCursorReveal,
   saveCurrentCompanionLayout,
   setCompanionAlwaysOnTop
 } = require('../src/companion-note-window.cjs');
@@ -224,10 +225,8 @@ test('Companion open refreshes document-scoped Go Study browser modifier', () =>
 });
 
 
-test('Companion can focus a long Markdown note at the end and reveal the caret', async () => {
-  const { plugin, editor, file, leaf } = pluginFixture();
-  const scroller = { scrollTop: 0, scrollHeight: 2400 };
-  leaf.view.containerEl.querySelector = (selector) => selector === '.cm-scroller' ? scroller : null;
+test('Companion focuses a long Markdown note once at the end and reveals the caret after layout settles', async () => {
+  const { plugin, editor, file } = pluginFixture();
 
   editor.cursor = { line: 0, ch: 0 };
   editor.focused = false;
@@ -245,31 +244,32 @@ test('Companion can focus a long Markdown note at the end and reveal the caret',
     forceLayout: true,
     focusAtEnd: true
   });
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setTimeout(resolve, 100));
 
   assert.deepEqual(editor.cursor, { line: 18, ch: '最后一行内容'.length });
   assert.equal(editor.focused, true);
-  assert.ok(editor.scrollCalls.length >= 1);
-  assert.equal(scroller.scrollTop, scroller.scrollHeight);
+  assert.equal(editor.scrollCalls.length, 1);
 });
 
-test('programmatic Companion reveal keeps caret visible without stealing PotPlayer focus', () => {
+test('scheduled Companion reveal does not fight user typing or steal focus', async () => {
   const { plugin, editor, file, leaf } = pluginFixture();
-  const scroller = { scrollTop: 0, scrollHeight: 1800 };
-  leaf.view.containerEl.querySelector = (selector) => selector === '.cm-scroller' ? scroller : null;
-
   editor.cursor = { line: 9, ch: 4 };
   editor.focusCount = 0;
-  editor.lastLine = () => 10;
-  editor.getLine = () => 'abc';
+  editor.scrollCalls = 0;
   editor.getCursor = () => ({ ...editor.cursor });
   editor.focus = () => { editor.focusCount += 1; };
-  editor.scrollIntoView = () => {};
+  editor.scrollIntoView = () => { editor.scrollCalls += 1; };
 
   plugin._goStudyCompanionWindow = { leaf, win: fakeWindow() };
   plugin._goStudyCompanionTarget = { editor, filePath: file.path, leaf, locked: true };
 
+  assert.equal(scheduleCompanionEditorCursorReveal(plugin, editor, { delayMs: 20 }), true);
+  editor.cursor = { line: 9, ch: 5 }; // user typed before the scheduled reveal
+  await new Promise((resolve) => setTimeout(resolve, 35));
+  assert.equal(editor.focusCount, 0);
+  assert.equal(editor.scrollCalls, 0);
+
   assert.equal(revealCompanionEditorCursor(plugin, editor, { focus: false }), true);
   assert.equal(editor.focusCount, 0);
-  assert.equal(scroller.scrollTop, scroller.scrollHeight);
+  assert.equal(editor.scrollCalls, 1);
 });
