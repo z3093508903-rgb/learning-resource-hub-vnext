@@ -14,10 +14,13 @@ test('HUD renders five configurable slots without taking foreground focus', () =
   assert.match(hudSource, /showInactive/);
 });
 
-test('master shortcut supports quick direction execution before delayed HUD display', () => {
+test('master shortcut uses deterministic direction selection before delayed HUD display', () => {
   assert.match(hotkeySource, /beginActionHud/);
   assert.match(hotkeySource, /actionHudDelayMs/);
-  assert.match(hotkeySource, /if \(!visible\) return execute\(slot\)/);
+  assert.doesNotMatch(hotkeySource, /if \(!visible\) return execute\(slot\)/);
+  assert.match(hotkeySource, /revealHudNow/);
+  assert.match(hotkeySource, /selected = slot/);
+  assert.match(hotkeySource, /lastDirectionAt = now/);
   for (const key of ['Up','Down','Left','Right','Enter','Escape']) assert.match(hotkeySource, new RegExp(key));
   assert.match(hotkeySource, /cleanup\(\);\n\s*void runCaptureAction/);
 });
@@ -30,9 +33,20 @@ test('legacy actions and HUD actions share one capture-action executor', () => {
 });
 
 
-test('visible HUD supports double-pressing the same direction as direction plus Enter', () => {
+test('HUD supports double-pressing the same direction as direction plus Enter regardless of display timing', () => {
   assert.match(hotkeySource, /lastDirectionAt/);
   assert.match(hotkeySource, /directionDoublePressMs/);
   assert.match(hotkeySource, /selected === slot && now - lastDirectionAt <= doublePressMs/);
   assert.match(hotkeySource, /return execute\(slot\)/);
+});
+
+
+test('first direction press reveals and selects instead of executing immediately', () => {
+  const start = hotkeySource.indexOf('const chooseDirection = (slot) => {');
+  const end = hotkeySource.indexOf('const handlers = {', start);
+  const block = hotkeySource.slice(start, end);
+  assert.match(block, /selected = slot/);
+  assert.match(block, /revealHudNow\(\)/);
+  assert.match(block, /hud\?\.select/);
+  assert.doesNotMatch(block, /!visible.*execute/);
 });
