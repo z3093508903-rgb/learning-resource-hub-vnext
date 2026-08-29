@@ -2307,13 +2307,23 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
     void runCaptureAction(plugin, action, options).catch(() => {});
   };
 
+  const revealHudNow = () => {
+    if (visible || closed) return;
+    visible = true;
+    if (showTimer) {
+      clearTimeout(showTimer);
+      showTimer = null;
+    }
+    void hud?.show?.();
+  };
+
   const chooseDirection = (slot) => {
-    if (!visible) return execute(slot);
     const now = Date.now();
     const doublePressMs = Math.max(180, Math.min(650, Number(options.directionDoublePressMs || 420)));
     if (selected === slot && now - lastDirectionAt <= doublePressMs) return execute(slot);
     selected = slot;
     lastDirectionAt = now;
+    revealHudNow();
     void hud?.select?.(slot);
   };
 
@@ -2344,6 +2354,7 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
 
   const delay = Number(settings.actionHudDelayMs || 0);
   showTimer = setTimeout(() => {
+    showTimer = null;
     if (closed) return;
     visible = true;
     void hud?.show?.();
@@ -10990,7 +11001,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
       new Setting(containerEl)
         .setName('动作盘显示延迟')
-        .setDesc('熟练时可在 HUD 出现前直接按方向执行；停顿超过这个时间才显示提示。')
+        .setDesc('按下 Alt+S 后，停顿超过这个时间才自动显示 HUD；如果提前按方向，会立即显示并选中该方向。第一次方向键永远只选择，双击同方向或按 Enter 才执行，避免方向键漏到浏览器。')
         .addDropdown((dropdown) => {
           dropdown
             .addOption('0', '立即显示')
