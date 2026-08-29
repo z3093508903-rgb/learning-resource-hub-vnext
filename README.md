@@ -157,7 +157,7 @@ PotPlayer
 
 Go Study 当前是 Desktop-only 插件。
 
-发布前 RC 建议使用 GitHub Releases 中提供的 ZIP 包。
+推荐通过 GitHub Releases 下载正式版本。
 
 正式版目录建议为：
 
@@ -185,7 +185,7 @@ Go Study 当前是 Desktop-only 插件。
 5. 加载解压缩的扩展；
 6. Go Study 设置页会显示桥接“已启动 / 已连接”。
 
-正式浏览器商店版本上线后，这一步会简化。
+目前浏览器桥接通过“加载解压缩的扩展”安装；后续如有正式商店版本会再简化。
 
 ---
 
@@ -248,6 +248,23 @@ Go Study 0.3.0 的网页视频增强首先针对 **Bilibili** 做了专门适配
 
 ---
 
+## 权限与网络访问
+
+Go Study 是 Desktop-only 插件，会使用 Node.js / Electron 能力完成本地学习工作流。
+
+它可能访问：
+
+- 你明确选择的本地文件或文件夹；
+- PotPlayer 可执行文件，用于启动本地 / OpenList 视频；
+- 你自己配置的 OpenList 服务；
+- Bilibili 公共页面 / 接口；
+- 本机 `127.0.0.1`，用于可选的 Bilibili Bridge；
+- Vault 的插件目录与 `.obsidian/go-study-recovery`，用于状态和恢复备份。
+
+Go Study 不包含客户端遥测，也不会把你的 Markdown 笔记上传到 Go Study 服务器。
+
+---
+
 ## 隐私
 
 - 无广告
@@ -259,11 +276,11 @@ Go Study 0.3.0 的网页视频增强首先针对 **Bilibili** 做了专门适配
 
 ---
 
-## 当前状态
+## 当前版本
 
-Go Study 0.3.0 正在 Release Candidate 阶段。
+**Go Study 0.3.0** 是第一个公开稳定版本。
 
-发布前已经覆盖：
+已经覆盖：
 
 - 资源中心 / 项目学习
 - PotPlayer
