@@ -40,7 +40,8 @@ function markdownSafeReferenceUri(rawUri) {
     const eq = part.indexOf('=');
     if (eq < 0) return part;
     const key = part.slice(0, eq + 1);
-    const value = part.slice(eq + 1).replace(/\./g, '%2E');
+    let value = part.slice(eq + 1);
+    if (/^https?%3A%2F%2F/i.test(value)) value = value.replace(/\./g, '%2E');
     return key + value;
   }).join('&');
   return base + safeQuery;
