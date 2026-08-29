@@ -4,7 +4,6 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 
 const {
-  buildJvPlaybackUri,
   localVideoAllowed,
   locatorKind,
   openPortableFreeformReference
@@ -19,18 +18,41 @@ test('portable locator classification recognizes Windows, POSIX and web forms', 
   assert.equal(localVideoAllowed('/Users/zl/Course/not-video.exe'), false);
 });
 
-test('Windows fallback keeps jv internal instead of writing it into Markdown', async () => {
-  const opened = [];
+test('Windows Freeform playback uses native PotPlayer launcher instead of jv protocol', async () => {
+  const calls = [];
   const result = await openPortableFreeformReference({
     locator: 'D:\\Course\\lesson.mp4',
     position: { type: 'time', seconds: 18 }
   }, {
     platform: 'win32',
-    shell: { openExternal: async (uri) => opened.push(uri), openPath: async () => '' }
+    launchPotPlayerTarget: async (target, position) => {
+      calls.push({ target, position });
+      return { transport: 'native-potplayer-cli', positionApplied: true };
+    }
   });
-  assert.equal(result.transport, 'windows-jv');
+  assert.equal(result.transport, 'native-potplayer-cli');
   assert.equal(result.positionApplied, true);
-  assert.equal(opened[0], buildJvPlaybackUri('D:\\Course\\lesson.mp4', { type: 'time', seconds: 18 }));
+  assert.deepEqual(calls, [{
+    target: 'D:\\Course\\lesson.mp4',
+    position: { type: 'time', seconds: 18 }
+  }]);
+});
+
+test('Windows Freeform web playback uses the same native launcher and preserves source URL', async () => {
+  const calls = [];
+  const result = await openPortableFreeformReference({
+    locator: 'https://www.bilibili.com/video/BV1TEST?p=2',
+    position: { type: 'time', seconds: 65.5 }
+  }, {
+    platform: 'win32',
+    launchPotPlayerTarget: async (target, position) => {
+      calls.push({ target, position });
+      return { transport: 'native-potplayer-cli', positionApplied: true };
+    }
+  });
+  assert.equal(result.transport, 'native-potplayer-cli');
+  assert.equal(calls[0].target, 'https://www.bilibili.com/video/BV1TEST?p=2');
+  assert.equal(calls[0].position.seconds, 65.5);
 });
 
 test('macOS/Linux local fallback opens only POSIX video paths and refuses foreign Windows paths', async () => {
