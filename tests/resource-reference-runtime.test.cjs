@@ -217,3 +217,131 @@ test('legacy source plugin id does not mistake itself for a coexistence conflict
     assert.equal(Notice.messages.length, 0);
   });
 });
+
+
+test('OpenList playback resolver prefers signed URL when API is healthy', async () => {
+  await withPluginModule(async ({ ExportedPlugin }) => {
+    const plugin = new ExportedPlugin();
+    plugin.loginOpenList = async () => 'token';
+    plugin.getOpenList = async (_source, remotePath, token) => {
+      assert.equal(remotePath, '/课程/第一课 01.mp4');
+      assert.equal(token, 'token');
+      return { sign: 'abc+123' };
+    };
+
+    const result = await plugin.resolveOpenListPlaybackUrl(
+      { id: 's1', baseUrl: 'https://openlist.example.com' },
+      '/课程/第一课 01.mp4',
+      { notice: false }
+    );
+
+    assert.equal(result.fallback, false);
+    assert.equal(result.signed, true);
+    assert.equal(
+      result.url,
+      'https://openlist.example.com/d/%E8%AF%BE%E7%A8%8B/%E7%AC%AC%E4%B8%80%E8%AF%BE%2001.mp4?sign=abc%2B123'
+    );
+  });
+});
+
+test('OpenList API network refusal falls back to direct /d URL instead of blocking PotPlayer launch', async () => {
+  await withPluginModule(async ({ ExportedPlugin, Notice }) => {
+    const plugin = new ExportedPlugin();
+    plugin.loginOpenList = async () => { throw new Error('net::ERR_CONNECTION_REFUSED'); };
+
+    const result = await plugin.resolveOpenListPlaybackUrl(
+      { id: 's1', baseUrl: 'https://openlist.example.com' },
+      '/课程/第一课 01.mp4'
+    );
+
+    assert.equal(result.fallback, true);
+    assert.equal(result.signed, false);
+    assert.equal(
+      result.url,
+      'https://openlist.example.com/d/%E8%AF%BE%E7%A8%8B/%E7%AC%AC%E4%B8%80%E8%AF%BE%2001.mp4'
+    );
+    assert.ok(Notice.messages.some((message) => message.includes('已尝试直接播放地址')));
+  });
+});
+
+test('OpenList auth/file errors do not silently fall back to unsigned playback', async () => {
+  await withPluginModule(async ({ ExportedPlugin }) => {
+    const plugin = new ExportedPlugin();
+    plugin.loginOpenList = async () => 'token';
+    plugin.getOpenList = async () => { throw new Error('OpenList 请求失败（HTTP 403）。'); };
+
+    await assert.rejects(
+      () => plugin.resolveOpenListPlaybackUrl(
+        { id: 's1', baseUrl: 'https://openlist.example.com' },
+        '/课程/private.mp4',
+        { notice: false }
+      ),
+      /HTTP 403/
+    );
+  });
+});
+
+test('project-page OpenList play uses resilient playback resolver before Native PotPlayer', async () => {
+  await withPluginModule(async ({ ExportedPlugin }) => {
+    const plugin = new ExportedPlugin();
+    plugin.state = {
+      resources: {
+        r1: { id: 'r1', title: '第一课', kind: 'video', deletedAt: '' }
+      },
+      sources: {
+        s1: { id: 's1', type: 'openlist', baseUrl: 'https://openlist.example.com', deletedAt: '' }
+      },
+      uiState: {}
+    };
+    plugin.resolveOpenListPlaybackUrl = async (_source, remotePath) => {
+      assert.equal(remotePath, '/课程/01.mp4');
+      return { url: 'https://openlist.example.com/d/%E8%AF%BE%E7%A8%8B/01.mp4', fallback: true };
+    };
+    let launch = null;
+    plugin.launchPotPlayerTarget = async (target, position) => { launch = { target, position }; return {}; };
+    plugin.markResourceStarted = async () => {};
+    plugin.workbenchLeaf = null;
+
+    const opened = await plugin.openResourceAction(
+      plugin.state.resources.r1,
+      'play',
+      { type: 'openlist', sourceId: 's1', remotePath: '/课程/01.mp4' }
+    );
+
+    assert.equal(opened, true);
+    assert.deepEqual(launch, {
+      target: 'https://openlist.example.com/d/%E8%AF%BE%E7%A8%8B/01.mp4',
+      position: 0
+    });
+  });
+});
+
+test('managed OpenList timestamp uses the same resilient playback resolver', async () => {
+  await withPluginModule(async ({ ExportedPlugin }) => {
+    const plugin = new ExportedPlugin();
+    plugin.state = {
+      resources: { r1: { id: 'r1', title: '第一课', deletedAt: '' } },
+      sources: { s1: { id: 's1', type: 'openlist', baseUrl: 'https://openlist.example.com', deletedAt: '' } },
+      uiState: {}
+    };
+    plugin.resolveOpenListPlaybackUrl = async () => ({
+      url: 'https://openlist.example.com/d/course/01.mp4',
+      fallback: true
+    });
+    let launch = null;
+    plugin.launchPotPlayerTarget = async (target, position) => { launch = { target, position }; return {}; };
+    plugin.markResourceStarted = async () => {};
+
+    const opened = await plugin.openPositionedPlayTarget(
+      plugin.state.resources.r1,
+      { type: 'openlist', sourceId: 's1', remotePath: '/course/01.mp4' },
+      '00:01:09'
+    );
+
+    assert.equal(opened, true);
+    assert.deepEqual(launch, {
+      target: 'https://openlist.example.com/d/course/01.mp4',
+      position: '00:01:09'
+    });
+  });
+});
