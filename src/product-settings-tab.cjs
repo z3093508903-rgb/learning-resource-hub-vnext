@@ -547,7 +547,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
       new Setting(containerEl)
         .setName('动作盘显示延迟')
-        .setDesc('熟练时可在 HUD 出现前直接按方向执行；停顿超过这个时间才显示提示。')
+        .setDesc('按下 Alt+S 后，停顿超过这个时间才自动显示 HUD；如果提前按方向，会立即显示并选中该方向。第一次方向键永远只选择，双击同方向或按 Enter 才执行，避免方向键漏到浏览器。')
         .addDropdown((dropdown) => {
           dropdown
             .addOption('0', '立即显示')
