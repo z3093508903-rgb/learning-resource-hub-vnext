@@ -74,3 +74,12 @@ test('Alt+3 commit flow uses configured note template while keeping a permanent 
   assert.match(inserted[0], /^> 关键结论\n> 🎬 \[00:01:05\]\(obsidian:\/\/go-study\?/);
   assert.match(inserted[0], / · 回到课程$/);
 });
+
+
+test('programmatic learning capture reveals the Companion caret without focusing it', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'learning-capture.cjs'), 'utf8');
+  assert.match(source, /revealCompanionEditorCursor/);
+  assert.match(source, /revealCompanionEditorCursor\(plugin, prepared\.editor, \{ focus: false/);
+  assert.match(source, /revealCompanionEditorCursor\(plugin, editor, \{ focus: false/);
+});
