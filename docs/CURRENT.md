@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.9.1 — Pre-RC / Bilibili Freeform Ctrl-click Hotfix**
+**Go Study 0.3.0-beta.20.9.2 — Pre-RC / Native PotPlayer + Legacy JV Compatibility Hotfix**
 
 Stable / Merge：**HOLD**
 
@@ -20,29 +20,30 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：fix/freeform-bili-ctrlclick-beta20-9-1
-- Draft PR：#39
-- Base：work/portable-reference-fallback-beta20-9
-- Current HEAD：ae0bcfd74662366433f4d1ea655f81f9eb72ae44
-- 最后完整验证 / 发布提交：70670f1c0cdeb2866a8acc598de2f8d84d8fb225
-- Preview：Go Study Preview 0.3.0-beta.20.9.1
-- Tag：go-study-preview-v0.3.0-beta.20.9.1
-- ZIP SHA256：6b66f64fe9dc8edc1e0a69e62cf033ca822b9848f919bbad1d5d71d82450f3c9
+- Branch：fix/legacy-jv-native-beta20-9-2
+- Base：fix/freeform-bili-ctrlclick-beta20-9-1
+- Draft PR：尚未创建；PR #39 仍保留为 beta20.9.1 历史 Hotfix
+- Current HEAD：9139cbee5f63266eabfd37ef0960905b3d33ba4e
+- Preview 发布目标：217a992ba7df18e4a3caedf4fad3890633b47900
+- Preview：Go Study Preview 0.3.0-beta.20.9.2
+- Tag：go-study-preview-v0.3.0-beta.20.9.2
+- ZIP SHA256：e290e0b5bb243b9f5289dda353123920d74d9992864406ac763f702dd8bdae24
 
 ## 自动化状态
 
-- CI #281 ✅
-- CI #282 ✅
+- beta20.9.2 one-shot validator run #3 ✅
 - Preview publisher ✅
-- **372 / 372 tests PASS**
+- **383 / 383 tests PASS**
+- build：37 modules / 737899 bytes ✅
 - committed main.js consistency ✅
 - release validation ✅
+- Release readiness check ✅
 
-Current HEAD ae0bcfd... 只删除一次性 publisher workflow，因此该 HEAD 的 CI #283 显示 action_required 不代表代码测试失败。
+前两次 validator 暴露的是测试基线与 Node 测试环境问题（旧 bundle 测试仍要求生成 jv://；Freeform 测试直接加载 Electron），修正后第 3 次完整验证全绿。
 
 ## 当前发布阻断 / 未关闭
 
-1. beta20.9.1：PotPlayer 打开的 Bilibili Freeform timestamp，Ctrl+点击浏览器等待实机复验；
+1. beta20.9.2：beta20.9.1 的 Bilibili Freeform Ctrl+点击已在实机确认 FAIL；20.9.2 增加 protocol-level modifier fallback，并移除新 Runtime 对外部 note2potplayer / jv:// 播放生成的依赖，等待 Windows 实机复验；
 2. Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode 仍未通过实机；
 3. Companion caret 点击定位在 beta20.7 修复后缺少最终实机确认；
 4. Managed v3 fallback、legacy v1 relink、light-mode modal、named backup 需要最终 RC 回归；
@@ -829,3 +830,42 @@ Windows 实机反馈：从 PotPlayer 打开的 Bilibili Freeform 视频生成时
 2. Companion 小窗 Ctrl+点击同一 timestamp；
 3. 浏览器 URL 应为 `/video/BV...?...&t=<seconds>`；
 4. 新 URI 不再出现 literal `www.bilibili.com` 嵌在 Go Study destination 内。
+
+
+## beta20.9.2：Native PotPlayer + Legacy JV Compatibility
+
+beta20.9.1 真人复验得到两个新事实：
+
+1. 新 URI 的 Markdown-safe 编码已生效，真实链接已使用 `www%2Ebilibili%2Ecom`，因此 nested-linkify 修复 PASS；
+2. Ctrl+点击仍回到 PotPlayer，且 Obsidian 外部打开路径会触发 `note2potplayer.exe`，说明 Browser Modifier 在真实 Live Preview DOM 中仍可能漏接，同时 Go Study Runtime 仍存在旧 JV transport 耦合。
+
+用户确认：历史笔记中的 `jv://open?... ` 必须继续可用，但这只是旧笔记兼容，不应成为新用户或新链接的正常 Runtime 依赖。
+
+beta20.9.2 候选实现：
+
+- 新增默认关闭的“旧 JV 链接兼容（高级）”开关；
+- 新用户继续只生成 / 使用 `obsidian://go-study`，不会生成新的 `jv://`；
+- 旧 `jv://open?path=...&time=...` 作为只读 Legacy Adapter 解析成内部 Freeform v2；
+- 兼容开关开启时，旧 JV 普通点击由 Go Study 接管；
+- Windows Freeform / Managed / OpenList / Bilibili 播放改为 Go Study 直接启动 PotPlayer CLI，使用 `/current` + `/seek=<seconds>`；
+- 正常 Runtime 不再通过 `shell.openExternal('jv://...')` 调用 `note2potplayer.exe`；
+- Ctrl / Meta 状态在 DOM anchor 识别之前记录；即使 Live Preview 点击目标不是标准 `<a>`，随后 `obsidian://go-study` Protocol Handler 仍可通过短时 modifier state 走 Browser fallback；
+- Bilibili Browser fallback 继续保留 `p` 并写入 `t=<floor seconds>`。
+
+自动验证：
+
+- 383 / 383 tests PASS；
+- Release readiness PASS；
+- Preview publisher PASS；
+- Preview：`Go Study Preview 0.3.0-beta.20.9.2`；
+- Tag：`go-study-preview-v0.3.0-beta.20.9.2`；
+- ZIP SHA256：`e290e0b5bb243b9f5289dda353123920d74d9992864406ac763f702dd8bdae24`。
+
+仍需 Windows 真人验证：
+
+- 新 Go Study Bilibili Freeform 普通点击 → PotPlayer 正确定位，且不再弹 `note2potplayer.exe`；
+- 主 Obsidian Markdown Ctrl+点击 → Browser + `t=<seconds>`；
+- Companion Ctrl+点击 → 同上；
+- 开启 Legacy JV 兼容并停止旧 helper 后，旧本地 / Bilibili `jv://` 普通点击仍能由 Go Study 打开 PotPlayer 到正确时间；
+- 旧 Bilibili JV Ctrl+点击 → Browser + 正确时间；
+- 关闭 Legacy JV 兼容后，不应让这层私人历史兼容影响新用户正常 Go Study 链路。
