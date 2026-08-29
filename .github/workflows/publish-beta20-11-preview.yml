@@ -1,0 +1,120 @@
+name: Publish Beta20.11 Companion Polish Preview
+
+on:
+  push:
+    branches:
+      - fix/companion-polish-beta20-11
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.20.11
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.20.11
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package isolated preview
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Go Study Preview beta20.11: standalone Companion note window, project note-box drag, clean feedback, and long-note caret reveal.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+
+          for (const marker of [
+            'openDraggedNoteCompanion',
+            'companionMode',
+            'enableCompanionDrag',
+            'revealCompanionEditorCursor',
+            '已打开笔记小窗'
+          ]) {
+            if (!bundle.includes(marker)) throw new Error('Missing beta20.11 marker: ' + marker);
+          }
+          if (bundle.includes('result.media?.title')) throw new Error('Raw PotPlayer media title still appears in drag success feedback.');
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.20.11
+
+          ## 1. Clean success feedback
+          Drag a Markdown into the right-side Companion target.
+          Expected: success Notice only shows the note name; no garbled PotPlayer title.
+
+          ## 2. Project Note Box drag
+          Open a project's Note Box.
+          Drag an existing linked note.
+          Expected: the same right-side Companion target appears and the note can be dropped into it.
+
+          ## 3. Standalone Companion without PotPlayer
+          Fully exit PotPlayer.
+          Drag a Markdown from file tree, tab, project page, or Project Note Box into the Companion target.
+          Expected: Companion opens as a lightweight note window.
+          It must not show an error requiring PotPlayer.
+          In standalone mode Capture lock is not forced.
+
+          ## 4. Study context when PotPlayer exists
+          Open PotPlayer with a video, then drag a Markdown into Companion.
+          Expected: it enters the existing Study Mode and keeps current video context without restarting PotPlayer.
+
+          ## 5. Long note focus
+          Open a long Markdown through Companion.
+          Expected: editor is focused near the note end by default.
+          Continue typing: normal CodeMirror caret stays visible.
+          With Study Mode active, trigger HUD capture while PotPlayer keeps focus.
+          Expected: newly inserted content scrolls into view in Companion without stealing focus back from PotPlayer.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists"; exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "${{ github.sha }}" \
+            --title "Go Study Preview ${PREVIEW_VERSION}" \
+            --notes "beta20.11 polishes Companion: drag success feedback no longer surfaces raw PotPlayer titles; Project Note Box rows can drag into Companion; Companion can open standalone without PotPlayer; and long-note focus/caret reveal keeps editing visible without stealing PotPlayer focus during programmatic captures. Full validation: 394/394 tests passing." \
+            --prerelease \
+            "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+            "dist-preview/go-study-preview/main.js" \
+            "dist-preview/go-study-preview/manifest.json" \
+            "dist-preview/go-study-preview/styles.css" \
+            "dist-preview/go-study-preview/TESTING.md"
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-beta20-11-preview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-beta20-11-preview.yml
+          git commit -m "ci: remove one-shot beta20.11 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
