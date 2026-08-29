@@ -12,9 +12,12 @@ const {
   markLoadedBaseline,
   meaningfulState,
   protectBeforePersist,
+  pruneRecoveryBackups,
   recoveryDirectory,
   recoveryEntries,
+  renameRecoveryEntry,
   startupSafetySnapshot,
+  writeNamedRecoveryState,
   writeRecoveryState
 } = require('../src/state-safety.cjs');
 
@@ -98,4 +101,25 @@ test('manual backups are real JSON files in the external recovery folder', () =>
   const result = writeRecoveryState(plugin, state, 'manual');
   assert.equal(path.dirname(result.fullPath), recoveryDirectory(plugin));
   assert.deepEqual(JSON.parse(fs.readFileSync(result.fullPath, 'utf8')), state);
+});
+
+
+test('named manual backups are pinned and excluded from automatic retention', () => {
+  const { plugin } = fixture();
+  const state = richState();
+  const named = writeNamedRecoveryState(plugin, state, '发布前稳定版');
+  for (let i = 0; i < 8; i += 1) writeRecoveryState(plugin, state, 'auto-' + i);
+  pruneRecoveryBackups(plugin, 3);
+  const entries = recoveryEntries(plugin);
+  assert.ok(entries.some((entry) => entry.name === named.name && entry.named));
+  assert.equal(entries.filter((entry) => !entry.named).length, 3);
+});
+
+test('renaming any snapshot promotes it to a pinned named backup', () => {
+  const { plugin } = fixture();
+  const state = richState();
+  const automatic = writeRecoveryState(plugin, state, 'before-save');
+  const renamed = renameRecoveryEntry(plugin, automatic.name, '长期保留');
+  assert.match(renamed.name, /^saved-长期保留-/);
+  assert.equal(recoveryEntries(plugin).find((entry) => entry.name === renamed.name)?.named, true);
 });
