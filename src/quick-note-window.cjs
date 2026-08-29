@@ -98,7 +98,12 @@ function showNativeQuickNote(options = {}) {
       const text = decodeTitlePayload(title, 'GO_STUDY_SUBMIT');
       if (text !== null) { event.preventDefault(); finish(text.trim() || null); }
     });
-    win.once('ready-to-show', () => { win.show(); win.focus(); });
+    win.once('ready-to-show', () => {
+      try { win.setAlwaysOnTop?.(true, 'screen-saver'); } catch {}
+      try { win.show(); } catch {}
+      try { win.moveTop?.(); } catch {}
+      try { win.focus(); } catch {}
+    });
     void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(promptHtml(options))}`);
   });
 }
