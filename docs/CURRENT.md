@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-rc.1 — Full RC Audit / Feature Frozen**
+**Go Study 0.3.0-rc.2 — Full RC Audit / Selectable Backup Restore Hotfix**
 
 Stable / Merge：**HOLD**
 
@@ -20,23 +20,23 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：release/go-study-0.3.0-rc1
-- Base：fix/web-hud-focus-beta20-12-3
+- Branch：release/go-study-0.3.0-rc2
+- Base：release/go-study-0.3.0-rc1
 - Draft PR：尚未创建
-- Current HEAD：2604ff769554792cb7f7b2abad41c48405ccc46c
-- RC 发布目标：b76dd0d944b3e8f2c6ceb73c5b05525f17c80f20
-- Release：Go Study 0.3.0 RC1
-- Tag：go-study-rc-v0.3.0-rc.1
-- RC ZIP SHA256：00ec2d449f759b7bd3ac0dcc04294aa41b5c9092e8165c5023de9683dbbfbe22
+- Current HEAD：79cba03059a2a3777a4a03fd1139f9791cabf55a
+- RC 发布目标：9a07975df00a29bb54b6b589c93aaf4897621801
+- Release：Go Study 0.3.0 RC2
+- Tag：go-study-rc-v0.3.0-rc.2
+- RC ZIP SHA256：8c4b7e676638cb05e744eb1fcedfb4de7772f1ef7845d24bb0e5381ba94791d6
 - Bilibili Bridge：0.1.1
 - Bridge ZIP SHA256：cf7970e76894167945b21427900124feef342de42b8e20e76e1558edc71cb7c4
 
 ## 自动化状态
 
-- RC1 validator ✅
-- RC publisher ✅
-- **412 / 412 tests PASS**
-- build：38 modules / 772597 bytes ✅
+- RC2 validator ✅
+- RC2 publisher ✅
+- **413 / 413 tests PASS**
+- build：38 modules / 775671 bytes ✅
 - committed main.js consistency ✅
 - Release readiness PASS ✅
 
@@ -1260,3 +1260,40 @@ Topmost：
 **beta20.12.3 behavior = ACCEPTED-AS-BEHAVIOR（Windows）**
 
 之后进入 RC1，功能冻结。
+
+
+## RC2：Selectable Backup Restore Hotfix
+
+RC1 真人数据安全验收发现：
+
+> 设置页虽然可以创建命名备份，也会显示最近命名备份，但恢复入口只有“恢复最近备份”，无法从历史命名备份 / 自动快照中主动选择一份恢复。
+
+RC2 修复：
+
+- 新增“选择备份恢复”入口；
+- 新增 `BackupRestoreModal`；
+- 分组展示：
+  - 命名备份（长期保留）
+  - 自动恢复快照
+- 每个备份显示：
+  - 文件名
+  - 类型
+  - 大小
+  - 修改时间
+- 每个备份都有独立“恢复此备份”；
+- 恢复前仍先创建 `before-manual-restore` 自动保护当前状态；
+- “恢复最近备份”继续保留为快速入口，但不再是唯一恢复方式；
+- 命名备份仍不参与自动清理。
+
+自动验证：
+- 413 / 413 tests PASS；
+- Release readiness PASS；
+- Preview/RC：`0.3.0-rc.2`。
+
+真人重点：
+1. 创建至少 1 个命名备份；
+2. 再产生若干更新的自动快照；
+3. 点击“选择备份恢复”；
+4. 选择一个**不是最新**的命名备份；
+5. 恢复后确认状态回到该备份；
+6. 该命名备份仍然存在。
