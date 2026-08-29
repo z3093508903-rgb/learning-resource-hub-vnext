@@ -269,14 +269,14 @@ function normalizeSeekSeconds(position) {
 
 function normalizePotPlayerTarget(value) {
   const raw = String(value || '').trim();
-  if (!raw || raw.length > 8192 || /[\\x00-\\x1F]/.test(raw)) throw new Error('PotPlayer 启动目标无效。');
+  if (!raw || raw.length > 8192 || /[\x00-\x1F]/.test(raw)) throw new Error('PotPlayer 启动目标无效。');
   try {
     const url = new URL(raw);
     if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
     return url.toString();
   } catch {}
-  const windowsDrive = /^[A-Za-z]:[\\\\/]/.test(raw);
-  const windowsUnc = /^\\\\\\\\[^\\\\]+\\\\[^\\\\]+/.test(raw);
+  const windowsDrive = /^[A-Za-z]:[\\/]/.test(raw);
+  const windowsUnc = /^\\\\[^\\]+\\[^\\]+/.test(raw);
   if (!windowsDrive && !windowsUnc) throw new Error('PotPlayer 只允许打开 HTTP(S) 地址或 Windows 绝对媒体路径。');
   return raw;
 }
