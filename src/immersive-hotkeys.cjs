@@ -107,11 +107,18 @@ function resultTimeSuffix(action, result) {
 }
 
 async function promptForPreparedNote(plugin, prepared, action, options = {}) {
+  const webMode = String(prepared?.player?.transport || '') === 'bilibili-web';
+  const pausedByGoStudy = Boolean(prepared?.player?.control?.pausedByGoStudy);
+  const subtitle = webMode
+    ? 'B站网页模式 · Enter 保存 · Shift+Enter 换行 · Esc 取消'
+    : pausedByGoStudy
+      ? '视频已暂停 · Enter 保存 · Shift+Enter 换行 · Esc 取消'
+      : 'Enter 保存 · Shift+Enter 换行 · Esc 取消';
   return (options.showQuickNoteInput || showQuickNoteInput)(plugin, {
     title: action.time
       ? `${action.label} · ${formatPositionClock(prepared.position)}`
       : action.label,
-    subtitle: '视频已暂停 · Enter 保存 · Shift+Enter 换行 · Esc 取消',
+    subtitle,
     placeholder: '写下这一刻的笔记…',
     ...(options.promptOptions || {})
   });
@@ -154,7 +161,7 @@ async function runCaptureAction(plugin, actionValue, options = {}) {
       }
     } else if (action.note) {
       prepared = await prepareCurrentLearningPosition(plugin, {
-        nativeOnly: true,
+        nativeOnly: false,
         pause: true,
         ...options.captureOptions
       });
@@ -169,7 +176,7 @@ async function runCaptureAction(plugin, actionValue, options = {}) {
         : await commitPreparedPlainTypedNote(plugin, prepared, note);
       await resumePreparedPlayback(plugin, prepared, 'save', options);
     } else if (action.time) {
-      result = await insertCurrentLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
+      result = await insertCurrentLearningPosition(plugin, { nativeOnly: false, ...options.captureOptions });
     } else {
       throw new Error('当前动作没有任何采集内容。');
     }
@@ -177,9 +184,12 @@ async function runCaptureAction(plugin, actionValue, options = {}) {
     await successFeedback(plugin, `✓ ${action.label}${resultTimeSuffix(action, result)}`, options);
     return result;
   } catch (error) {
-    const message = compactError(error);
+    let message = compactError(error);
+    if (action.image && /PotPlayer|B站网页|网页模式/.test(message)) {
+      message = '网页学习目前支持时间戳、纯笔记、评论 + 时间戳；截图动作仍需要 PotPlayer。';
+    }
     if (!/PotPlayer 当前不是前台窗口/.test(message)) {
-      await feedback(`⚠ ${message}`, { ...options, toastOptions: { ...(options.toastOptions || {}), durationMs: 2200 } });
+      await feedback(`⚠ ${message}`, { ...options, toastOptions: { ...(options.toastOptions || {}), durationMs: 2600 } });
     }
     throw error;
   } finally {
