@@ -49,7 +49,7 @@ const {
 const { registerResourceRelinkCommands } = require('./resource-relink-ui.cjs');
 const { registerLearningCaptureCommands } = require('./learning-capture.cjs');
 
-const LEGACY_GO_STUDY_PLUGIN_ID = 'learning-resource-hub-next';
+const LEGACY_GO_STUDY_PLUGIN_IDS = ['go-study-preview', 'learning-resource-hub-next'];
 
 class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async onload() {
@@ -88,8 +88,9 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
 
   legacyGoStudyProtocolConflict() {
     const currentId = String(this.manifest?.id || '').trim();
-    if (!currentId || currentId === LEGACY_GO_STUDY_PLUGIN_ID) return false;
-    return this.enabledPluginIds().has(LEGACY_GO_STUDY_PLUGIN_ID);
+    if (!currentId) return false;
+    const enabled = this.enabledPluginIds();
+    return LEGACY_GO_STUDY_PLUGIN_IDS.some((pluginId) => pluginId !== currentId && enabled.has(pluginId));
   }
 
   registerGoStudyReferenceProtocol() {
@@ -123,7 +124,7 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     if ((legacyConflict || !registered) && !this._goStudyProtocolWarningShown) {
       this._goStudyProtocolWarningShown = true;
       const message = legacyConflict
-        ? 'Go Study 检测到旧版 Learning Resource Hub Next 同时启用。Go Study 已继续启动，但旧版可能争用时间戳回链协议；请停用旧版并重新加载 Obsidian。'
+        ? 'Go Study 检测到 Preview / 旧版插件同时启用。Go Study 已继续启动，但旧版本可能争用时间戳回链协议；完成数据迁移后请停用旧版本并重新加载 Obsidian。'
         : `Go Study 已继续启动，但时间戳回链协议注册失败：${error || '协议可能已被其他插件占用'}。资源工作台仍可使用，请检查是否同时启用了旧版插件。`;
       new Notice(message, 10000);
     }
