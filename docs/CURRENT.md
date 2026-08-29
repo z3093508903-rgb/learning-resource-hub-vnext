@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.10 — Pre-RC / Native Obsidian Drag Bridge**
+**Go Study 0.3.0-beta.20.11 — Pre-RC / Companion Polish & Standalone Note Window**
 
 Stable / Merge：**HOLD**
 
@@ -20,30 +20,32 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：fix/native-obsidian-drag-beta20-10
-- Base：fix/potplayer-discovery-beta20-9-3
+- Branch：fix/companion-polish-beta20-11
+- Base：fix/native-obsidian-drag-beta20-10
 - Draft PR：尚未创建
-- Current HEAD：259038db6f5f91e16e5ddadc0c9c23fb29b95806
-- Preview 发布目标：3d232b98c84e6e2caa0fdee6a34c2cd597578f1b
-- Preview：Go Study Preview 0.3.0-beta.20.10
-- Tag：go-study-preview-v0.3.0-beta.20.10
-- ZIP SHA256：ab3d97d7ee9e1c3f7d9bf6a2a4d40f0ae1e7136836ebb0768c20d3dd82511080
+- Current HEAD：2d0015ab52fbb7aaed2ec16e85391f312b376b0d
+- Preview 发布目标：e0a68f259274fe737da4fb874ae77695132bfb19
+- Preview：Go Study Preview 0.3.0-beta.20.11
+- Tag：go-study-preview-v0.3.0-beta.20.11
+- ZIP SHA256：4f2f5a25d7592306b8240aff45cd47613ac20b15c35329b8b924afb935287cda
 
 ## 自动化状态
 
-- beta20.10 validator ✅
+- beta20.11 validator run #2 ✅
 - Preview publisher ✅
-- **388 / 388 tests PASS**
-- build：37 modules / 746628 bytes ✅
+- **394 / 394 tests PASS**
+- build：37 modules / 752289 bytes ✅
 - committed main.js consistency ✅
 - release validation ✅
 - Release readiness check ✅
+
+第一次 validator 仅有 1 个测试断言仍检查旧函数边界，代码逻辑本身已通过其余 393 项；修正测试后第 2 次全绿。
 
 
 ## 当前发布阻断 / 未关闭
 
 1. beta20.9.3 Windows 真人验收已全部 PASS：PotPlayer 自动发现 / Resource Center 播放 / Freeform 普通点击与 seek / Ctrl+点击 Browser / Legacy JV compatibility 均正常；当前最高优先级转为 Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode；
-2. Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode 仍未通过实机；
+2. beta20.10 Native Obsidian Drag 已真人确认可用，并保持普通 Obsidian 拖动边界；beta20.11 正在收口 Companion 体验：项目笔记盒拖入、无 PotPlayer 纯笔记小窗、成功提示乱码、长笔记焦点/滚动；
 3. Companion caret 点击定位在 beta20.7 修复后缺少最终实机确认；
 4. Managed v3 fallback、legacy v1 relink、light-mode modal、named backup 需要最终 RC 回归；
 5. data.json 自动归零事故已做 fail-closed + external recovery；用户后续未再次报告归零，但 RC 前仍需 restart ×2 + restore 复验。
@@ -966,3 +968,54 @@ Preview：
 3. 拖到 Go Study 小 Target → Companion Study Mode；
 4. 顶部 Markdown Tab 同样测试；
 5. 若 Target 不出现，打开 DevTools Console，截图 `Go Study native drag diagnostic`。
+
+
+## beta20.10 Windows 真人验收：PASS
+
+用户确认：
+
+- Obsidian 原生文件树 Markdown 拖动可召唤 Go Study 小 Drop Target；
+- Native Drag Bridge 已可工作；
+- 用户进一步强调边界：普通 Obsidian 移动 / 排序不能被 Go Study 抢占，只有 Drop Target 范围内才由 Go Study 接管。
+
+结论：
+
+**beta20.10 Native Drag 基础能力 = ACCEPTED-AS-BEHAVIOR（Windows）**
+
+后续不再恢复 pointer hijack。
+
+
+## beta20.11：Companion Polish & Standalone Note Window
+
+用户明确认为核心功能层面已经基本完成，本轮只做体验收口，不再扩展大功能。
+
+真人反馈 / 新边界：
+
+1. Native Drag 成功后 Notice 会带 PotPlayer 原始 title，部分机器出现乱码；
+2. 项目页面文件可拖，但“项目笔记盒”内已关联笔记不能拖；
+3. Companion 小窗不应强依赖 PotPlayer；用户可能只想把它当轻量置顶 Markdown 小窗；
+4. 长笔记需要更可靠的编辑焦点与光标可见性。
+
+beta20.11 候选实现：
+
+- 成功 Notice 不再显示任何 raw PotPlayer media title，只显示稳定笔记名；
+- Project Note Box 已关联笔记与搜索结果可拖入同一个 Companion Target；
+- 新增 Optional PotPlayer probe：
+  - 有当前 PotPlayer 媒体 → 原 Study Mode；
+  - 没有 PotPlayer / 读取失败 → 直接打开纯 Companion Note Window；
+- 纯笔记小窗：
+  - 不要求 PotPlayer；
+  - 不强制 Capture lock；
+  - 保持 right-rail / always-on-top 能力；
+- Direct Drag Target 文案泛化为“笔记小窗”，不再承诺必须有视频；
+- Companion 打开时默认依据 focusStudyNoteAtEnd 把光标聚焦到正文末尾；
+- 长笔记打开后自动 reveal caret；
+- HUD / 程序化 Capture 插入后，仅让 Companion 当前 caret 滚回可见范围，不抢回 PotPlayer 焦点；
+- 普通 CodeMirror 手工编辑继续使用 Obsidian 自己的滚动行为。
+
+Preview：
+- `Go Study Preview 0.3.0-beta.20.11`
+- ZIP SHA256：`4f2f5a25d7592306b8240aff45cd47613ac20b15c35329b8b924afb935287cda`
+- 394 / 394 tests PASS。
+
+本轮真人验收通过后，下一阶段不再开发功能，进入 **Full RC Audit / Polish**。
