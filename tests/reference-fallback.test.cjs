@@ -104,3 +104,25 @@ test('legacy v1 Resource IDs can be recovered from external recovery snapshots',
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+
+test('legacy Resource ID alias resolves to a newly collected resource', () => {
+  const { base, plugin } = pluginFixture();
+  try {
+    plugin.state.resources.newResource = { id: 'newResource', title: '重新收录课程' };
+    plugin.state.uiState = { referenceAliases: { oldResource: 'newResource' } };
+    plugin.resourceActions = (resource) => resource.id === 'newResource'
+      ? { webTarget: 'https://www.bilibili.com/video/BV1RELINK' }
+      : {};
+    assert.equal(
+      browserUrlForReference(plugin, {
+        resourceId: 'oldResource',
+        position: { type: 'time', seconds: 12 },
+        version: 1
+      }),
+      'https://www.bilibili.com/video/BV1RELINK'
+    );
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
