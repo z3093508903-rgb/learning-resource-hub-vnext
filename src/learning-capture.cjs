@@ -9,9 +9,10 @@ const {
 } = require('./note-target.cjs');
 const { requestNativePotPlayer } = require('./native-potplayer.cjs');
 const { requestPotPlayerBridge } = require('./potplayer-bridge.cjs');
+const { requestBilibiliWebBridge } = require('./bilibili-web-bridge.cjs');
 const { currentProductSettings, normalizeCaptureFolder } = require('./product-settings.cjs');
 const { updateResumePosition } = require('./resource-resolver.cjs');
-const { revealCompanionEditorCursor } = require('./companion-note-window.cjs');
+const { scheduleCompanionEditorCursorReveal } = require('./companion-note-window.cjs');
 const {
   buildContextCaptureMarkdown,
   buildContextCaptureNoteMarkdown,
@@ -38,7 +39,10 @@ function resolveLearningContext(plugin, playerMedia) {
     plugin.activeMediaSession,
     playerMedia,
     (resource) => plugin.resourceActions(resource),
-    { allowFreeform: settings.freeformVideoNotesEnabled }
+    {
+      allowFreeform: settings.freeformVideoNotesEnabled,
+      preferFreeform: String(playerMedia?.source || playerMedia?.transport || '') === 'bilibili-web'
+    }
   );
 }
 
@@ -88,12 +92,27 @@ async function requestLearningPlayer(plugin, action, options = {}) {
     }
   }
 
+  let webError = null;
+  if (action === 'current' && options.web !== false) {
+    try {
+      return await (options.webRequest || requestBilibiliWebBridge)(plugin, action, options.webOptions || {});
+    } catch (error) {
+      webError = error;
+      if (options.webOnly) throw error;
+    }
+  }
+
   try {
     return await requestPotPlayerBridge(options.requestUrl || requestUrl, action, options.bridgeOptions || {});
   } catch (bridgeError) {
-    if (nativeError) {
-      const message = nativeError instanceof Error ? nativeError.message : String(nativeError);
-      throw new Error(`Go Study 原生视频控制失败：${message}`);
+    if (nativeError || webError) {
+      const nativeMessage = nativeError instanceof Error ? nativeError.message : String(nativeError || '');
+      const webMessage = webError instanceof Error ? webError.message : String(webError || '');
+      const detail = [
+        nativeMessage ? `PotPlayer：${nativeMessage}` : '',
+        webMessage ? `B站网页：${webMessage}` : ''
+      ].filter(Boolean).join('；');
+      throw new Error(detail || (bridgeError instanceof Error ? bridgeError.message : String(bridgeError)));
     }
     throw bridgeError;
   }
@@ -111,7 +130,7 @@ async function insertPreparedMarkdown(plugin, prepared, markdown) {
     throw new Error('最近的学习笔记已经关闭或不可编辑。');
   }
   prepared.editor.replaceSelection(markdown);
-  revealCompanionEditorCursor(plugin, prepared.editor, { focus: false, center: false });
+  scheduleCompanionEditorCursorReveal(plugin, prepared.editor, { focus: false, center: false });
   await persistRecordedPosition(plugin, prepared.resource, prepared.position);
   return { ...prepared, markdown };
 }
@@ -269,7 +288,7 @@ async function insertPlainTypedNote(plugin, noteText, options = {}) {
   const editor = activeEditor(plugin, options.editor);
   const markdown = buildPlainNoteMarkdown(noteText, noteOutputOptions(plugin));
   editor.replaceSelection(markdown);
-  revealCompanionEditorCursor(plugin, editor, { focus: false, center: false });
+  scheduleCompanionEditorCursorReveal(plugin, editor, { focus: false, center: false });
   return { mode: 'plain', editor, markdown };
 }
 async function commitPreparedPlainTypedNote(plugin, prepared, noteText) {
