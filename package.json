@@ -1,8 +1,8 @@
 {
-  "name": "learning-resource-hub-next",
-  "version": "0.2.0-alpha.12.4",
+  "name": "go-study",
+  "version": "0.3.0",
   "private": true,
-  "description": "Clean component-first rewrite of Learning Resource Hub.",
+  "description": "Open-source Obsidian desktop learning workbench for resources, video positions, and Markdown notes.",
   "main": "main.js",
   "scripts": {
     "check": "node --check src/runtime-entry.cjs && node --check src/entry.cjs && node --check src/ui-fixes.cjs && node --check src/anki-launch.cjs && node --check src/usage-polish.cjs && node --check src/release-hardening.cjs && node --check src/state-safety.cjs && node --check src/resource-locator.cjs && node --check src/resource-reference.cjs && node --check src/resource-resolver.cjs && node --check src/reference-fallback.cjs && node --check src/reference-relink-ui.cjs && node --check src/resource-relink.cjs && node --check src/resource-relink-ui.cjs && node --check src/potplayer-bridge.cjs && node --check src/bilibili-web-bridge.cjs && node --check src/native-potplayer.cjs && node --check src/freeform-playback.cjs && node --check src/legacy-jv.cjs && node --check src/quick-note-window.cjs && node --check src/capture-actions.cjs && node --check src/action-hud.cjs && node --check src/immersive-hotkeys.cjs && node --check src/product-settings.cjs && node --check src/product-settings-tab.cjs && node --check src/project-notes.cjs && node --check src/project-notes-ui.cjs && node --check src/media-session.cjs && node --check src/resource-note.cjs && node --check src/note-target.cjs && node --check src/companion-events.cjs && node --check src/learning-controls-ui.cjs && node --check src/freeform-link-ui.cjs && node --check src/learning-capture.cjs && node --check src/main.cjs && node --check src/model.cjs && node --check scripts/check-release.mjs",
