@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.12.3 — Pre-RC / Focused Web HUD + Strong Topmost Hotfix**
+**Go Study 0.3.0-rc.1 — Full RC Audit / Feature Frozen**
 
 Stable / Merge：**HOLD**
 
@@ -20,35 +20,41 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：fix/bilibili-companion-focus-beta20-12-1
-- Base：fix/bilibili-web-learning-beta20-12
+- Branch：release/go-study-0.3.0-rc1
+- Base：fix/web-hud-focus-beta20-12-3
 - Draft PR：尚未创建
-- Current HEAD：688c6fcc1a392a505448c9ce9c027eb646aa5408
-- Preview 发布目标：786e848393545f9f636dec75fdf9f6926808afb7
-- Preview：Go Study Preview 0.3.0-beta.20.12.1
-- Tag：go-study-preview-v0.3.0-beta.20.12.1
-- Obsidian ZIP SHA256：68ffdd15a69bcaf458fcf865258e5412f0c82d4ab3a7aa4d45648fcf3ee29f9b
-- Bilibili Bridge 0.1.1 ZIP SHA256：bead8797235b5528be80d7918d909d20e0b42815d8b330085816cd1e7c8a6d13
+- Current HEAD：2604ff769554792cb7f7b2abad41c48405ccc46c
+- RC 发布目标：b76dd0d944b3e8f2c6ceb73c5b05525f17c80f20
+- Release：Go Study 0.3.0 RC1
+- Tag：go-study-rc-v0.3.0-rc.1
+- RC ZIP SHA256：00ec2d449f759b7bd3ac0dcc04294aa41b5c9092e8165c5023de9683dbbfbe22
+- Bilibili Bridge：0.1.1
+- Bridge ZIP SHA256：cf7970e76894167945b21427900124feef342de42b8e20e76e1558edc71cb7c4
 
 ## 自动化状态
 
-- beta20.12.1 validator ✅
-- Browser Bridge 0.1.1 syntax / Manifest validation ✅
-- Preview publisher ✅
-- **405 / 405 tests PASS**
-- build：38 modules / 767255 bytes ✅
+- RC1 validator ✅
+- RC publisher ✅
+- **412 / 412 tests PASS**
+- build：38 modules / 772597 bytes ✅
 - committed main.js consistency ✅
-- release validation ✅
-- Release readiness check ✅
+- Release readiness PASS ✅
+
+beta20.12.3 Windows 真人验收已确认通过，功能冻结。RC1 只增加 legacy protocol coexistence fail-safe，不新增产品功能。
 
 
 ## 当前发布阻断 / 未关闭
 
-1. beta20.9.3 Windows 真人验收已全部 PASS：PotPlayer 自动发现 / Resource Center 播放 / Freeform 普通点击与 seek / Ctrl+点击 Browser / Legacy JV compatibility 均正常；当前最高优先级转为 Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode；
-2. beta20.10 Native Obsidian Drag 已真人确认可用，并保持普通 Obsidian 拖动边界；beta20.11 正在收口 Companion 体验：项目笔记盒拖入、无 PotPlayer 纯笔记小窗、成功提示乱码、长笔记焦点/滚动；
-3. beta20.11 长笔记自动聚焦真人反馈出现持续刷新/抽搐；beta20.12 已改为一次性、事件驱动 caret reveal，并在用户继续输入/移动光标时自动放弃滚动，等待实机；
-4. Managed v3 fallback、legacy v1 relink、light-mode modal、named backup 需要最终 RC 回归；
-5. data.json 自动归零事故已做 fail-closed + external recovery；用户后续未再次报告归零，但 RC 前仍需 restart ×2 + restore 复验。
+1. **BLOCK：Restart Persistence** — RC1 需要完整退出 / 重开 ×2，确认项目、资源、设置与 Companion 状态不丢；
+2. **BLOCK：Named Backup + Restore** — 自动测试全绿，但必须真人创建命名备份、修改状态、恢复并确认命名备份未被清理；
+3. **BLOCK：OpenList real auth/playback/seek** — 代码与模型覆盖齐全，但真实服务兼容必须真人；
+4. **RECHECK：Managed v3 fallback + legacy v1 recovery/relink**；
+5. **RECHECK：Timeline stale overlay / mixed-source grouping**；
+6. **RECHECK：Companion long-note caret + light-mode modal**；
+7. **RECHECK：旧版插件共存** — RC1 已 fail-safe；若旧插件仍安装，只需一次 reload smoke test；
+8. **BLOCK：Stable plugin identity** — 正式版永久 id/name/version 尚未确认。推荐 `go-study / Go Study / 0.3.0`，RC 暂继续 `go-study-preview` 以保留测试数据。
+
+完整矩阵：`docs/release/RC_AUDIT_0.3.0.md`
 
 详细交接：docs/handoff/CURRENT_HANDOFF.md
 
@@ -1239,3 +1245,18 @@ Topmost：
 5. 执行 note action 后 Quick Note 必须出现在最前；
 6. Companion pin 后点击浏览器，Companion 仍应保持在其上；
 7. PotPlayer 模式必须无回归。
+
+
+## beta20.12.3 Windows 真人最终结论：PASS
+
+用户确认 beta20.12.3：
+- B站网页 Focused HUD 工作正常；
+- 方向键不再被浏览器抢走；
+- Quick Note 输入弹窗正常；
+- Companion 强置顶可覆盖 Chrome / Edge；
+- 可继续进入发布收尾。
+
+结论：
+**beta20.12.3 behavior = ACCEPTED-AS-BEHAVIOR（Windows）**
+
+之后进入 RC1，功能冻结。
