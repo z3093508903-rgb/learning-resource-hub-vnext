@@ -1402,3 +1402,80 @@ Messaging focus:
 - local-first, recoverable data.
 
 Do not add new product features during final release preparation. Remaining work is release identity, final packaging, screenshots/visual assets, and publish metadata.
+
+
+## Open-source promise & launch scope
+
+Confirmed for public launch:
+
+### Free & Open Source
+
+Go Study Core is fully open source.
+
+Public promise:
+
+> **Go Study is free and open source.**
+>
+> **Core features will not be locked behind a paywall.**
+>
+> If this project saves you time, you can optionally support its continued development.
+
+中文承诺：
+
+> **Go Study 免费且开源，0.3.0 已有的核心学习功能将永久免费且开源，不会在未来被移到付费墙后。**
+>
+> 如果它确实帮你节省了一些时间，可以选择赞助项目继续开发。
+
+Possible future paid services are limited to NEW capabilities with recurring operational cost, e.g.:
+
+- AI services;
+- cloud sync;
+- hosted services;
+- recurring server/storage/API-cost features.
+
+Those services must remain optional and must not move current Core functionality behind a paywall.
+
+### Sponsorship UI
+
+Settings may show one quiet `支持 Go Study` section at the bottom:
+
+- no startup popup;
+- no notification badge;
+- no feature interruption;
+- sponsorship is voluntary;
+- current functionality is never gated by sponsorship.
+
+Current public project URL target:
+`https://github.com/z3093508903-rgb/go-study`
+
+Actual payment/sponsorship channel will be linked from the future public repository; do not invent one in code.
+
+### Video platform scope for 0.3.0
+
+First-party web-video adapter:
+
+- Bilibili: YES, because the workflow has been designed and real-machine validated for the current initial user base.
+- YouTube: NO dedicated web timestamp/HUD bridge in 0.3.0.
+
+YouTube is explicitly **not a release blocker**.
+
+Future YouTube / international platform adapters should be driven by real overseas user workflows, not by pre-release feature-count pressure.
+
+### RC5
+
+Branch:
+`release/go-study-0.3.0-rc5`
+
+HEAD:
+`77d5025b7a6c048c5ae2ff6d0bd09da6a97fdd95`
+
+Validation:
+- 414 / 414 tests PASS;
+- 38 modules / 776860 bytes;
+- Release readiness PASS.
+
+Changes are launch-facing only:
+- quiet sponsorship section;
+- open-source/paywall commitment;
+- YouTube/Bilibili platform scope documentation;
+- no learning-flow feature change.
