@@ -189,6 +189,54 @@ Go Study 当前是 Desktop-only 插件。
 
 ---
 
+## Free & Open Source
+
+**Go Study is free and open source.**
+
+**Core features will not be locked behind a paywall.**  
+If this project saves you time, you can optionally support its continued development.
+
+> **Go Study 免费且开源，当前核心学习功能将永久免费且开源，不会在未来被移到付费墙后。**
+>
+> 如果它确实帮你节省了一些时间，可以选择赞助项目继续开发。
+
+未来只有在新增**需要持续运营成本**的能力时，例如：
+
+- AI 服务
+- 云同步
+- 托管服务
+- 其他需要持续服务器 / API 成本的在线能力
+
+才可能提供**可选付费服务**。
+
+这些未来服务不会改变 0.3.0 已经提供的核心功能的免费与开源承诺。
+
+### Support Go Study
+
+如果你愿意支持项目，可以从正式项目主页查看赞助方式：
+
+`https://github.com/z3093508903-rgb/go-study`
+
+赞助完全自愿，不会影响功能、更新或使用体验。
+
+---
+
+## 关于 Bilibili 与 YouTube
+
+Go Study 0.3.0 的网页视频增强首先针对 **Bilibili** 做了专门适配，因为首版主要围绕已经实际验证的中国用户视频学习工作流开发。
+
+当前：
+
+- Bilibili Web Bridge：有专门适配与实机验证；
+- YouTube：**暂时没有专门的视频时间戳 / HUD Bridge 适配**；
+- 其他网页视频：可以继续把 Companion 当作独立置顶 Markdown 小窗使用，但不承诺自动读取网页播放器时间。
+
+这不是永久限制，也不是 0.3.0 的缺陷修复项。
+
+如果未来有足够的海外用户需求，会再基于真实使用习惯设计 YouTube / 其他平台 Adapter，而不是为了首发“支持平台更多”仓促加入未经验证的实现。
+
+---
+
 ## 兼容边界
 
 正式兼容承诺：
