@@ -70,14 +70,30 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
     if (!href.startsWith('obsidian://go-study')) return;
     let reference;
     try { reference = parseReferenceUri(href); } catch { return; }
-    if (reference?.mode !== 'freeform') return;
 
-    stopLinkEvent(event);
-    const web = reference.web || httpLocator(reference.locator);
-    if (event?.ctrlKey && web) {
-      void shellImpl.openExternal(browserUrlAtPosition(web, reference.position));
+    if (event?.ctrlKey) {
+      stopLinkEvent(event);
+      const fallbackWeb = reference?.mode === 'freeform'
+        ? (reference.web || httpLocator(reference.locator))
+        : '';
+      const resolveWeb = typeof plugin?.browserUrlForReference === 'function'
+        ? Promise.resolve(plugin.browserUrlForReference(reference))
+        : Promise.resolve(fallbackWeb);
+      void resolveWeb.then((web) => {
+        if (!web) {
+          try {
+            const { Notice } = require('obsidian');
+            new Notice('这条 Go Study 回链没有可用的网页来源。旧版 Managed 回链如果资源数据已丢失，无法反推出原网页。', 6500);
+          } catch {}
+          return;
+        }
+        return shellImpl.openExternal(browserUrlAtPosition(web, reference.position));
+      }).catch(() => {});
       return;
     }
+
+    if (reference?.mode !== 'freeform') return;
+    stopLinkEvent(event);
     if (typeof plugin?.openFreeformReference === 'function') {
       void Promise.resolve(plugin.openFreeformReference(reference)).catch(() => {});
     }

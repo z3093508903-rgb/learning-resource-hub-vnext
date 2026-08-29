@@ -9,6 +9,7 @@ const {
   matchingManagedResource,
   matchingManagedResourceByPortableName
 } = require('./media-session.cjs');
+const { currentResourceForReference } = require('./reference-fallback.cjs');
 
 
 function cleanSourceTitle(value) {
@@ -64,17 +65,26 @@ function freeformSource(reference) {
 function sourceForReference(plugin, reference) {
   if (!reference) return null;
   if (reference.mode !== 'freeform') {
-    const resource = plugin?.state?.resources?.[reference.resourceId];
+    const resource = currentResourceForReference(plugin, reference);
     if (!resource || resource.deletedAt) {
+      let fallback = cleanSourceTitle(reference.title) || cleanSourceTitle(reference.name);
+      if (!fallback) {
+        try {
+          const url = new URL(String(reference.web || reference.locator || ''));
+          fallback = url.hostname;
+        } catch {}
+      }
       return {
         key: `managed:${reference.resourceId}`,
         kind: 'managed',
-        title: '已收录视频',
+        title: fallback || '来源已丢失的视频',
         resourceId: reference.resourceId,
-        resource: null
+        resource: null,
+        locator: reference.locator || '',
+        web: reference.web || ''
       };
     }
-    return managedSource(plugin, resource);
+    return managedSource(plugin, resource, resource.id === reference.resourceId ? null : reference);
   }
 
   const resolveActions = (resource) => plugin?.resourceActions?.(resource) || {};

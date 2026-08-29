@@ -2,6 +2,7 @@
 
 const {
   MarkdownRenderer,
+  Modal,
   Notice,
   PluginSettingTab = class {},
   Setting = class {}
@@ -50,6 +51,65 @@ const {
   buildPlainNoteMarkdown,
   buildPositionMarkdown
 } = require('./resource-note.cjs');
+
+class BackupNameModal extends Modal {
+  constructor(app, title, initialValue, onSubmit) {
+    super(app);
+    this.title = title;
+    this.initialValue = initialValue;
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen() {
+    this.modalEl.addClass?.('go-study-backup-name-modal');
+    this.contentEl.createEl('h3', { text: this.title });
+    const input = this.contentEl.createEl('input', {
+      cls: 'go-study-backup-name-input',
+      attr: { type: 'text', placeholder: '例如：发布前稳定版' }
+    });
+    input.value = this.initialValue || '';
+    const actions = this.contentEl.createDiv({ cls: 'go-study-backup-name-actions' });
+    const cancel = actions.createEl('button', { text: '取消' });
+    const save = actions.createEl('button', { text: '保存名称', cls: 'mod-cta' });
+    const submit = () => {
+      const value = String(input.value || '').trim();
+      if (!value) return;
+      this.onSubmit?.(value);
+      this.close();
+    };
+    cancel.addEventListener('click', () => this.close());
+    save.addEventListener('click', submit);
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      submit();
+    });
+    window.setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+function promptBackupName(app, title, initialValue = '') {
+  return new Promise((resolve) => {
+    let settled = false;
+    const modal = new BackupNameModal(app, title, initialValue, (value) => {
+      settled = true;
+      resolve(value);
+    });
+    const originalClose = modal.onClose.bind(modal);
+    modal.onClose = () => {
+      originalClose();
+      if (!settled) resolve('');
+    };
+    modal.open();
+  });
+}
 
 function section(containerEl, title, description = '') {
   const heading = containerEl.createEl('h3', { text: title });
@@ -711,7 +771,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('自动备份保留数量')
-      .setDesc('保留最近 3～10 份真实恢复快照；启动前和保存前都会自动保护旧状态。')
+      .setDesc('只限制启动前 / 保存前的自动快照，保留最近 3～10 份。命名手动备份不计入这个数量，也不会被自动清理。')
       .addDropdown((dropdown) => {
         for (let value = 3; value <= 10; value += 1) dropdown.addOption(String(value), `${value} 份`);
         dropdown.setValue(String(settings.backupRetention));
@@ -731,14 +791,16 @@ class GoStudySettingsTab extends PluginSettingTab {
           if (error) new Notice(`无法打开备份文件夹：${error}`, 6000);
         }))
       .addButton((button) => button
-        .setButtonText('立即备份')
+        .setButtonText('新建命名备份')
         .onClick(async () => {
+          const label = await promptBackupName(this.app, '命名手动备份', '手动备份');
+          if (!label) return;
           try {
-            const name = await this.plugin.createStateBackup('manual');
-            new Notice(`已创建状态备份：${name}`, 5000);
+            const name = await this.plugin.createNamedStateBackup(label);
+            new Notice(`已创建命名备份：${name}`, 5000);
             this.display();
           } catch (error) {
-            new Notice(commandErrorText('创建状态备份失败', error), 6000);
+            new Notice(commandErrorText('创建命名备份失败', error), 6000);
           }
         }));
 
@@ -747,6 +809,28 @@ class GoStudySettingsTab extends PluginSettingTab {
       .setDesc(dataPath || '当前环境无法解析 data.json 路径。');
 
     const latest = entries[0];
+    const latestNamed = entries.find((entry) => entry.named);
+    new Setting(containerEl)
+      .setName('手动命名备份')
+      .setDesc(latestNamed
+        ? `最近命名：${latestNamed.name} · 不参与自动清理`
+        : '还没有命名备份。你也可以把最近任意快照重命名为长期保留备份。')
+      .addButton((button) => button
+        .setButtonText('重命名最近快照')
+        .setDisabled(!latest)
+        .onClick(async () => {
+          if (!latest) return;
+          const label = await promptBackupName(this.app, '将最近快照设为长期备份', latest.name.replace(/\.json$/i, ''));
+          if (!label) return;
+          try {
+            const renamed = this.plugin.renameStateBackup(latest.name, label);
+            new Notice(`已设为长期命名备份：${renamed.name}`, 5000);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('重命名备份失败', error), 6000);
+          }
+        }));
+
     new Setting(containerEl)
       .setName('最近恢复快照')
       .setDesc(latest ? `${latest.name} · ${Math.max(1, Math.round(latest.size / 1024))} KB` : '还没有恢复快照。重新加载插件后至少会生成一份启动前快照。')
@@ -776,9 +860,11 @@ class GoStudySettingsTab extends PluginSettingTab {
 }
 
 module.exports = {
+  BackupNameModal,
   GoStudySettingsTab,
   noteOutputOptions,
   noteOutputPreview,
+  promptBackupName,
   section,
   setInterfaceTips,
   videoStatusText

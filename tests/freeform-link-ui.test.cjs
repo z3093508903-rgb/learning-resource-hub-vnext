@@ -17,8 +17,9 @@ test('beta.17 freeform links are handled inside Go Study and avoid reserved path
   assert.match(source, /addEventListener\('click', onClick, true\)/);
 });
 
-test('Ctrl-click opens HTTP freeform locator in the browser while old jv links remain compatible', () => {
-  assert.match(source, /httpLocator\(reference\.locator\)/);
+test('Ctrl-click opens both freeform and managed Go Study browser sources while old jv links remain compatible', () => {
+  assert.match(source, /plugin\?\.browserUrlForReference/);
+  assert.match(source, /browserUrlAtPosition\(web, reference\.position\)/);
   assert.match(source, /href\.startsWith\('jv:\/\/open\?'/);
   assert.match(source, /shellImpl\.openExternal\(web\)/);
 });

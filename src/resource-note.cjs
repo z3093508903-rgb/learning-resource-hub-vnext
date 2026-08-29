@@ -1,6 +1,14 @@
 'use strict';
 
-const { buildFreeformReferenceUri, buildReferenceUri, freeformLocatorName, normalizeReferencePosition } = require('./resource-reference.cjs');
+const {
+  PORTABLE_MANAGED_REFERENCE_VERSION,
+  buildFreeformReferenceUri,
+  buildReferenceUri,
+  freeformLocatorName,
+  normalizeOptionalManagedLocator,
+  normalizeOptionalWebLocator,
+  normalizeReferencePosition
+} = require('./resource-reference.cjs');
 const {
   DEFAULT_PRODUCT_SETTINGS,
   normalizeOutputTemplate,
@@ -38,10 +46,69 @@ function renderOutputTemplate(template, values = {}) {
   });
 }
 
+function firstHttpLocator(values) {
+  for (const value of values || []) {
+    try {
+      const normalized = normalizeOptionalWebLocator(value);
+      if (normalized) return normalized;
+    } catch {}
+  }
+  return '';
+}
+
+function firstManagedLocator(values) {
+  for (const value of values || []) {
+    try {
+      const normalized = normalizeOptionalManagedLocator(value);
+      if (normalized) return normalized;
+    } catch {}
+  }
+  return '';
+}
+
+function managedReferenceFallback(resource = {}) {
+  const metadata = resource?.metadata || {};
+  const launcher = resource?.launcher || {};
+  const launcherHttp = launcher.type === 'potplayer'
+    ? launcher.target
+    : launcher.type === 'uri'
+      ? launcher.uri
+      : '';
+  const web = firstHttpLocator([
+    metadata.sourceUrl,
+    metadata.originalUrl,
+    metadata.web,
+    launcherHttp
+  ]);
+  const locator = firstManagedLocator([
+    metadata.localPath,
+    launcher.type === 'file' ? launcher.path : '',
+    launcher.type === 'potplayer' ? launcher.target : '',
+    launcher.type === 'uri' ? launcher.uri : '',
+    web
+  ]);
+  let name = '';
+  if (locator) {
+    try { name = freeformLocatorName(locator); } catch {}
+  }
+  const title = String(resource?.title || '').replace(/[\r\n\t]+/g, ' ').trim();
+  return {
+    ...(locator ? { locator } : {}),
+    ...(name ? { name } : {}),
+    ...(title ? { title } : {}),
+    ...(web ? { web } : {})
+  };
+}
+
 function buildPositionMarkdown(resource, position, options = {}) {
   if (!resource?.id) throw new Error('无法为缺少 Resource ID 的资源生成回链。');
   const normalized = normalizeReferencePosition(position);
-  const uri = buildReferenceUri({ resourceId: resource.id, position: normalized, version: 1 });
+  const uri = buildReferenceUri({
+    resourceId: resource.id,
+    ...managedReferenceFallback(resource),
+    position: normalized,
+    version: PORTABLE_MANAGED_REFERENCE_VERSION
+  });
   const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
   const title = escapeMarkdownLabel(options.title || resource.title || '学习资源');
   const template = normalizeOutputTemplate(
@@ -248,6 +315,7 @@ module.exports = {
   contextBacklinkTitle,
   freeformMediaTitle,
   freeformWebLocator,
+  managedReferenceFallback,
   escapeMarkdownLabel,
   formatPositionClock,
   normalizeCaptureImage,

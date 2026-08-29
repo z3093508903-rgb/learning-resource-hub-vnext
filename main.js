@@ -981,6 +981,13 @@ const {
 const { matchingManagedResource, matchingManagedResourceByPortableName } = __rhLoad("media-session.cjs");
 const { openPortableFreeformReference } = __rhLoad("freeform-playback.cjs");
 const {
+  browserUrlForReference,
+  currentResourceForReference,
+  fallbackFreeformReference,
+  recoveredResourceById
+} = __rhLoad("reference-fallback.cjs");
+const { chooseReferenceRelinkResource } = __rhLoad("reference-relink-ui.cjs");
+const {
   applySafeOpenListPathRemap,
   normalizeStrictOpenListPath,
   previewSafeOpenListPathRemap,
@@ -1030,19 +1037,64 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
 
   async openResourceReference(reference) {
     if (reference?.mode === 'freeform') return this.openFreeformReference(reference);
-    const resolved = resolveReferencePlayback(this.state, reference, (resource) => this.resourceActions(resource));
-    const opened = await this.openPositionedPlayTarget(resolved.resource, resolved.playTarget, resolved.playerTime);
-    if (!opened) return false;
 
-    updateResumePosition(this.state.resources[resolved.resource.id], resolved.position);
-    this.activeMediaSession = {
-      resourceId: resolved.resource.id,
-      startedAt: new Date().toISOString(),
-      lastKnownPosition: { ...resolved.position }
-    };
-    await this.persist();
-    await this.workbenchLeaf?.view?.render?.();
-    return true;
+    const current = currentResourceForReference(this, reference);
+    if (current) {
+      const resolved = resolveReferencePlayback(this.state, {
+        ...reference,
+        resourceId: current.id
+      }, (resource) => this.resourceActions(resource));
+      const opened = await this.openPositionedPlayTarget(resolved.resource, resolved.playTarget, resolved.playerTime);
+      if (!opened) return false;
+
+      updateResumePosition(this.state.resources[resolved.resource.id], resolved.position);
+      this.activeMediaSession = {
+        resourceId: resolved.resource.id,
+        startedAt: new Date().toISOString(),
+        lastKnownPosition: { ...resolved.position }
+      };
+      await this.persist();
+      await this.workbenchLeaf?.view?.render?.();
+      return true;
+    }
+
+    const portable = fallbackFreeformReference(reference);
+    if (portable) {
+      new Notice('Go Study 当前没有这条 Resource，但回链自带来源信息，将按临时视频打开。', 5000);
+      return this.openFreeformReference(portable);
+    }
+
+    const recovered = recoveredResourceById(this, reference?.resourceId);
+    if (recovered?.resource) {
+      try {
+        const actions = model.resolveResourceActions(recovered.resource, recovered.state?.sources || {});
+        if (!actions.playTarget) throw new Error('恢复快照中的资源没有可用播放方式。');
+        const playerTime = formatPotPlayerTime(reference.position);
+        const opened = await this.openPositionedPlayTarget(recovered.resource, actions.playTarget, playerTime);
+        if (opened) {
+          new Notice('已从恢复快照识别这条旧回链；资源尚未重新收录到当前库。', 6000);
+          return true;
+        }
+      } catch (error) {
+        console.warn('Go Study: recovered backlink resource could not be opened.', error);
+      }
+    }
+
+    const chosen = await chooseReferenceRelinkResource(this, reference);
+    if (chosen?.id) {
+      this.state.uiState ||= {};
+      this.state.uiState.referenceAliases ||= {};
+      this.state.uiState.referenceAliases[String(reference.resourceId || '')] = chosen.id;
+      await this.persist();
+      new Notice(`旧回链已重新关联：${chosen.title || chosen.id}`, 5000);
+      return this.openResourceReference(reference);
+    }
+
+    throw new Error('Go Study 找不到这条旧回链对应的学习资源，而且旧链接没有携带可恢复的来源信息。可先重新收录对应视频，再普通点击旧时间戳进行一次性重新关联。');
+  }
+
+  browserUrlForReference(reference) {
+    return browserUrlForReference(this, reference);
   }
 
   async openFreeformReference(reference) {
@@ -1368,14 +1420,30 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
     if (!href.startsWith('obsidian://go-study')) return;
     let reference;
     try { reference = parseReferenceUri(href); } catch { return; }
-    if (reference?.mode !== 'freeform') return;
 
-    stopLinkEvent(event);
-    const web = reference.web || httpLocator(reference.locator);
-    if (event?.ctrlKey && web) {
-      void shellImpl.openExternal(browserUrlAtPosition(web, reference.position));
+    if (event?.ctrlKey) {
+      stopLinkEvent(event);
+      const fallbackWeb = reference?.mode === 'freeform'
+        ? (reference.web || httpLocator(reference.locator))
+        : '';
+      const resolveWeb = typeof plugin?.browserUrlForReference === 'function'
+        ? Promise.resolve(plugin.browserUrlForReference(reference))
+        : Promise.resolve(fallbackWeb);
+      void resolveWeb.then((web) => {
+        if (!web) {
+          try {
+            const { Notice } = require('obsidian');
+            new Notice('这条 Go Study 回链没有可用的网页来源。旧版 Managed 回链如果资源数据已丢失，无法反推出原网页。', 6500);
+          } catch {}
+          return;
+        }
+        return shellImpl.openExternal(browserUrlAtPosition(web, reference.position));
+      }).catch(() => {});
       return;
     }
+
+    if (reference?.mode !== 'freeform') return;
+    stopLinkEvent(event);
     if (typeof plugin?.openFreeformReference === 'function') {
       void Promise.resolve(plugin.openFreeformReference(reference)).catch(() => {});
     }
@@ -2513,7 +2581,9 @@ const {
   recoveryDirectory,
   recoveryEntries,
   refreshPersistBaseline,
+  renameRecoveryEntry,
   startupSafetySnapshot,
+  writeNamedRecoveryState,
   writeRecoveryState
 } = __rhLoad("state-safety.cjs");
 
@@ -2931,6 +3001,15 @@ class ResourceHubNextPlugin extends Plugin {
   async createStateBackup(label = 'manual') {
     const result = writeRecoveryState(this, this.state, label);
     return result.name;
+  }
+
+  async createNamedStateBackup(label = '手动备份') {
+    const result = writeNamedRecoveryState(this, this.state, label);
+    return result.name;
+  }
+
+  renameStateBackup(backupName, newLabel) {
+    return renameRecoveryEntry(this, backupName, newLabel);
   }
 
   async restoreStateBackup(backupName) {
@@ -9496,6 +9575,7 @@ module.exports = {
 
 const {
   MarkdownRenderer,
+  Modal,
   Notice,
   PluginSettingTab = class {},
   Setting = class {}
@@ -9544,6 +9624,65 @@ const {
   buildPlainNoteMarkdown,
   buildPositionMarkdown
 } = __rhLoad("resource-note.cjs");
+
+class BackupNameModal extends Modal {
+  constructor(app, title, initialValue, onSubmit) {
+    super(app);
+    this.title = title;
+    this.initialValue = initialValue;
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen() {
+    this.modalEl.addClass?.('go-study-backup-name-modal');
+    this.contentEl.createEl('h3', { text: this.title });
+    const input = this.contentEl.createEl('input', {
+      cls: 'go-study-backup-name-input',
+      attr: { type: 'text', placeholder: '例如：发布前稳定版' }
+    });
+    input.value = this.initialValue || '';
+    const actions = this.contentEl.createDiv({ cls: 'go-study-backup-name-actions' });
+    const cancel = actions.createEl('button', { text: '取消' });
+    const save = actions.createEl('button', { text: '保存名称', cls: 'mod-cta' });
+    const submit = () => {
+      const value = String(input.value || '').trim();
+      if (!value) return;
+      this.onSubmit?.(value);
+      this.close();
+    };
+    cancel.addEventListener('click', () => this.close());
+    save.addEventListener('click', submit);
+    input.addEventListener('keydown', (event) => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      submit();
+    });
+    window.setTimeout(() => {
+      input.focus();
+      input.select();
+    }, 0);
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
+function promptBackupName(app, title, initialValue = '') {
+  return new Promise((resolve) => {
+    let settled = false;
+    const modal = new BackupNameModal(app, title, initialValue, (value) => {
+      settled = true;
+      resolve(value);
+    });
+    const originalClose = modal.onClose.bind(modal);
+    modal.onClose = () => {
+      originalClose();
+      if (!settled) resolve('');
+    };
+    modal.open();
+  });
+}
 
 function section(containerEl, title, description = '') {
   const heading = containerEl.createEl('h3', { text: title });
@@ -10205,7 +10344,7 @@ class GoStudySettingsTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('自动备份保留数量')
-      .setDesc('保留最近 3～10 份真实恢复快照；启动前和保存前都会自动保护旧状态。')
+      .setDesc('只限制启动前 / 保存前的自动快照，保留最近 3～10 份。命名手动备份不计入这个数量，也不会被自动清理。')
       .addDropdown((dropdown) => {
         for (let value = 3; value <= 10; value += 1) dropdown.addOption(String(value), `${value} 份`);
         dropdown.setValue(String(settings.backupRetention));
@@ -10225,14 +10364,16 @@ class GoStudySettingsTab extends PluginSettingTab {
           if (error) new Notice(`无法打开备份文件夹：${error}`, 6000);
         }))
       .addButton((button) => button
-        .setButtonText('立即备份')
+        .setButtonText('新建命名备份')
         .onClick(async () => {
+          const label = await promptBackupName(this.app, '命名手动备份', '手动备份');
+          if (!label) return;
           try {
-            const name = await this.plugin.createStateBackup('manual');
-            new Notice(`已创建状态备份：${name}`, 5000);
+            const name = await this.plugin.createNamedStateBackup(label);
+            new Notice(`已创建命名备份：${name}`, 5000);
             this.display();
           } catch (error) {
-            new Notice(commandErrorText('创建状态备份失败', error), 6000);
+            new Notice(commandErrorText('创建命名备份失败', error), 6000);
           }
         }));
 
@@ -10241,6 +10382,28 @@ class GoStudySettingsTab extends PluginSettingTab {
       .setDesc(dataPath || '当前环境无法解析 data.json 路径。');
 
     const latest = entries[0];
+    const latestNamed = entries.find((entry) => entry.named);
+    new Setting(containerEl)
+      .setName('手动命名备份')
+      .setDesc(latestNamed
+        ? `最近命名：${latestNamed.name} · 不参与自动清理`
+        : '还没有命名备份。你也可以把最近任意快照重命名为长期保留备份。')
+      .addButton((button) => button
+        .setButtonText('重命名最近快照')
+        .setDisabled(!latest)
+        .onClick(async () => {
+          if (!latest) return;
+          const label = await promptBackupName(this.app, '将最近快照设为长期备份', latest.name.replace(/\.json$/i, ''));
+          if (!label) return;
+          try {
+            const renamed = this.plugin.renameStateBackup(latest.name, label);
+            new Notice(`已设为长期命名备份：${renamed.name}`, 5000);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('重命名备份失败', error), 6000);
+          }
+        }));
+
     new Setting(containerEl)
       .setName('最近恢复快照')
       .setDesc(latest ? `${latest.name} · ${Math.max(1, Math.round(latest.size / 1024))} KB` : '还没有恢复快照。重新加载插件后至少会生成一份启动前快照。')
@@ -10270,9 +10433,11 @@ class GoStudySettingsTab extends PluginSettingTab {
 }
 
 module.exports = {
+  BackupNameModal,
   GoStudySettingsTab,
   noteOutputOptions,
   noteOutputPreview,
+  promptBackupName,
   section,
   setInterfaceTips,
   videoStatusText
@@ -12268,6 +12433,236 @@ module.exports = {
 };
 
 },
+"reference-fallback.cjs": (module, exports, require) => {
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+const { recoveryEntries } = __rhLoad("state-safety.cjs");
+const {
+  matchingManagedResource,
+  matchingManagedResourceByPortableName
+} = __rhLoad("media-session.cjs");
+
+function httpLocator(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : '';
+  } catch { return ''; }
+}
+
+function recoveredStateFiles(plugin) {
+  const files = [];
+  for (const entry of recoveryEntries(plugin)) files.push(entry.fullPath);
+
+  const basePath = plugin?.app?.vault?.adapter?.getBasePath?.();
+  const configDir = plugin?.app?.vault?.configDir || '.obsidian';
+  if (basePath) {
+    for (const id of [
+      plugin?.manifest?.id,
+      'go-study-preview',
+      'learning-resource-hub-next'
+    ].filter(Boolean)) {
+      const dir = path.join(basePath, configDir, 'plugins', id);
+      const dataPath = path.join(dir, 'data.json');
+      if (fs.existsSync(dataPath)) files.push(dataPath);
+      const backupDir = path.join(dir, 'backups');
+      if (fs.existsSync(backupDir)) {
+        try {
+          const names = fs.readdirSync(backupDir)
+            .filter((name) => /\.json$/i.test(name))
+            .sort()
+            .reverse();
+          for (const name of names) files.push(path.join(backupDir, name));
+        } catch {}
+      }
+    }
+  }
+  return [...new Set(files)];
+}
+
+function recoveredResourceById(plugin, resourceId) {
+  const id = String(resourceId || '').trim();
+  if (!id) return null;
+  for (const filePath of recoveredStateFiles(plugin)) {
+    try {
+      const state = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      const resource = state?.resources?.[id];
+      if (resource && !resource.deletedAt) return { resource, state, filePath };
+    } catch {}
+  }
+  return null;
+}
+
+function currentResourceForReference(plugin, reference) {
+  const resourceId = String(reference?.resourceId || '');
+  const exact = plugin?.state?.resources?.[resourceId];
+  if (exact && !exact.deletedAt) return exact;
+
+  const aliasId = String(plugin?.state?.uiState?.referenceAliases?.[resourceId] || '');
+  const aliased = aliasId ? plugin?.state?.resources?.[aliasId] : null;
+  if (aliased && !aliased.deletedAt) return aliased;
+
+  const resolveActions = (resource) => plugin?.resourceActions?.(resource) || {};
+  if (reference?.locator) {
+    try {
+      const matched = matchingManagedResource(plugin?.state, reference.locator, resolveActions);
+      if (matched) return matched;
+    } catch {}
+  }
+  if (reference?.name) {
+    try {
+      const matched = matchingManagedResourceByPortableName(plugin?.state, reference.name, resolveActions);
+      if (matched) return matched;
+    } catch {}
+  }
+  return null;
+}
+
+function fallbackFreeformReference(reference) {
+  const locator = String(reference?.locator || reference?.web || '').trim();
+  if (!locator) return null;
+  return {
+    mode: 'freeform',
+    locator,
+    name: String(reference?.name || '').trim(),
+    title: String(reference?.title || '').trim(),
+    web: String(reference?.web || httpLocator(locator) || '').trim(),
+    position: reference.position,
+    version: 2
+  };
+}
+
+function resourceBrowserUrl(plugin, resource, stateOverride = null) {
+  if (!resource) return '';
+  const metadata = resource.metadata || {};
+  const direct = [
+    metadata.sourceUrl,
+    metadata.originalUrl,
+    metadata.web,
+    resource.launcher?.type === 'potplayer' ? resource.launcher.target : '',
+    resource.launcher?.type === 'uri' ? resource.launcher.uri : ''
+  ].map(httpLocator).find(Boolean);
+  if (direct) return direct;
+
+  try {
+    if (stateOverride && plugin?.state && stateOverride !== plugin.state) {
+      const model = __rhLoad("model.cjs");
+      const actions = model.resolveResourceActions(resource, stateOverride.sources || {});
+      return httpLocator(actions?.webTarget)
+        || httpLocator(actions?.playTarget?.target)
+        || httpLocator(actions?.playTarget?.uri)
+        || '';
+    }
+    const actions = plugin?.resourceActions?.(resource) || {};
+    return httpLocator(actions.webTarget)
+      || httpLocator(actions.playTarget?.target)
+      || httpLocator(actions.playTarget?.uri)
+      || '';
+  } catch { return ''; }
+}
+
+function browserUrlForReference(plugin, reference) {
+  if (reference?.mode === 'freeform') {
+    return httpLocator(reference.web) || httpLocator(reference.locator);
+  }
+  const current = currentResourceForReference(plugin, reference);
+  if (current) return resourceBrowserUrl(plugin, current);
+  const inline = httpLocator(reference?.web) || httpLocator(reference?.locator);
+  if (inline) return inline;
+  const recovered = recoveredResourceById(plugin, reference?.resourceId);
+  return recovered ? resourceBrowserUrl(plugin, recovered.resource, recovered.state) : '';
+}
+
+module.exports = {
+  browserUrlForReference,
+  currentResourceForReference,
+  fallbackFreeformReference,
+  httpLocator,
+  recoveredResourceById,
+  recoveredStateFiles,
+  resourceBrowserUrl
+};
+
+},
+"reference-relink-ui.cjs": (module, exports, require) => {
+'use strict';
+
+const { Modal } = require('obsidian');
+
+function activeVideoResources(plugin) {
+  return Object.values(plugin?.state?.resources || {})
+    .filter((resource) => resource && !resource.deletedAt && resource.kind === 'video')
+    .sort((left, right) => String(left.title || '').localeCompare(String(right.title || ''), 'zh-CN'));
+}
+
+class MissingReferenceRelinkModal extends Modal {
+  constructor(app, plugin, reference, onChoose) {
+    super(app);
+    this.plugin = plugin;
+    this.reference = reference;
+    this.onChoose = onChoose;
+    this.chosen = false;
+  }
+
+  onOpen() {
+    this.modalEl.addClass?.('go-study-reference-relink-modal');
+    this.contentEl.createEl('h3', { text: '重新关联旧时间戳' });
+    this.contentEl.createEl('p', {
+      text: '这是一条旧版 Managed 回链，只保存了 Resource ID。当前资源库里已经没有这个 ID，因此需要手动选择一次对应的视频。之后同一旧 Resource ID 的时间戳都会自动使用这条关联。'
+    });
+
+    const resources = activeVideoResources(this.plugin);
+    if (!resources.length) {
+      this.contentEl.createEl('p', {
+        cls: 'setting-item-description',
+        text: '当前没有可选视频。请先重新收录对应资源，再点击这条旧时间戳进行关联。'
+      });
+      const close = this.contentEl.createEl('button', { text: '知道了' });
+      close.addEventListener('click', () => this.close());
+      return;
+    }
+
+    const select = this.contentEl.createEl('select', { cls: 'dropdown go-study-reference-relink-select' });
+    for (const resource of resources) {
+      select.createEl('option', {
+        text: resource.title || resource.id,
+        value: resource.id
+      });
+    }
+
+    const actions = this.contentEl.createDiv({ cls: 'go-study-reference-relink-actions' });
+    const cancel = actions.createEl('button', { text: '取消' });
+    const confirm = actions.createEl('button', { text: '关联并打开', cls: 'mod-cta' });
+    cancel.addEventListener('click', () => this.close());
+    confirm.addEventListener('click', () => {
+      const resource = this.plugin?.state?.resources?.[select.value];
+      if (!resource || resource.deletedAt) return;
+      this.chosen = true;
+      this.onChoose?.(resource);
+      this.close();
+    });
+  }
+
+  onClose() {
+    if (!this.chosen) this.onChoose?.(null);
+    this.contentEl.empty();
+  }
+}
+
+function chooseReferenceRelinkResource(plugin, reference) {
+  return new Promise((resolve) => {
+    new MissingReferenceRelinkModal(plugin.app, plugin, reference, resolve).open();
+  });
+}
+
+module.exports = {
+  MissingReferenceRelinkModal,
+  activeVideoResources,
+  chooseReferenceRelinkResource
+};
+
+},
 "release-hardening.cjs": (module, exports, require) => {
 'use strict';
 
@@ -12751,7 +13146,15 @@ module.exports = {
 "resource-note.cjs": (module, exports, require) => {
 'use strict';
 
-const { buildFreeformReferenceUri, buildReferenceUri, freeformLocatorName, normalizeReferencePosition } = __rhLoad("resource-reference.cjs");
+const {
+  PORTABLE_MANAGED_REFERENCE_VERSION,
+  buildFreeformReferenceUri,
+  buildReferenceUri,
+  freeformLocatorName,
+  normalizeOptionalManagedLocator,
+  normalizeOptionalWebLocator,
+  normalizeReferencePosition
+} = __rhLoad("resource-reference.cjs");
 const {
   DEFAULT_PRODUCT_SETTINGS,
   normalizeOutputTemplate,
@@ -12789,10 +13192,69 @@ function renderOutputTemplate(template, values = {}) {
   });
 }
 
+function firstHttpLocator(values) {
+  for (const value of values || []) {
+    try {
+      const normalized = normalizeOptionalWebLocator(value);
+      if (normalized) return normalized;
+    } catch {}
+  }
+  return '';
+}
+
+function firstManagedLocator(values) {
+  for (const value of values || []) {
+    try {
+      const normalized = normalizeOptionalManagedLocator(value);
+      if (normalized) return normalized;
+    } catch {}
+  }
+  return '';
+}
+
+function managedReferenceFallback(resource = {}) {
+  const metadata = resource?.metadata || {};
+  const launcher = resource?.launcher || {};
+  const launcherHttp = launcher.type === 'potplayer'
+    ? launcher.target
+    : launcher.type === 'uri'
+      ? launcher.uri
+      : '';
+  const web = firstHttpLocator([
+    metadata.sourceUrl,
+    metadata.originalUrl,
+    metadata.web,
+    launcherHttp
+  ]);
+  const locator = firstManagedLocator([
+    metadata.localPath,
+    launcher.type === 'file' ? launcher.path : '',
+    launcher.type === 'potplayer' ? launcher.target : '',
+    launcher.type === 'uri' ? launcher.uri : '',
+    web
+  ]);
+  let name = '';
+  if (locator) {
+    try { name = freeformLocatorName(locator); } catch {}
+  }
+  const title = String(resource?.title || '').replace(/[\r\n\t]+/g, ' ').trim();
+  return {
+    ...(locator ? { locator } : {}),
+    ...(name ? { name } : {}),
+    ...(title ? { title } : {}),
+    ...(web ? { web } : {})
+  };
+}
+
 function buildPositionMarkdown(resource, position, options = {}) {
   if (!resource?.id) throw new Error('无法为缺少 Resource ID 的资源生成回链。');
   const normalized = normalizeReferencePosition(position);
-  const uri = buildReferenceUri({ resourceId: resource.id, position: normalized, version: 1 });
+  const uri = buildReferenceUri({
+    resourceId: resource.id,
+    ...managedReferenceFallback(resource),
+    position: normalized,
+    version: PORTABLE_MANAGED_REFERENCE_VERSION
+  });
   const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
   const title = escapeMarkdownLabel(options.title || resource.title || '学习资源');
   const template = normalizeOutputTemplate(
@@ -12999,6 +13461,7 @@ module.exports = {
   contextBacklinkTitle,
   freeformMediaTitle,
   freeformWebLocator,
+  managedReferenceFallback,
   escapeMarkdownLabel,
   formatPositionClock,
   normalizeCaptureImage,
@@ -13014,6 +13477,7 @@ module.exports = {
 const REFERENCE_ACTION = 'go-study';
 const REFERENCE_VERSION = 1;
 const FREEFORM_REFERENCE_VERSION = 2;
+const PORTABLE_MANAGED_REFERENCE_VERSION = 3;
 const ALLOWED_QUERY_KEYS = new Set(['resource', 'position', 'v', 'mode', 'locator', 'name', 'title', 'path', 'web']);
 const ALLOWED_PROTOCOL_META_KEYS = new Set(['action']);
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9._:-]{1,256}$/;
@@ -13043,7 +13507,7 @@ function serializeReferencePosition(position) {
 
 function normalizeReferenceVersion(value) {
   const version = Number(value);
-  if (!Number.isInteger(version) || ![REFERENCE_VERSION, FREEFORM_REFERENCE_VERSION].includes(version)) {
+  if (!Number.isInteger(version) || ![REFERENCE_VERSION, FREEFORM_REFERENCE_VERSION, PORTABLE_MANAGED_REFERENCE_VERSION].includes(version)) {
     throw new Error(`不支持的 Go Study 回链版本：${String(value || '') || '缺失'}。`);
   }
   return version;
@@ -13104,12 +13568,35 @@ function normalizeOptionalWebLocator(value) {
   return url.toString();
 }
 
+function normalizeOptionalManagedLocator(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return normalizeFreeformLocator(raw);
+}
+
+function normalizeOptionalPortableMediaName(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  return normalizePortableMediaName(raw);
+}
+
 function validateReferenceData(input) {
   const source = input && typeof input === 'object' ? input : {};
   const version = normalizeReferenceVersion(source.version ?? source.v ?? REFERENCE_VERSION);
-  if (version !== REFERENCE_VERSION) throw new Error(`Managed Go Study 回链只支持 v${REFERENCE_VERSION}。`);
+  if (![REFERENCE_VERSION, PORTABLE_MANAGED_REFERENCE_VERSION].includes(version)) {
+    throw new Error(`Managed Go Study 回链只支持 v${REFERENCE_VERSION} 或 v${PORTABLE_MANAGED_REFERENCE_VERSION}。`);
+  }
+  const portable = version === PORTABLE_MANAGED_REFERENCE_VERSION;
+  const locator = portable ? normalizeOptionalManagedLocator(source.locator) : '';
+  const name = portable ? normalizeOptionalPortableMediaName(source.name || (locator ? freeformLocatorName(locator) : '')) : '';
+  const title = portable ? normalizeOptionalMediaTitle(source.title) : '';
+  const web = portable ? normalizeOptionalWebLocator(source.web) : '';
   return {
     resourceId: normalizeResourceId(source.resourceId ?? source.resource),
+    ...(locator ? { locator } : {}),
+    ...(name ? { name } : {}),
+    ...(title ? { title } : {}),
+    ...(web ? { web } : {}),
     position: normalizeReferencePosition(source.position),
     version
   };
@@ -13135,6 +13622,12 @@ function buildReferenceUri(input) {
   const reference = validateReferenceData(input);
   const url = new URL(`obsidian://${REFERENCE_ACTION}`);
   url.searchParams.set('resource', reference.resourceId);
+  if (reference.version === PORTABLE_MANAGED_REFERENCE_VERSION) {
+    if (reference.locator) url.searchParams.set('locator', reference.locator);
+    if (reference.name) url.searchParams.set('name', reference.name);
+    if (reference.title) url.searchParams.set('title', reference.title);
+    if (reference.web) url.searchParams.set('web', reference.web);
+  }
   url.searchParams.set('position', serializeReferencePosition(reference.position));
   url.searchParams.set('v', String(reference.version));
   return url.toString();
@@ -13172,11 +13665,19 @@ function parseQueryEntries(searchParams) {
       v: searchParams.get('v')
     });
   }
-  if (searchParams.has('mode') || searchParams.has('locator') || searchParams.has('name') || searchParams.has('title') || searchParams.has('path') || searchParams.has('web')) {
-    throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
+  if (searchParams.has('mode') || searchParams.has('path')) {
+    throw new Error('Go Study 管理型回链包含不允许的参数。');
+  }
+  const version = normalizeReferenceVersion(searchParams.get('v'));
+  if (version === REFERENCE_VERSION && (searchParams.has('locator') || searchParams.has('name') || searchParams.has('title') || searchParams.has('web'))) {
+    throw new Error('Go Study v1 管理型回链不能携带便携来源字段。');
   }
   return validateReferenceData({
     resource: searchParams.get('resource'),
+    locator: searchParams.get('locator') || '',
+    name: searchParams.get('name') || '',
+    title: searchParams.get('title') || '',
+    web: searchParams.get('web') || '',
     position: searchParams.get('position'),
     v: searchParams.get('v')
   });
@@ -13213,11 +13714,19 @@ function parseProtocolParams(params) {
     if (source.locator != null && source.path != null) throw new Error('Go Study 自由回链不能同时包含 locator 与旧 path 参数。');
     return validateFreeformReferenceData(source);
   }
-  if (source.mode != null || source.locator != null || source.name != null || source.title != null || source.path != null || source.web != null) {
-    throw new Error('Go Study 管理型回链包含不允许的参数：自由回链字段。');
+  if (source.mode != null || source.path != null) {
+    throw new Error('Go Study 管理型回链包含不允许的参数。');
+  }
+  const version = normalizeReferenceVersion(source.v);
+  if (version === REFERENCE_VERSION && (source.locator != null || source.name != null || source.title != null || source.web != null)) {
+    throw new Error('Go Study v1 管理型回链不能携带便携来源字段。');
   }
   return validateReferenceData({
     resource: source.resource,
+    locator: source.locator || '',
+    name: source.name || '',
+    title: source.title || '',
+    web: source.web || '',
     position: source.position,
     v: source.v
   });
@@ -13227,14 +13736,17 @@ module.exports = {
   ALLOWED_PROTOCOL_META_KEYS,
   ALLOWED_QUERY_KEYS,
   FREEFORM_REFERENCE_VERSION,
+  PORTABLE_MANAGED_REFERENCE_VERSION,
   REFERENCE_ACTION,
   REFERENCE_VERSION,
   buildFreeformReferenceUri,
   buildReferenceUri,
   freeformLocatorName,
   normalizeFreeformLocator,
+  normalizeOptionalManagedLocator,
   normalizeOptionalMediaTitle,
   normalizeOptionalWebLocator,
+  normalizeOptionalPortableMediaName,
   normalizePortableMediaName,
   normalizeReferencePosition,
   normalizeReferenceVersion,
@@ -14078,6 +14590,10 @@ function safeStamp(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, '-');
 }
 
+function isNamedRecoveryEntryName(name) {
+  return /^saved-/i.test(String(name || ''));
+}
+
 function recoveryEntries(plugin) {
   const dir = recoveryDirectory(plugin);
   if (!dir || !fs.existsSync(dir)) return [];
@@ -14086,16 +14602,22 @@ function recoveryEntries(plugin) {
     .map((entry) => {
       const fullPath = path.join(dir, entry.name);
       const stat = fs.statSync(fullPath);
-      return { name: entry.name, fullPath, mtimeMs: Number(stat.mtimeMs || 0), size: Number(stat.size || 0) };
+      return {
+        name: entry.name,
+        fullPath,
+        mtimeMs: Number(stat.mtimeMs || 0),
+        size: Number(stat.size || 0),
+        named: isNamedRecoveryEntryName(entry.name)
+      };
     })
     .sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name));
 }
 
 function pruneRecoveryBackups(plugin, keep = 10) {
   const retention = Math.max(3, Math.min(100, Math.floor(Number(keep) || 10)));
-  const entries = recoveryEntries(plugin);
+  const automatic = recoveryEntries(plugin).filter((entry) => !entry.named);
   const removed = [];
-  for (const entry of entries.slice(retention)) {
+  for (const entry of automatic.slice(retention)) {
     try {
       fs.unlinkSync(entry.fullPath);
       removed.push(entry.name);
@@ -14113,6 +14635,39 @@ function writeRecoveryState(plugin, state, label = 'manual') {
   const fullPath = path.join(dir, name);
   fs.writeFileSync(fullPath, JSON.stringify(state, null, 2), 'utf8');
   return { name, fullPath };
+}
+
+function sanitizeNamedBackupLabel(value) {
+  const cleaned = String(value || '')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim()
+    .slice(0, 80);
+  return cleaned || '手动备份';
+}
+
+function writeNamedRecoveryState(plugin, state, label = '手动备份') {
+  const dir = recoveryDirectory(plugin);
+  if (!dir) throw new Error('当前 Vault 不支持本地恢复备份。');
+  fs.mkdirSync(dir, { recursive: true });
+  const safeLabel = sanitizeNamedBackupLabel(label);
+  const name = `saved-${safeLabel}-${safeStamp()}.json`;
+  const fullPath = path.join(dir, name);
+  fs.writeFileSync(fullPath, JSON.stringify(state, null, 2), 'utf8');
+  return { name, fullPath, named: true };
+}
+
+function renameRecoveryEntry(plugin, currentName, newLabel) {
+  const safeCurrent = path.basename(String(currentName || ''));
+  if (!safeCurrent) throw new Error('找不到需要重命名的备份。');
+  const dir = recoveryDirectory(plugin);
+  const currentPath = path.join(dir, safeCurrent);
+  if (!fs.existsSync(currentPath)) throw new Error('备份文件已经不存在。');
+  const targetName = `saved-${sanitizeNamedBackupLabel(newLabel)}-${safeStamp()}.json`;
+  const targetPath = path.join(dir, targetName);
+  fs.renameSync(currentPath, targetPath);
+  return { name: targetName, fullPath: targetPath, named: true };
 }
 
 function protectRawPluginData(plugin, label = 'startup') {
@@ -14191,6 +14746,7 @@ module.exports = {
   assertSafePersist,
   catastrophicStateDrop,
   markLoadedBaseline,
+  isNamedRecoveryEntryName,
   meaningfulState,
   pluginDataPath,
   pluginDirectory,
@@ -14200,10 +14756,12 @@ module.exports = {
   readRawPluginData,
   recoveryDirectory,
   recoveryEntries,
+  renameRecoveryEntry,
   refreshPersistBaseline,
   stateCounts,
   stateWeight,
   startupSafetySnapshot,
+  writeNamedRecoveryState,
   writeRecoveryState
 };
 
@@ -14360,6 +14918,7 @@ const {
   matchingManagedResource,
   matchingManagedResourceByPortableName
 } = __rhLoad("media-session.cjs");
+const { currentResourceForReference } = __rhLoad("reference-fallback.cjs");
 
 
 function cleanSourceTitle(value) {
@@ -14415,17 +14974,26 @@ function freeformSource(reference) {
 function sourceForReference(plugin, reference) {
   if (!reference) return null;
   if (reference.mode !== 'freeform') {
-    const resource = plugin?.state?.resources?.[reference.resourceId];
+    const resource = currentResourceForReference(plugin, reference);
     if (!resource || resource.deletedAt) {
+      let fallback = cleanSourceTitle(reference.title) || cleanSourceTitle(reference.name);
+      if (!fallback) {
+        try {
+          const url = new URL(String(reference.web || reference.locator || ''));
+          fallback = url.hostname;
+        } catch {}
+      }
       return {
         key: `managed:${reference.resourceId}`,
         kind: 'managed',
-        title: '已收录视频',
+        title: fallback || '来源已丢失的视频',
         resourceId: reference.resourceId,
-        resource: null
+        resource: null,
+        locator: reference.locator || '',
+        web: reference.web || ''
       };
     }
-    return managedSource(plugin, resource);
+    return managedSource(plugin, resource, resource.id === reference.resourceId ? null : reference);
   }
 
   const resolveActions = (resource) => plugin?.resourceActions?.(resource) || {};

@@ -318,3 +318,20 @@ test('collapsed timeline rail uses one dot per video source, not one dot per tim
   assert.match(source, /sourceNodes\.forEach\(\(group, index\)/);
   assert.doesNotMatch(source, /flattened\.slice\(0, 18\)/);
 });
+
+
+test('portable managed v3 keeps its source title visible in Timeline after Resource state is lost', () => {
+  const uri = buildReferenceUri({
+    resourceId: 'missing-v3',
+    locator: 'https://www.bilibili.com/video/BV1LOST',
+    name: 'BV1LOST',
+    title: '遗失资源但来源仍可识别',
+    web: 'https://www.bilibili.com/video/BV1LOST',
+    position: { type: 'time', seconds: 33 },
+    version: 3
+  });
+  const groups = timelineGroupsFromMarkdown(`[00:33](${uri})`, { state: { resources: {} } });
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].title, '遗失资源但来源仍可识别');
+  assert.equal(groups[0].items[0].time, '00:33');
+});

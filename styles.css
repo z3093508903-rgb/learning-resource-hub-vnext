@@ -630,7 +630,35 @@
 }
 .rh-next-sidebar-restore:hover { opacity: 1; color: var(--rh-accent); }
 
-.modal.rh-next-modal { width: min(920px, 92vw); }
+.modal.rh-next-modal {
+  --rh-accent: var(--interactive-accent);
+  --rh-accent-hover: var(--interactive-accent-hover);
+  --rh-soft: color-mix(in srgb, var(--interactive-accent) 10%, var(--background-primary));
+  --rh-border: var(--background-modifier-border);
+  --rh-card: color-mix(in srgb, var(--background-secondary) 66%, var(--background-primary));
+  width: min(920px, 92vw);
+  color: var(--text-normal);
+  background: var(--background-primary);
+}
+
+.modal.rh-next-modal .rh-next-button.is-primary,
+.modal.rh-next-modal .rh-next-button.is-active {
+  color: var(--text-on-accent);
+  border-color: var(--interactive-accent);
+  background: var(--interactive-accent);
+}
+
+.modal.rh-next-modal .rh-next-button.is-primary:hover,
+.modal.rh-next-modal .rh-next-button.is-active:hover {
+  background: var(--interactive-accent-hover);
+}
+
+.modal.rh-next-modal .rh-next-input,
+.modal.rh-next-modal select.rh-next-input,
+.modal.rh-next-modal textarea.rh-next-input {
+  color: var(--text-normal);
+  background: var(--background-modifier-form-field, var(--background-primary));
+}
 .modal.rh-next-add-modal { width: min(1160px, 96vw); height: min(820px, 90vh); }
 .rh-next-modal .modal-content { display: flex; flex-direction: column; min-height: 0; }
 .rh-next-modal-heading { justify-content: space-between; gap: 16px; }

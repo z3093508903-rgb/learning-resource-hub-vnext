@@ -84,6 +84,10 @@ function safeStamp(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, '-');
 }
 
+function isNamedRecoveryEntryName(name) {
+  return /^saved-/i.test(String(name || ''));
+}
+
 function recoveryEntries(plugin) {
   const dir = recoveryDirectory(plugin);
   if (!dir || !fs.existsSync(dir)) return [];
@@ -92,16 +96,22 @@ function recoveryEntries(plugin) {
     .map((entry) => {
       const fullPath = path.join(dir, entry.name);
       const stat = fs.statSync(fullPath);
-      return { name: entry.name, fullPath, mtimeMs: Number(stat.mtimeMs || 0), size: Number(stat.size || 0) };
+      return {
+        name: entry.name,
+        fullPath,
+        mtimeMs: Number(stat.mtimeMs || 0),
+        size: Number(stat.size || 0),
+        named: isNamedRecoveryEntryName(entry.name)
+      };
     })
     .sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name));
 }
 
 function pruneRecoveryBackups(plugin, keep = 10) {
   const retention = Math.max(3, Math.min(100, Math.floor(Number(keep) || 10)));
-  const entries = recoveryEntries(plugin);
+  const automatic = recoveryEntries(plugin).filter((entry) => !entry.named);
   const removed = [];
-  for (const entry of entries.slice(retention)) {
+  for (const entry of automatic.slice(retention)) {
     try {
       fs.unlinkSync(entry.fullPath);
       removed.push(entry.name);
@@ -119,6 +129,39 @@ function writeRecoveryState(plugin, state, label = 'manual') {
   const fullPath = path.join(dir, name);
   fs.writeFileSync(fullPath, JSON.stringify(state, null, 2), 'utf8');
   return { name, fullPath };
+}
+
+function sanitizeNamedBackupLabel(value) {
+  const cleaned = String(value || '')
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim()
+    .slice(0, 80);
+  return cleaned || '手动备份';
+}
+
+function writeNamedRecoveryState(plugin, state, label = '手动备份') {
+  const dir = recoveryDirectory(plugin);
+  if (!dir) throw new Error('当前 Vault 不支持本地恢复备份。');
+  fs.mkdirSync(dir, { recursive: true });
+  const safeLabel = sanitizeNamedBackupLabel(label);
+  const name = `saved-${safeLabel}-${safeStamp()}.json`;
+  const fullPath = path.join(dir, name);
+  fs.writeFileSync(fullPath, JSON.stringify(state, null, 2), 'utf8');
+  return { name, fullPath, named: true };
+}
+
+function renameRecoveryEntry(plugin, currentName, newLabel) {
+  const safeCurrent = path.basename(String(currentName || ''));
+  if (!safeCurrent) throw new Error('找不到需要重命名的备份。');
+  const dir = recoveryDirectory(plugin);
+  const currentPath = path.join(dir, safeCurrent);
+  if (!fs.existsSync(currentPath)) throw new Error('备份文件已经不存在。');
+  const targetName = `saved-${sanitizeNamedBackupLabel(newLabel)}-${safeStamp()}.json`;
+  const targetPath = path.join(dir, targetName);
+  fs.renameSync(currentPath, targetPath);
+  return { name: targetName, fullPath: targetPath, named: true };
 }
 
 function protectRawPluginData(plugin, label = 'startup') {
@@ -197,6 +240,7 @@ module.exports = {
   assertSafePersist,
   catastrophicStateDrop,
   markLoadedBaseline,
+  isNamedRecoveryEntryName,
   meaningfulState,
   pluginDataPath,
   pluginDirectory,
@@ -206,9 +250,11 @@ module.exports = {
   readRawPluginData,
   recoveryDirectory,
   recoveryEntries,
+  renameRecoveryEntry,
   refreshPersistBaseline,
   stateCounts,
   stateWeight,
   startupSafetySnapshot,
+  writeNamedRecoveryState,
   writeRecoveryState
 };

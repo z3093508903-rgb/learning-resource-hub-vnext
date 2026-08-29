@@ -16,10 +16,12 @@ test('plugin protects data before load and refuses populated-to-empty startup re
   assert.match(mainSource, /protectBeforePersist\(this, retention\)/);
 });
 
-test('backup UI exposes actual folder, immediate backup, and recent restore', () => {
+test('backup UI exposes actual folder, pinned named backups, rename, and recent restore', () => {
   assert.match(settingsSource, /恢复备份位置/);
   assert.match(settingsSource, /打开备份文件夹/);
-  assert.match(settingsSource, /立即备份/);
+  assert.match(settingsSource, /新建命名备份/);
+  assert.match(settingsSource, /重命名最近快照/);
+  assert.match(settingsSource, /不参与自动清理/);
   assert.match(settingsSource, /恢复最近备份/);
   assert.match(settingsSource, /当前 data\.json/);
 });
