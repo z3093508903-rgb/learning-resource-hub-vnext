@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.12.1 — Pre-RC / Bilibili Companion Focus Hotfix**
+**Go Study 0.3.0-beta.20.12.2 — Pre-RC / HUD Direction Race Hotfix**
 
 Stable / Merge：**HOLD**
 
@@ -1162,3 +1162,36 @@ Preview：
 6. Alt+S → timestamp / note+timestamp；
 7. 必须继续写入 Companion；
 8. 切换到其他 browser tab 后旧 B站源必须停止可用。
+
+
+## beta20.12.2：HUD Direction Race Hotfix
+
+真人发现：
+- Chrome / Edge 前台时，Alt+S 后快速连按两次同方向，有概率第二次方向键落入浏览器并触发浏览器菜单 / 设置。
+
+Root cause 不是单纯浏览器抢键，而是 HUD 手势语义随 `actionHudDelayMs` 时序变化：
+
+- HUD 已显示：第一次方向 = select，第二次同方向 = execute；
+- HUD 尚未显示：第一次方向 = **直接 execute + cleanup**；
+- 因此用户习惯性第二次方向在 session 已关闭后落到浏览器。
+
+修复：
+- 无论 HUD 是否已显示，第一次方向永远只 select；
+- 第一次方向如果发生在显示延迟内，立即 reveal HUD；
+- 第二次同方向（doublePress window）或 Enter 才 execute；
+- fast / slow gesture 语义完全一致；
+- 不改为 focusable HUD，避免破坏 PotPlayer foreground detection；
+- 临时方向键接管在第二次按键执行前保持有效，因此不会把第二次按键漏给浏览器。
+
+验证：
+- 406 / 406 tests PASS；
+- Release readiness PASS；
+- Preview `0.3.0-beta.20.12.2`；
+- Bilibili Bridge 仍为 `0.1.1`。
+
+真人重点复验：
+1. B站活动标签 + Companion 置顶；
+2. Alt+S 后立刻快速双击 ↑ / ↓ / ← / →；
+3. 第一次应显示并选中，第二次执行；
+4. 浏览器不应响应方向键；
+5. 慢速操作必须与快速操作一致。
