@@ -53,6 +53,8 @@ const {
   buildPositionMarkdown
 } = require('./resource-note.cjs');
 
+const BILIBILI_BRIDGE_RELEASES_URL = 'https://github.com/z3093508903-rgb/learning-resource-hub-vnext/releases';
+
 class BackupNameModal extends Modal {
   constructor(app, title, initialValue, onSubmit) {
     super(app);
@@ -122,8 +124,16 @@ function videoStatusText(plugin) {
   const settings = currentProductSettings(plugin);
   if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会注册视频笔记快捷键，也不会显示视频增强状态点。';
   const status = immersiveStatus(plugin);
-  if (status.registered) return `已就绪 · ${status.registeredAccelerators?.length || 0} 个全局快捷键已注册。`;
-  return status.error || '已开启，但当前没有成功注册全局快捷键。';
+  const web = bridgeStatus(plugin);
+  const webText = web.connected
+    ? 'B站网页桥接已连接'
+    : web.listening
+      ? 'B站网页桥接已启动，等待 B站网页'
+      : web.error
+        ? `B站网页桥接异常：${web.error}`
+        : 'B站网页桥接未启动';
+  if (status.registered) return `已就绪 · ${status.registeredAccelerators?.length || 0} 个全局快捷键已注册 · ${webText}。`;
+  return `${status.error || '已开启，但当前没有成功注册全局快捷键。'} · ${webText}。`;
 }
 
 async function setInterfaceTips(plugin, value) {
@@ -367,15 +377,36 @@ class GoStudySettingsTab extends PluginSettingTab {
         }));
 
     const webBridge = bridgeStatus(this.plugin);
-    new Setting(containerEl)
+    const webBridgeSetting = new Setting(containerEl)
       .setName('B站网页桥接（可选）')
       .setDesc(
         webBridge.connected
-          ? '已连接前台 B站视频 · HUD 可直接读取网页 currentTime，无需 PotPlayer。'
+          ? '已连接活动 B站视频标签页 · 即使 Companion 置顶、浏览器失去系统焦点，HUD 仍可读取网页时间。'
           : webBridge.listening
-            ? `等待浏览器扩展连接 · 本地桥接 127.0.0.1:${webBridge.port}。Preview 安装包内附 Go Study Bilibili Bridge 扩展。`
-            : `本地桥接未启动${webBridge.error ? `：${webBridge.error}` : '。'}`
+            ? `桥接服务已启动 · 等待浏览器扩展连接（127.0.0.1:${webBridge.port}）。`
+            : `桥接服务未启动${webBridge.error ? `：${webBridge.error}` : '。'}`
       );
+    webBridgeSetting.addButton((button) => button
+      .setButtonText('下载 / 安装桥接')
+      .onClick(async () => {
+        await shell.openExternal(BILIBILI_BRIDGE_RELEASES_URL);
+        new Notice('请下载最新 go-study-bilibili-bridge ZIP，解压后在 Chrome / Edge 扩展页开启开发者模式并“加载解压缩的扩展”。正式上架浏览器商店后这里会改为商店安装入口。', 9000);
+      }));
+    webBridgeSetting.addButton((button) => button
+      .setButtonText(webBridge.connected ? '已连接' : '检查连接')
+      .setDisabled(Boolean(webBridge.connected))
+      .onClick(() => {
+        const current = bridgeStatus(this.plugin);
+        new Notice(
+          current.connected
+            ? 'B站网页桥接已连接。'
+            : current.listening
+              ? '桥接服务已启动，但还没收到活动 B站视频。请刷新 B站视频页并保持该标签页为当前标签。'
+              : `B站网页桥接未启动${current.error ? `：${current.error}` : '。'}`,
+          6500
+        );
+        this.display();
+      }));
 
     new Setting(containerEl)
       .setName('未收录视频也启用增强')
