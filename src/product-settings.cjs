@@ -11,6 +11,7 @@ const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   videoSuccessFeedback: true,
   focusStudyNoteAtEnd: true,
   freeformVideoNotesEnabled: true,
+  legacyJvCompatibilityEnabled: false,
   shortcutMode: 'mixed',
   actionHudShortcut: 'Alt+S',
   actionHudDelayMs: 300,
@@ -150,6 +151,7 @@ function currentProductSettings(plugin) {
     videoSuccessFeedback: boolOr(ui.videoSuccessFeedback, DEFAULT_PRODUCT_SETTINGS.videoSuccessFeedback),
     focusStudyNoteAtEnd: boolOr(ui.focusStudyNoteAtEnd, DEFAULT_PRODUCT_SETTINGS.focusStudyNoteAtEnd),
     freeformVideoNotesEnabled: boolOr(ui.freeformVideoNotesEnabled, DEFAULT_PRODUCT_SETTINGS.freeformVideoNotesEnabled),
+    legacyJvCompatibilityEnabled: boolOr(ui.legacyJvCompatibilityEnabled, DEFAULT_PRODUCT_SETTINGS.legacyJvCompatibilityEnabled),
     shortcutMode: normalizeShortcutMode(ui.shortcutMode),
     actionHudShortcut: (() => {
       try { return normalizeActionHudShortcut(ui.actionHudShortcut); }
