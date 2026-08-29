@@ -244,3 +244,19 @@ test('managed v1 refuses v3 fallback fields so old semantics stay deterministic'
     /v1 管理型回链不能携带便携来源字段/
   );
 });
+
+
+test('nested Bilibili HTTP values are encoded so Obsidian Markdown cannot auto-link the host inside the Go Study destination', () => {
+  const sourceUrl = 'https://www.bilibili.com/video/BV1xJ38z3EkX';
+  const uri = buildFreeformReferenceUri({
+    locator: sourceUrl,
+    web: sourceUrl,
+    position: { type: 'time', seconds: 12.244 }
+  });
+  assert.doesNotMatch(uri, /www\.bilibili\.com/);
+  assert.match(uri, /www%2Ebilibili%2Ecom/);
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.locator, sourceUrl);
+  assert.equal(parsed.web, sourceUrl);
+  assert.equal(parsed.position.seconds, 12.244);
+});
