@@ -636,3 +636,44 @@ Hotfix：
 - 左文件树 Markdown 拖动入口；
 - 已打开 Markdown tab 拖动入口；
 - Companion 行首 / 行中 / 行尾点击光标落点。
+
+
+## beta20.8：Fail-Closed 数据安全修复
+
+Windows 实机发现发布阻断级数据事故：
+
+- 重启 Obsidian 后，原本有项目/资源的 `data.json` 可能被覆盖成空状态；
+- 手工把旧 `data.json` 复制回去，再打开 Obsidian 仍可能再次被归零；
+- 旧“自动备份保留数量”设置具有误导性：实际上主要只在资源清理前创建插件目录内备份，并非真正自动快照。
+
+### 新安全边界
+
+1. 插件启动读取之前，先直接保护当前原始 `data.json`；
+2. 恢复快照移到插件目录之外：
+   `<Vault>/.obsidian/go-study-recovery/`
+3. 若 Obsidian `loadData()` 返回空状态，但原始 `data.json` 明明有项目/资源，则优先使用已保护的原始状态；
+4. 若 normalize/migration 会导致“有数据 → 近似全空”，进入只读安全状态并拒绝写入；
+5. 每次 persist 前执行 populated → empty catastrophe guard；
+6. 后续保存前滚动保护上一份磁盘状态；
+7. 手动备份也写入同一个外部 recovery 目录；
+8. Restore 在覆盖前重新做迁移安全检查；
+9. 设置页现在明确显示：
+   - 恢复备份位置
+   - 当前 data.json 路径
+   - 打开备份文件夹
+   - 立即备份
+   - 恢复最近备份
+10. recovery 数量按现有 3–10 retention 设置实际裁剪。
+
+### 当前开发
+
+- branch `fix/state-safety-native-drag-beta20-8`
+- Draft PR #37
+- latest validated HEAD `115e4da66157a07135a4207317b441d2566ec8b8`
+- CI #264 PASS
+- **356 / 356 tests PASS**
+- Preview `Go Study Preview 0.3.0-beta.20.8`
+- release target `c886e1afb4df93623834d83f200898332de7ce6f`
+- ZIP SHA256 `770c168a79dd3f16cbbc4ba8afa69e77f31a3f60a291298a8f73b39dedbb083e`
+
+状态：VALIDATING。发布前必须通过“重启两次 + 手工备份恢复 + 原 data.json 不再被空状态覆盖”实机验收。
