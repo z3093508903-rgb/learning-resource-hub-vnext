@@ -56,6 +56,21 @@ if (manifest && pkg) {
   if (manifest.isDesktopOnly === true) pass('桌面端声明已启用');
   else fail('桌面端声明已启用', '当前代码使用 Node/Electron API，应保持 isDesktopOnly=true');
 
+  if (strict) {
+    if (manifest.id === 'go-study') pass('正式插件 ID 为 go-study');
+    else fail('正式插件 ID 为 go-study', manifest.id || '<empty>');
+    if (manifest.name === 'Go Study') pass('正式插件名称为 Go Study');
+    else fail('正式插件名称为 Go Study', manifest.name || '<empty>');
+    if (pkg.name === 'go-study') pass('package 名称为 go-study');
+    else fail('package 名称为 go-study', pkg.name || '<empty>');
+    const description = String(manifest.description || '');
+    if (description.length > 0 && description.length <= 250 && /\.$/.test(description)) {
+      pass('Community description 长度与结尾有效');
+    } else {
+      fail('Community description 长度与结尾有效', `${description.length} chars`);
+    }
+  }
+
   if (releaseTag) {
     if (releaseTag === manifest.version) pass('Git tag 与 manifest version 一致');
     else fail('Git tag 与 manifest version 一致', `${releaseTag} != ${manifest.version}`);
