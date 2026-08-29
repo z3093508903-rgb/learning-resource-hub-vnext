@@ -47,6 +47,7 @@ function createNativeActionHud(rawSlots, options = {}) {
   const area = display?.workArea || { x: 0, y: 0, width: 1280, height: 720 };
   const width = 460;
   const height = 300;
+  const focusable = Boolean(options.focusable);
   const win = new BrowserWindow({
     width,
     height,
@@ -59,12 +60,29 @@ function createNativeActionHud(rawSlots, options = {}) {
     maximizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    focusable: false,
+    focusable,
     show: false,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
   });
   let shown = false;
   let closed = false;
+  if (focusable && typeof options.onInput === 'function') {
+    win.webContents?.on?.('before-input-event', (event, input) => {
+      if (closed || input?.type !== 'keyDown' || input?.isAutoRepeat) return;
+      const key = String(input?.key || '');
+      const mapped = {
+        ArrowUp: 'Up',
+        ArrowDown: 'Down',
+        ArrowLeft: 'Left',
+        ArrowRight: 'Right',
+        Enter: 'Enter',
+        Escape: 'Escape'
+      }[key];
+      if (!mapped) return;
+      try { event?.preventDefault?.(); } catch {}
+      try { options.onInput(mapped); } catch {}
+    });
+  }
   const ready = win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(hudHtml(rawSlots))}`).catch(() => {});
   return {
     async show() {
@@ -72,7 +90,14 @@ function createNativeActionHud(rawSlots, options = {}) {
       await ready;
       if (closed || win.isDestroyed?.()) return false;
       shown = true;
-      try { win.showInactive?.(); } catch { try { win.show(); } catch {} }
+      try { win.setAlwaysOnTop?.(true, 'screen-saver'); } catch {}
+      if (focusable) {
+        try { win.show?.(); } catch {}
+        try { win.moveTop?.(); } catch {}
+        try { win.focus?.(); } catch {}
+      } else {
+        try { win.showInactive?.(); } catch { try { win.show(); } catch {} }
+      }
       return true;
     },
     async select(slot) {
@@ -90,7 +115,8 @@ function createNativeActionHud(rawSlots, options = {}) {
       closed = true;
       try { if (!win.isDestroyed?.()) win.close(); } catch {}
     },
-    get shown() { return shown; }
+    get shown() { return shown; },
+    get focusable() { return focusable; }
   };
 }
 
@@ -893,6 +919,22 @@ function resolveNativeCompanionWindow(win, options = {}) {
   return bestScore <= 180 ? best : null;
 }
 
+function applyStrongCompanionTopmost(nativeWindow, enabled) {
+  if (!nativeWindow) return false;
+  const on = Boolean(enabled);
+  try {
+    if (typeof nativeWindow.setAlwaysOnTop === 'function') {
+      nativeWindow.setAlwaysOnTop(on, on ? 'screen-saver' : 'normal');
+    }
+  } catch {
+    try { nativeWindow.setAlwaysOnTop?.(on); } catch {}
+  }
+  if (on) {
+    try { nativeWindow.moveTop?.(); } catch {}
+  }
+  return true;
+}
+
 function syncCompanionNativeState(plugin, session, options = {}) {
   const win = session?.win;
   if (!win) return false;
@@ -910,9 +952,7 @@ function syncCompanionNativeState(plugin, session, options = {}) {
   try {
     if (typeof nativeWindow.setTitle === 'function' && nativeWindow.getTitle?.() !== title) nativeWindow.setTitle(title);
   } catch {}
-  try {
-    if (typeof nativeWindow.setAlwaysOnTop === 'function') nativeWindow.setAlwaysOnTop(Boolean(state.alwaysOnTop));
-  } catch {}
+  applyStrongCompanionTopmost(nativeWindow, state.alwaysOnTop);
   return true;
 }
 
@@ -1149,7 +1189,7 @@ async function setCompanionAlwaysOnTop(plugin, value, options = {}) {
   const session = currentCompanionWindow(plugin);
   if (session?.win) {
     syncCompanionNativeState(plugin, session, options);
-    try { session.nativeWindow?.setAlwaysOnTop?.(state.alwaysOnTop); } catch {}
+    applyStrongCompanionTopmost(session.nativeWindow, state.alwaysOnTop);
     updatePinButton(plugin, session);
   }
   if (plugin?.state?.uiState?.studyMode) plugin.state.uiState.studyMode.alwaysOnTop = state.alwaysOnTop;
@@ -1273,6 +1313,7 @@ module.exports = {
   applyCompanionChrome,
   applyCompanionLayout,
   applyGeometry,
+  applyStrongCompanionTopmost,
   builtinGeometry,
   clampGeometry,
   closeCompanionNoteWindow,
@@ -2076,6 +2117,7 @@ const {
   resolveElectronGlobalShortcut
 } = __rhLoad("native-potplayer.cjs");
 const { currentProductSettings } = __rhLoad("product-settings.cjs");
+const { currentBilibiliWebState } = __rhLoad("bilibili-web-bridge.cjs");
 const { formatPositionClock } = __rhLoad("resource-note.cjs");
 const { showNativeToast, showQuickNoteInput } = __rhLoad("quick-note-window.cjs");
 
@@ -2258,6 +2300,21 @@ async function runImmersiveAction(plugin, key, options = {}) {
   return runCaptureAction(plugin, actionId, options);
 }
 
+function companionOwnsDesktopFocus(plugin) {
+  const session = plugin?._goStudyCompanionWindow;
+  try { if (session?.nativeWindow?.isFocused?.()) return true; } catch {}
+  try { if (session?.win?.document?.hasFocus?.()) return true; } catch {}
+  return false;
+}
+
+function shouldUseFocusedWebHud(plugin, options = {}) {
+  if (options.forceFocusedHud === true) return true;
+  if (options.forceFocusedHud === false) return false;
+  let state = null;
+  try { state = currentBilibiliWebState(plugin); } catch { return false; }
+  return Boolean(state?.focused || companionOwnsDesktopFocus(plugin));
+}
+
 function closeActionHudSession(plugin) {
   const session = plugin?._goStudyActionHudSession;
   if (!session) return;
@@ -2276,11 +2333,18 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
     return null;
   }
 
-  const hud = createNativeActionHud(settings.actionHudSlots, options.hudOptions || {});
+  const focusedWebHud = shouldUseFocusedWebHud(plugin, options);
+  let localInputHandler = null;
+  const hud = createNativeActionHud(settings.actionHudSlots, {
+    ...(options.hudOptions || {}),
+    focusable: focusedWebHud,
+    onInput: (key) => localInputHandler?.(key)
+  });
   if (!hud) {
     void feedback('⚠ Go Study 动作盘窗口接口不可用', options);
     return null;
   }
+
   const temporary = [];
   let visible = false;
   let selected = '';
@@ -2325,35 +2389,62 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
     Enter: () => execute(selected || 'center'),
     Escape: () => cleanup()
   };
+  localInputHandler = (key) => handlers[key]?.();
 
-  const failures = [];
-  for (const [accelerator, handler] of Object.entries(handlers)) {
-    try {
-      const ok = api.register(accelerator, handler);
-      if (ok === false) failures.push(accelerator);
-      else temporary.push(accelerator);
-    } catch {
-      failures.push(accelerator);
+  const registerTemporaryHandlers = (strict) => {
+    const failures = [];
+    for (const [accelerator, handler] of Object.entries(handlers)) {
+      try {
+        const ok = api.register(accelerator, handler);
+        if (ok === false) failures.push(accelerator);
+        else temporary.push(accelerator);
+      } catch {
+        failures.push(accelerator);
+      }
     }
-  }
-  if (failures.length) {
-    cleanup();
-    void feedback(`⚠ 动作盘无法临时接管：${failures.join('、')}`, options);
-    return null;
+    if (strict && failures.length) {
+      cleanup();
+      void feedback(`⚠ 动作盘无法临时接管：${failures.join('、')}`, options);
+      return false;
+    }
+    return true;
+  };
+
+  const releaseTemporaryHandlers = () => {
+    while (temporary.length) {
+      const accelerator = temporary.pop();
+      try { api.unregister(accelerator); } catch {}
+    }
+  };
+
+  let delay = Number(settings.actionHudDelayMs || 0);
+  if (focusedWebHud) {
+    // Browser mode is deliberately aggressive:
+    // register the old global directions only as a tiny bootstrap safety net,
+    // then show/focus the HUD immediately and release those global keys as soon
+    // as the HUD can capture them locally.
+    registerTemporaryHandlers(false);
+    delay = 0;
+    visible = true;
+    void Promise.resolve(hud?.show?.()).finally(() => {
+      if (!closed) releaseTemporaryHandlers();
+    });
+  } else {
+    if (!registerTemporaryHandlers(true)) return null;
+    showTimer = setTimeout(() => {
+      if (closed) return;
+      visible = true;
+      void hud?.show?.();
+    }, delay);
   }
 
-  const delay = Number(settings.actionHudDelayMs || 0);
-  showTimer = setTimeout(() => {
-    if (closed) return;
-    visible = true;
-    void hud?.show?.();
-  }, delay);
   expiryTimer = setTimeout(cleanup, Math.max(8000, delay + 5000));
 
   plugin._goStudyActionHudSession = {
     close: cleanup,
     execute,
     select: chooseDirection,
+    focusedWebHud,
     get visible() { return visible; }
   };
   return plugin._goStudyActionHudSession;
@@ -2494,6 +2585,7 @@ module.exports = {
   beginActionHud,
   closeActionHudSession,
   compactError,
+  companionOwnsDesktopFocus,
   feedback,
   immersiveStatus,
   registerImmersiveHotkeys,
@@ -2503,6 +2595,7 @@ module.exports = {
   runCaptureAction,
   runImmersiveAction,
   setImmersiveStatus,
+  shouldUseFocusedWebHud,
   shortcutConflict,
   successFeedback,
   unregisterImmersiveHotkeys,
@@ -13476,7 +13569,12 @@ function showNativeQuickNote(options = {}) {
       const text = decodeTitlePayload(title, 'GO_STUDY_SUBMIT');
       if (text !== null) { event.preventDefault(); finish(text.trim() || null); }
     });
-    win.once('ready-to-show', () => { win.show(); win.focus(); });
+    win.once('ready-to-show', () => {
+      try { win.setAlwaysOnTop?.(true, 'screen-saver'); } catch {}
+      try { win.show(); } catch {}
+      try { win.moveTop?.(); } catch {}
+      try { win.focus(); } catch {}
+    });
     void win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(promptHtml(options))}`);
   });
 }
