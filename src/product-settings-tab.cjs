@@ -98,6 +98,93 @@ class BackupNameModal extends Modal {
   }
 }
 
+
+function backupEntryDescription(entry) {
+  const bits = [];
+  bits.push(entry?.named ? '命名备份 · 长期保留' : '自动恢复快照');
+  const size = Number(entry?.size || 0);
+  if (size > 0) bits.push(`${Math.max(1, Math.round(size / 1024))} KB`);
+  const mtimeMs = Number(entry?.mtimeMs || 0);
+  if (mtimeMs > 0) {
+    try { bits.push(new Date(mtimeMs).toLocaleString()); } catch {}
+  }
+  return bits.join(' · ');
+}
+
+class BackupRestoreModal extends Modal {
+  constructor(app, plugin, onRestored) {
+    super(app);
+    this.plugin = plugin;
+    this.onRestored = onRestored;
+  }
+
+  entries() {
+    try { return this.plugin?.stateBackupEntries?.() || []; }
+    catch { return []; }
+  }
+
+  async restoreEntry(entry, button = null) {
+    if (!entry?.name) return;
+    const approved = typeof window?.confirm === 'function'
+      ? window.confirm(
+        `确定恢复这个备份？\\n\\n${entry.name}\\n\\n恢复前，Go Study 会先自动保护当前状态。`
+      )
+      : true;
+    if (!approved) return;
+
+    if (button) button.disabled = true;
+    try {
+      await this.plugin.createStateBackup('before-manual-restore');
+      await this.plugin.restoreStateBackup(entry.name);
+      new Notice(`Go Study 已恢复备份：${entry.name}`, 7000);
+      this.close();
+      this.onRestored?.(entry);
+    } catch (error) {
+      if (button) button.disabled = false;
+      new Notice(commandErrorText('恢复状态备份失败', error), 8000);
+    }
+  }
+
+  renderGroup(title, entries) {
+    if (!entries.length) return;
+    this.contentEl.createEl('h4', { text: title });
+    for (const entry of entries) {
+      new Setting(this.contentEl)
+        .setName(entry.name)
+        .setDesc(backupEntryDescription(entry))
+        .addButton((button) => {
+          button
+            .setButtonText('恢复此备份')
+            .onClick(() => this.restoreEntry(entry, button.buttonEl || null));
+        });
+    }
+  }
+
+  onOpen() {
+    this.modalEl.addClass?.('go-study-backup-restore-modal');
+    this.contentEl.createEl('h3', { text: '选择要恢复的备份' });
+    this.contentEl.createEl('p', {
+      text: '命名备份和自动快照都可以单独恢复。恢复前会先自动备份当前状态。',
+      cls: 'setting-item-description'
+    });
+
+    const entries = this.entries();
+    if (!entries.length) {
+      this.contentEl.createEl('p', { text: '当前还没有可恢复的备份。' });
+      return;
+    }
+
+    const named = entries.filter((entry) => entry.named);
+    const automatic = entries.filter((entry) => !entry.named);
+    this.renderGroup('命名备份（长期保留）', named);
+    this.renderGroup('自动恢复快照', automatic);
+  }
+
+  onClose() {
+    this.contentEl.empty();
+  }
+}
+
 function promptBackupName(app, title, initialValue = '') {
   return new Promise((resolve) => {
     let settled = false;
@@ -872,6 +959,13 @@ class GoStudySettingsTab extends PluginSettingTab {
       .setName('恢复备份位置')
       .setDesc(backupDir || '当前环境无法解析本地恢复目录。')
       .addButton((button) => button
+        .setButtonText('选择备份恢复')
+        .setCta?.()
+        .setDisabled(!entries.length)
+        .onClick(() => {
+          new BackupRestoreModal(this.app, this.plugin, () => this.display()).open();
+        }))
+      .addButton((button) => button
         .setButtonText('打开备份文件夹')
         .setDisabled(!backupDir)
         .onClick(async () => {
@@ -949,6 +1043,8 @@ class GoStudySettingsTab extends PluginSettingTab {
 
 module.exports = {
   BackupNameModal,
+  BackupRestoreModal,
+  backupEntryDescription,
   GoStudySettingsTab,
   noteOutputOptions,
   noteOutputPreview,
