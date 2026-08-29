@@ -779,3 +779,46 @@ Managed v3 即使当前 Resource 已经不存在，Timeline 仍可以通过 hidd
 - named backup 不被 retention 删除。
 
 Obsidian 原生文件树 / Markdown tab 拖入 Study Mode 仍是独立未关闭问题，不因 beta20.9 自动视为修复。
+
+
+## beta20.9.1：Freeform Bilibili Ctrl-click Hotfix
+
+Windows 实机反馈：从 PotPlayer 打开的 Bilibili Freeform 视频生成时间戳后，Ctrl+点击仍不能打开浏览器。
+
+用户提供的真实 URI 暴露两个问题：
+
+1. Go Study 自定义协议 query 内嵌了：
+   `https%3A%2F%2Fwww.bilibili.com...`
+   Obsidian Markdown / Live Preview 可能把其中的 `www.bilibili.com` 再次自动识别为网页链接，导致原本的 `obsidian://go-study` destination 被嵌套 / 污染；
+2. `installFreeformBrowserModifier` 过去只绑定 `globalThis.document`，Companion / Markdown popout 是独立 document，因此在小窗中 Ctrl+点击不会进入 Go Study handler。
+
+修复：
+- 新生成 reference URI 对内嵌 HTTP(S) query value 的 literal dot 做 Markdown-safe 编码，例如：
+  `www%2Ebilibili%2Ecom`
+- parse 后仍恢复成正常：
+  `https://www.bilibili.com/...`
+- browser modifier 同时绑定：
+  - 主 Obsidian document
+  - active Markdown document
+  - 所有 Markdown leaves 的 ownerDocument
+  - Companion popout document
+- Companion 创建后立即 refresh browser modifier；
+- Ctrl / Meta 均支持；
+- Bilibili 继续保留 `p` 并增加 `t=<captured seconds>`；
+- PotPlayer title 含 Unicode replacement character `�` 时，不再把乱码 title 写入 hidden metadata，回退到 portable BVID/name。
+
+开发：
+- branch `fix/freeform-bili-ctrlclick-beta20-9-1`
+- Draft PR #39
+- validated CI #281 / publish CI #282 PASS
+- **372 / 372 tests PASS**
+- Preview `Go Study Preview 0.3.0-beta.20.9.1`
+- release target `70670f1c0cdeb2866a8acc598de2f8d84d8fb225`
+- current PR head after publisher cleanup `ae0bcfd74662366433f4d1ea655f81f9eb72ae44`
+- ZIP SHA256 `6b66f64fe9dc8edc1e0a69e62cf033ca822b9848f919bbad1d5d71d82450f3c9`
+
+重点实机复验：
+1. 主 Obsidian Markdown Ctrl+点击 Freeform Bilibili timestamp；
+2. Companion 小窗 Ctrl+点击同一 timestamp；
+3. 浏览器 URL 应为 `/video/BV...?...&t=<seconds>`；
+4. 新 URI 不再出现 literal `www.bilibili.com` 嵌在 Go Study destination 内。
