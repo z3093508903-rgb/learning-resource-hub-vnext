@@ -194,3 +194,25 @@ test('protocol-level modifier fallback survives keyup race briefly', () => {
   assert.equal(browserModifierActive(plugin, 1500), true);
   assert.equal(browserModifierActive(plugin, 1800), false);
 });
+
+
+test('Ctrl click state is remembered even when Obsidian click target is not a standard anchor', () => {
+  let clickHandler = null;
+  const doc = {
+    addEventListener(type, handler) { if (type === 'click') clickHandler = handler; },
+    removeEventListener() {}
+  };
+  const plugin = {
+    app: { workspace: { getLeavesOfType() { return []; }, on() { return null; } } },
+    register() {}
+  };
+  installFreeformBrowserModifier(plugin, doc, {
+    shell: { async openExternal() {} }
+  });
+  clickHandler({
+    ctrlKey: true,
+    metaKey: false,
+    target: { closest() { return null; } }
+  });
+  assert.equal(browserModifierActive(plugin), true);
+});
