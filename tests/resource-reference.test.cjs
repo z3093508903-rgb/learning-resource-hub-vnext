@@ -5,6 +5,7 @@ const assert = require('node:assert/strict');
 
 const {
   FREEFORM_REFERENCE_VERSION,
+  PORTABLE_MANAGED_REFERENCE_VERSION,
   REFERENCE_ACTION,
   REFERENCE_VERSION,
   buildFreeformReferenceUri,
@@ -58,11 +59,26 @@ test('missing or malformed resource IDs are rejected', () => {
   );
 });
 
-test('managed v1 stays fixed while unknown protocol versions fail closed', () => {
+test('managed v1 stays compatible, portable managed v3 is supported, and unknown versions fail closed', () => {
   assert.throws(
     () => parseReferenceUri('obsidian://go-study?resource=resource-1&position=time%3A10&v=2'),
-    /Managed Go Study 回链只支持 v1/
+    /Managed Go Study 回链只支持 v1 或 v3/
   );
+  const v3 = buildReferenceUri({
+    resourceId: 'resource-1',
+    locator: 'https://www.bilibili.com/video/BV1PORTABLE?p=2',
+    name: 'BV1PORTABLE',
+    title: '便携课程',
+    web: 'https://www.bilibili.com/video/BV1PORTABLE?p=2',
+    position: { type: 'time', seconds: 65 },
+    version: PORTABLE_MANAGED_REFERENCE_VERSION
+  });
+  const parsed = parseReferenceUri(v3);
+  assert.equal(parsed.version, 3);
+  assert.equal(parsed.resourceId, 'resource-1');
+  assert.equal(parsed.title, '便携课程');
+  assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1PORTABLE?p=2');
+  assert.equal(parsed.position.seconds, 65);
   assert.throws(
     () => parseReferenceUri('obsidian://go-study?resource=resource-1&position=time%3A10&v=99'),
     /不支持的 Go Study 回链版本/
@@ -219,4 +235,12 @@ test('freeform v2 can remember a human media title without changing portable ide
   assert.equal(parsed.name, 'learning-photo.mp4');
   assert.equal(parsed.title, '学习摄影');
   assert.equal(parsed.locator, 'D:\\Loose\\learning-photo.mp4');
+});
+
+
+test('managed v1 refuses v3 fallback fields so old semantics stay deterministic', () => {
+  assert.throws(
+    () => parseReferenceUri('obsidian://go-study?resource=r1&locator=https%3A%2F%2Fexample.com%2Fv.mp4&position=time%3A1&v=1'),
+    /v1 管理型回链不能携带便携来源字段/
+  );
 });
