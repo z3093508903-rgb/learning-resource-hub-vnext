@@ -1,6 +1,6 @@
 # Go Study — 当前状态
 
-更新时间：**2026-08-28（北京时间，UTC+8）**
+更新时间：**2026-08-29（北京时间，UTC+8）**
 
 > 本文件只保存“现在”的可恢复事实。历史过程见 `handoff/HISTORY.md` 与 `sessions/`。
 
@@ -12,36 +12,43 @@
 
 ## 当前 Milestone
 
-**Go Study `0.3.0-beta.18` — Companion Note Window / 真人验收**
+**Go Study 0.3.0-beta.20.9.1 — Pre-RC / Bilibili Freeform Ctrl-click Hotfix**
 
 Stable / Merge：**HOLD**
 
+当前不是功能扩展阶段。核心产品链路已经形成，主要剩真机收尾与发布阻断项。
+
 ## 当前开发候选
 
-- Branch：`work/companion-note-beta18`
-- HEAD：`28208c9e244d0fcbe4fb1c7132bb800da09b0d67`
-- Draft PR：**#26**
-- Base：`work/portable-freeform-beta17`
-- Preview：`Go Study Preview 0.3.0-beta.18`
-- Tag：`go-study-preview-v0.3.0-beta.18`
-- Release Target：`7eb7fa2f66e7b8df03335e168d0c4ed6e48d6cc0`
+- Branch：fix/freeform-bili-ctrlclick-beta20-9-1
+- Draft PR：#39
+- Base：work/portable-reference-fallback-beta20-9
+- Current HEAD：ae0bcfd74662366433f4d1ea655f81f9eb72ae44
+- 最后完整验证 / 发布提交：70670f1c0cdeb2866a8acc598de2f8d84d8fb225
+- Preview：Go Study Preview 0.3.0-beta.20.9.1
+- Tag：go-study-preview-v0.3.0-beta.20.9.1
+- ZIP SHA256：6b66f64fe9dc8edc1e0a69e62cf033ca822b9848f919bbad1d5d71d82450f3c9
 
 ## 自动化状态
 
-最终分支 CI #188：
+- CI #281 ✅
+- CI #282 ✅
+- Preview publisher ✅
+- **372 / 372 tests PASS**
+- committed main.js consistency ✅
+- release validation ✅
 
-- `npm run release:check` ✅
-- committed `main.js` consistency ✅
-- **307 / 307 tests passing**
-- Build ✅
-- Release validation ✅
+Current HEAD ae0bcfd... 只删除一次性 publisher workflow，因此该 HEAD 的 CI #283 显示 action_required 不代表代码测试失败。
 
-beta.18 发布流水线：
+## 当前发布阻断 / 未关闭
 
-- Full release validation ✅
-- isolated `go-study-preview` packaging ✅
-- prerelease upload ✅
-- release asset verification ✅
+1. beta20.9.1：PotPlayer 打开的 Bilibili Freeform timestamp，Ctrl+点击浏览器等待实机复验；
+2. Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode 仍未通过实机；
+3. Companion caret 点击定位在 beta20.7 修复后缺少最终实机确认；
+4. Managed v3 fallback、legacy v1 relink、light-mode modal、named backup 需要最终 RC 回归；
+5. data.json 自动归零事故已做 fail-closed + external recovery；用户后续未再次报告归零，但 RC 前仍需 restart ×2 + restore 复验。
+
+详细交接：docs/handoff/CURRENT_HANDOFF.md
 
 ## beta.17 Windows 验收
 
