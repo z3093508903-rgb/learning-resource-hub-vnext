@@ -1,9 +1,9 @@
 {
-  "id": "learning-resource-hub-next",
-  "name": "Learning Resource Hub Next",
-  "version": "0.2.0-alpha.12.4",
+  "id": "go-study",
+  "name": "Go Study",
+  "version": "0.3.0",
   "minAppVersion": "1.7.2",
-  "description": "A clean, component-first learning resource workbench for Obsidian.",
+  "description": "Organize learning resources, resume videos, capture timestamped Markdown notes, and continue studying with less context switching.",
   "author": "时运Ⅲ",
   "isDesktopOnly": true
 }
