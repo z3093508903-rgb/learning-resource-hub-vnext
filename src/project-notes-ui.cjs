@@ -1020,6 +1020,7 @@ function markdownPathFromDragEvent(plugin, event, fallback = '') {
 function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
   if (!doc?.addEventListener || !doc?.body) return null;
   let pointerCandidate = '';
+  let pointerStart = null;
   let nativeDropEl = null;
 
   const removeDrop = () => {
@@ -1028,24 +1029,41 @@ function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
   };
 
   const showDrop = (path) => {
+    const selectedPath = String(path || '').trim();
+    if (!selectedPath) return;
+    if (nativeDropEl?.dataset?.goStudyNativeNotePath === selectedPath) return;
     removeDrop();
     nativeDropEl = workbenchStudyDropTarget(doc, doc.body, async () => {
-      const selectedPath = String(path || pointerCandidate || '').trim();
+      const droppedPath = String(selectedPath || pointerCandidate || '').trim();
       pointerCandidate = '';
+      pointerStart = null;
       removeDrop();
-      if (!selectedPath) return;
+      if (!droppedPath) return;
       try {
-        const result = await enterCurrentPotPlayerStudyMode(plugin, selectedPath, '');
-        new Notice(`已进入学习模式 · ${noteDisplayName({ path: selectedPath })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
+        const result = await enterCurrentPotPlayerStudyMode(plugin, droppedPath, '');
+        new Notice(`已进入学习模式 · ${noteDisplayName({ path: droppedPath })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
       } catch (error) {
         new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
       }
     });
     nativeDropEl.classList?.add?.('is-native-obsidian');
+    if (nativeDropEl?.dataset) nativeDropEl.dataset.goStudyNativeNotePath = selectedPath;
   };
 
   const onPointerDown = (event) => {
     pointerCandidate = markdownPathFromNativeDragTarget(plugin, event?.target);
+    pointerStart = pointerCandidate
+      ? { x: Number(event?.clientX || 0), y: Number(event?.clientY || 0) }
+      : null;
+  };
+
+  const onPointerMove = (event) => {
+    if (!pointerCandidate || !pointerStart || nativeDropEl) return;
+    if (Number(event?.buttons || 0) !== 1) return;
+    const dx = Number(event?.clientX || 0) - pointerStart.x;
+    const dy = Number(event?.clientY || 0) - pointerStart.y;
+    if ((dx * dx) + (dy * dy) < 64) return;
+    showDrop(pointerCandidate);
   };
 
   const onDragStart = (event) => {
@@ -1057,22 +1075,36 @@ function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
 
   const onDragEnd = () => {
     pointerCandidate = '';
+    pointerStart = null;
+    removeDrop();
+  };
+
+  const onPointerUp = () => {
+    pointerCandidate = '';
+    pointerStart = null;
     removeDrop();
   };
 
   const onDropAnywhere = (event) => {
     if (nativeDropEl?.contains?.(event?.target)) return;
     pointerCandidate = '';
+    pointerStart = null;
     removeDrop();
   };
 
   doc.addEventListener('pointerdown', onPointerDown, true);
+  doc.addEventListener('pointermove', onPointerMove, true);
+  doc.addEventListener('pointerup', onPointerUp, true);
+  doc.addEventListener('pointercancel', onPointerUp, true);
   doc.addEventListener('dragstart', onDragStart, false);
   doc.addEventListener('dragend', onDragEnd, true);
   doc.addEventListener('drop', onDropAnywhere, true);
 
   const cleanup = () => {
     doc.removeEventListener?.('pointerdown', onPointerDown, true);
+    doc.removeEventListener?.('pointermove', onPointerMove, true);
+    doc.removeEventListener?.('pointerup', onPointerUp, true);
+    doc.removeEventListener?.('pointercancel', onPointerUp, true);
     doc.removeEventListener?.('dragstart', onDragStart, false);
     doc.removeEventListener?.('dragend', onDragEnd, true);
     doc.removeEventListener?.('drop', onDropAnywhere, true);
