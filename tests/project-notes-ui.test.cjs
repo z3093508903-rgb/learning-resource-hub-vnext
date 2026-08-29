@@ -111,13 +111,17 @@ test('dragging a navigation note into freeform Study Mode does not reopen or res
 });
 
 
-test('native Obsidian file-tree and tab drags can summon the global Study Mode target', () => {
+test('native Obsidian file-tree and tab drags can summon the global Study Mode target without hijacking pointer movement', () => {
   assert.match(uiSource, /installNativeObsidianStudyDrag/);
   assert.match(uiSource, /\.nav-file-title\[data-path\]/);
   assert.match(uiSource, /\.workspace-tab-header/);
   assert.match(uiSource, /getLeavesOfType\?\.\('markdown'\)/);
+  assert.match(uiSource, /event\?\.composedPath\?\.\(\)/);
+  assert.match(uiSource, /data-file-path/);
+  assert.match(uiSource, /data-source-path/);
   assert.match(uiSource, /doc\.addEventListener\('dragstart'/);
-  assert.match(uiSource, /doc\.addEventListener\('pointermove'/);
+  assert.doesNotMatch(uiSource, /doc\.addEventListener\('pointermove'/);
+  assert.doesNotMatch(uiSource, /doc\.addEventListener\('pointerdown'/);
   assert.match(uiSource, /is-native-obsidian/);
   assert.match(uiSource, /enterCurrentPotPlayerStudyMode\(plugin, droppedPath, ''\)/);
 });
@@ -127,8 +131,26 @@ test('native drag bridge ignores Go Study workbench rows so only one drop target
 });
 
 
-test('pointer-based native tab dragging can complete by releasing over the Study Mode target', () => {
-  assert.match(uiSource, /nativeDropEl\?\.getBoundingClientRect/);
-  assert.match(uiSource, /x >= rect\.left && x <= rect\.right/);
-  assert.match(uiSource, /void completeDrop\(pointerCandidate\)/);
+test('Go Study only owns drops inside its explicit Study Mode target', () => {
+  const start = uiSource.indexOf('function installNativeObsidianStudyDrag');
+  const end = uiSource.indexOf('function installProjectNoteEntryPoints', start);
+  const block = uiSource.slice(start, end);
+  assert.match(block, /Only workbenchStudyDropTarget\(\) calls preventDefault\/stopPropagation/);
+  assert.doesNotMatch(block, /onPointerUp/);
+  assert.doesNotMatch(block, /getBoundingClientRect/);
+  assert.doesNotMatch(block, /pointerCandidate/);
+  assert.match(block, /nativeDropEl\?\.contains\?\.\(event\?\.target\)/);
+});
+
+
+test('native drag diagnostic records composedPath and dataTransfer without preventing the native drag', () => {
+  assert.match(uiSource, /function nativeDragDiagnostic/);
+  assert.match(uiSource, /dataTransferTypes/);
+  assert.match(uiSource, /defaultPrevented/);
+  assert.match(uiSource, /Go Study native drag diagnostic/);
+  const start = uiSource.indexOf('const onDragStart = (event) => {', uiSource.indexOf('function installNativeObsidianStudyDrag'));
+  const end = uiSource.indexOf('const onDragEnd', start);
+  const block = uiSource.slice(start, end);
+  assert.doesNotMatch(block, /preventDefault/);
+  assert.doesNotMatch(block, /stopPropagation/);
 });
