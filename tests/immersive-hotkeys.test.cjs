@@ -52,3 +52,13 @@ test('HUD time and note actions may fall back to Bilibili web while screenshot a
   assert.match(source, /B站网页模式/);
   assert.match(source, /截图动作仍需要 PotPlayer/);
 });
+
+
+test('active Bilibili browser workflow may move HUD input into a focused local window', () => {
+  assert.match(source, /currentBilibiliWebState/);
+  assert.match(source, /companionOwnsDesktopFocus/);
+  assert.match(source, /shouldUseFocusedWebHud/);
+  assert.match(source, /focusedWebHud/);
+  assert.match(source, /focusable:\s*focusedWebHud/);
+  assert.match(source, /localInputHandler/);
+});
