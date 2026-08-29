@@ -256,6 +256,12 @@ function companionEditorEndPosition(editor) {
   }
 }
 
+function sameCursor(a, b) {
+  return Boolean(a && b)
+    && Number(a.line) === Number(b.line)
+    && Number(a.ch) === Number(b.ch);
+}
+
 function revealCompanionEditorCursor(plugin, editor, options = {}) {
   if (!editor) return false;
   const target = plugin?._goStudyCompanionTarget;
@@ -274,38 +280,50 @@ function revealCompanionEditorCursor(plugin, editor, options = {}) {
   if (!cursor && typeof editor.getCursor === 'function') {
     try { cursor = editor.getCursor(); } catch {}
   }
+
   if (options.focus !== false) {
     try { editor.focus?.(); } catch {}
   }
 
-  const reveal = () => {
-    let current = cursor;
-    if (typeof editor.getCursor === 'function') {
-      try { current = editor.getCursor() || current; } catch {}
+  if (options.scroll !== false && cursor && typeof editor.scrollIntoView === 'function') {
+    try {
+      editor.scrollIntoView({ from: cursor, to: cursor }, Boolean(options.center));
+    } catch {
+      try { editor.scrollIntoView({ from: cursor, to: cursor }); } catch {}
     }
-    if (current && typeof editor.scrollIntoView === 'function') {
-      try {
-        editor.scrollIntoView({ from: current, to: current }, Boolean(options.center));
-      } catch {
-        try { editor.scrollIntoView({ from: current, to: current }); } catch {}
-      }
-    }
+  }
+  return true;
+}
 
-    const leaf = target?.leaf || plugin?._goStudyCompanionWindow?.leaf;
-    const scroller = leaf?.view?.containerEl?.querySelector?.('.cm-scroller');
-    const end = companionEditorEndPosition(editor);
-    if (scroller && current && end && end.line - Number(current.line || 0) <= 2) {
-      try { scroller.scrollTop = scroller.scrollHeight; } catch {}
-    }
-  };
+function scheduleCompanionEditorCursorReveal(plugin, editor, options = {}) {
+  if (!editor || plugin?._goStudyCompanionTarget?.editor !== editor) return false;
+  let expected = null;
+  if (typeof editor.getCursor === 'function') {
+    try { expected = editor.getCursor(); } catch {}
+  }
+  if (!expected) return false;
 
-  reveal();
-  const win = target?.leaf?.view?.containerEl?.ownerDocument?.defaultView
-    || plugin?._goStudyCompanionWindow?.win;
-  try {
-    if (typeof win?.requestAnimationFrame === 'function') win.requestAnimationFrame(reveal);
-    else setTimeout(reveal, 0);
-  } catch {}
+  if (plugin?._goStudyCompanionRevealTimer) {
+    try { clearTimeout(plugin._goStudyCompanionRevealTimer); } catch {}
+  }
+
+  const delayMs = Math.max(0, Math.min(300, Number(options.delayMs ?? 48)));
+  const timer = setTimeout(() => {
+    if (plugin) plugin._goStudyCompanionRevealTimer = null;
+    if (plugin?._goStudyCompanionTarget?.editor !== editor) return;
+    let current = null;
+    try { current = editor.getCursor?.(); } catch {}
+    // If the user typed, clicked or moved the caret after the programmatic insert,
+    // never fight their editor position.
+    if (!sameCursor(current, expected)) return;
+    revealCompanionEditorCursor(plugin, editor, {
+      focus: false,
+      center: Boolean(options.center),
+      scroll: true
+    });
+  }, delayMs);
+
+  if (plugin) plugin._goStudyCompanionRevealTimer = timer;
   return true;
 }
 
@@ -436,6 +454,10 @@ function detachCompanionTarget(plugin) {
 function cleanupCompanionSession(plugin, session, options = {}) {
   if (!session || session.cleaned) return;
   session.cleaned = true;
+  if (plugin?._goStudyCompanionRevealTimer) {
+    try { clearTimeout(plugin._goStudyCompanionRevealTimer); } catch {}
+    plugin._goStudyCompanionRevealTimer = null;
+  }
   try { if (session.timer) session.win?.clearInterval?.(session.timer); } catch {}
   try { session.win?.removeEventListener?.('resize', session.captureGeometry); } catch {}
   try { session.win?.removeEventListener?.('beforeunload', session.beforeUnload); } catch {}
@@ -571,8 +593,10 @@ async function openCompanionNoteWindow(plugin, options = {}) {
   revealCompanionEditorCursor(plugin, view.editor, {
     moveToEnd: focusAtEnd,
     focus: options.focusEditor !== false,
-    center: false
+    center: false,
+    scroll: false
   });
+  scheduleCompanionEditorCursorReveal(plugin, view.editor, { delayMs: 72, center: false });
   syncCompanionNativeState(plugin, session, options);
   installCompanionPinControl(plugin, session);
   installGeometryTracking(plugin, session);
