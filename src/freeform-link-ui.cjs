@@ -3,6 +3,10 @@
 let shell = null;
 try { shell = require('electron').shell; } catch {}
 const { parseReferenceUri } = require('./resource-reference.cjs');
+const {
+  legacyJvCompatibilityEnabled,
+  parseLegacyJvUri
+} = require('./legacy-jv.cjs');
 
 function stopLinkEvent(event) {
   event.preventDefault?.();
@@ -18,10 +22,10 @@ function httpLocator(value) {
 }
 
 function jvWebLocator(rawUri) {
-  let uri;
-  try { uri = new URL(String(rawUri || '').trim()); } catch { return ''; }
-  if (uri.protocol !== 'jv:' || uri.hostname !== 'open') return '';
-  return httpLocator(uri.searchParams.get('path'));
+  try {
+    const reference = parseLegacyJvUri(rawUri);
+    return reference.web || httpLocator(reference.locator);
+  } catch { return ''; }
 }
 
 function positionSeconds(position) {
@@ -53,6 +57,14 @@ function modifierPressed(event) {
   return Boolean(event?.ctrlKey || event?.metaKey);
 }
 
+function browserModifierActive(plugin, now = Date.now()) {
+  const state = plugin?._goStudyBrowserModifier?.modifierState;
+  if (!state) return false;
+  if (state.ctrl || state.meta) return true;
+  const last = Number(state.lastPressedAt || 0);
+  return last > 0 && Number(now) - last <= 750;
+}
+
 function referenceDocuments(plugin, primaryDoc = globalThis.document) {
   const docs = new Set();
   if (primaryDoc?.addEventListener) docs.add(primaryDoc);
@@ -79,11 +91,22 @@ function makeReferenceClickHandler(plugin, shellImpl) {
     const href = String(target.getAttribute?.('href') || target.href || '');
 
     if (href.startsWith('jv://open?')) {
-      if (!modifierPressed(event)) return;
-      const web = jvWebLocator(href);
-      if (!web) return;
+      let reference;
+      try { reference = parseLegacyJvUri(href); } catch { return; }
+
+      if (modifierPressed(event)) {
+        const web = reference.web || httpLocator(reference.locator);
+        if (!web) return;
+        stopLinkEvent(event);
+        void shellImpl.openExternal(browserUrlAtPosition(web, reference.position));
+        return;
+      }
+
+      if (!legacyJvCompatibilityEnabled(plugin)) return;
       stopLinkEvent(event);
-      void shellImpl.openExternal(web);
+      if (typeof plugin?.openFreeformReference === 'function') {
+        void Promise.resolve(plugin.openFreeformReference(reference)).catch(() => {});
+      }
       return;
     }
 
@@ -125,27 +148,60 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
   if (!shellImpl?.openExternal) return null;
 
   const bound = new Map();
+  const modifierState = {
+    ctrl: false,
+    meta: false,
+    lastPressedAt: 0
+  };
+
+  const rememberModifier = (event, down) => {
+    const hadModifier = modifierState.ctrl || modifierState.meta || Boolean(event?.ctrlKey || event?.metaKey);
+    if (event?.key === 'Control') modifierState.ctrl = Boolean(down);
+    else if (event?.key === 'Meta') modifierState.meta = Boolean(down);
+    else {
+      modifierState.ctrl = Boolean(event?.ctrlKey);
+      modifierState.meta = Boolean(event?.metaKey);
+    }
+    if (down && (modifierState.ctrl || modifierState.meta)) modifierState.lastPressedAt = Date.now();
+    if (!down && hadModifier) modifierState.lastPressedAt = Date.now();
+  };
+
   const bindDocument = (targetDoc) => {
     if (!targetDoc?.addEventListener || bound.has(targetDoc)) return null;
     const onClick = makeReferenceClickHandler(plugin, shellImpl);
+    const onKeyDown = (event) => rememberModifier(event, true);
+    const onKeyUp = (event) => rememberModifier(event, false);
+    const onBlur = () => {
+      if (modifierState.ctrl || modifierState.meta) modifierState.lastPressedAt = Date.now();
+      modifierState.ctrl = false;
+      modifierState.meta = false;
+    };
+
     targetDoc.addEventListener('click', onClick, true);
-    bound.set(targetDoc, onClick);
+    targetDoc.addEventListener('keydown', onKeyDown, true);
+    targetDoc.addEventListener('keyup', onKeyUp, true);
+    targetDoc.defaultView?.addEventListener?.('blur', onBlur, true);
+    bound.set(targetDoc, { onClick, onKeyDown, onKeyUp, onBlur });
     return onClick;
   };
+
   const refresh = () => {
     for (const targetDoc of referenceDocuments(plugin, doc)) bindDocument(targetDoc);
     return bound.size;
   };
   const cleanup = () => {
-    for (const [targetDoc, onClick] of bound) {
-      targetDoc.removeEventListener?.('click', onClick, true);
+    for (const [targetDoc, handlers] of bound) {
+      targetDoc.removeEventListener?.('click', handlers.onClick, true);
+      targetDoc.removeEventListener?.('keydown', handlers.onKeyDown, true);
+      targetDoc.removeEventListener?.('keyup', handlers.onKeyUp, true);
+      targetDoc.defaultView?.removeEventListener?.('blur', handlers.onBlur, true);
     }
     bound.clear();
     if (plugin?._goStudyBrowserModifier?.refresh === refresh) plugin._goStudyBrowserModifier = null;
   };
 
+  plugin._goStudyBrowserModifier = { refresh, cleanup, bound, modifierState };
   refresh();
-  plugin._goStudyBrowserModifier = { refresh, cleanup, bound };
 
   const workspace = plugin?.app?.workspace;
   const refs = [];
@@ -161,15 +217,17 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
   plugin?.register?.(cleanup);
 
   return {
-    onClick: bound.get(doc) || null,
+    onClick: bound.get(doc)?.onClick || null,
     refresh,
     cleanup,
-    bound
+    bound,
+    modifierState
   };
 }
 
 module.exports = {
   bilibiliUrlAtPosition,
+  browserModifierActive,
   browserUrlAtPosition,
   httpLocator,
   installFreeformBrowserModifier,
