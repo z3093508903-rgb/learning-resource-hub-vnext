@@ -120,7 +120,7 @@ test('资源清理前状态可备份并从备份恢复', async () => {
     const ExportedPlugin = require(built);
     const plugin = new ExportedPlugin();
     plugin.app = { vault: { adapter: { getBasePath: () => tempRoot }, configDir: '.obsidian' } };
-    plugin.manifest = { id: 'learning-resource-hub-next', dir: path.join('.obsidian', 'plugins', 'learning-resource-hub-next') };
+    plugin.manifest = { id: 'go-study', dir: path.join('.obsidian', 'plugins', 'go-study') };
     plugin.persist = async () => {};
     plugin.state = {
       schemaVersion: 1,
