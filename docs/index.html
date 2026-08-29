@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Go Study — 让继续学习更容易</title>
+<meta name="description" content="Go Study 是一个 Obsidian Desktop 学习工作台，把资源、视频位置和 Markdown 笔记连接起来。">
+<style>
+:root{
+  --bg:#f6f4ef;--paper:#fffdf8;--ink:#1c1c1a;--muted:#6f6b63;--line:#ddd8ce;
+  --accent:#2e6d5a;--accent-soft:#e7f0ec;--card:#ffffffcc;--shadow:0 16px 50px #29251c14;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:Inter,"PingFang SC","Microsoft YaHei",system-ui,sans-serif;line-height:1.65}
+a{color:inherit}
+.wrap{width:min(1120px,calc(100% - 36px));margin:auto}
+nav{position:sticky;top:0;z-index:20;background:#f6f4efdb;backdrop-filter:blur(18px);border-bottom:1px solid #ffffff80}
+.navin{height:66px;display:flex;align-items:center;justify-content:space-between}
+.brand{font-weight:800;letter-spacing:-.02em;font-size:20px}
+.links{display:flex;gap:22px;font-size:14px;color:var(--muted)}
+.hero{padding:96px 0 72px}
+.kicker{display:inline-flex;padding:7px 11px;border:1px solid var(--line);border-radius:99px;background:var(--paper);font-size:13px;color:var(--muted)}
+h1{font-size:clamp(48px,8vw,88px);line-height:1.02;letter-spacing:-.065em;margin:24px 0 26px;max-width:900px}
+.lead{font-size:clamp(18px,2.3vw,25px);max-width:760px;color:#4f4b44}
+.cta{display:flex;gap:12px;margin-top:34px;flex-wrap:wrap}
+.btn{display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:12px;border:1px solid var(--line);background:var(--paper);text-decoration:none;font-weight:700}
+.btn.primary{background:var(--ink);color:white;border-color:var(--ink)}
+.mini{margin-top:20px;color:var(--muted);font-size:14px}
+section{padding:72px 0}
+.eyebrow{text-transform:uppercase;letter-spacing:.12em;font-size:12px;color:var(--accent);font-weight:800}
+h2{font-size:clamp(32px,5vw,52px);letter-spacing:-.045em;line-height:1.08;margin:10px 0 28px}
+.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:18px}
+.card{background:var(--card);border:1px solid #ffffffc0;border-radius:24px;padding:28px;box-shadow:var(--shadow)}
+.card h3{margin:0 0 12px;font-size:21px}
+.card p{margin:0;color:var(--muted)}
+.span6{grid-column:span 6}.span4{grid-column:span 4}.span8{grid-column:span 8}
+.flow{display:grid;grid-template-columns:1fr 64px 1fr;gap:20px;align-items:stretch}
+.flowbox{background:var(--paper);border:1px solid var(--line);border-radius:24px;padding:28px}
+.flowbox ol{margin:0;padding-left:20px;color:var(--muted)}
+.arrow{display:grid;place-items:center;font-size:28px;color:var(--muted)}
+.big2{font-size:clamp(74px,12vw,150px);line-height:.8;font-weight:900;letter-spacing:-.08em;color:var(--accent)}
+.twoclick{display:flex;gap:24px;align-items:center}
+.quote{font-size:clamp(27px,4vw,46px);line-height:1.2;letter-spacing:-.035em}
+.code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;background:#171816;color:#f3f1e9;padding:20px;border-radius:18px;overflow:auto}
+.status{display:inline-flex;gap:8px;align-items:center;color:var(--muted);font-size:13px}
+.dot{width:8px;height:8px;border-radius:50%;background:#4fa47f;box-shadow:0 0 0 5px #4fa47f17}
+footer{padding:52px 0 80px;color:var(--muted);border-top:1px solid var(--line)}
+@media(max-width:760px){
+ .links{display:none}.hero{padding-top:64px}.span6,.span4,.span8{grid-column:1/-1}
+ .flow{grid-template-columns:1fr}.arrow{transform:rotate(90deg)}.twoclick{align-items:flex-start;flex-direction:column}
+}
+</style>
+</head>
+<body>
+<nav><div class="wrap navin"><div class="brand">Go Study</div><div class="links"><a href="#why">为什么</a><a href="#features">功能</a><a href="#bilibili">B站</a><a href="#privacy">数据安全</a></div></div></nav>
+
+<main>
+<section class="hero">
+<div class="wrap">
+<span class="kicker">Obsidian Desktop Learning Workbench</span>
+<h1>别再重新搭建昨天的学习现场。</h1>
+<p class="lead">Go Study 把学习资源、视频位置和真实 Markdown 笔记连起来。你只管继续学习，剩下的切窗口、找资源、记时间点交给工作流。</p>
+<div class="cta">
+<a class="btn primary" href="#start">开始了解</a>
+<a class="btn" href="USER_GUIDE.md">阅读说明书</a>
+</div>
+<p class="mini">本地优先 · 无广告 · 无遥测 · Desktop only</p>
+</div>
+</section>
+
+<section id="why">
+<div class="wrap">
+<div class="eyebrow">The problem</div>
+<h2>你本来只是想记一句话。</h2>
+<div class="flow">
+<div class="flowbox">
+<h3>以前</h3>
+<ol>
+<li>找到课程</li><li>打开播放器</li><li>找上次位置</li><li>切 Obsidian</li><li>找项目</li><li>找笔记</li><li>手动看时间</li><li>写时间戳</li><li>再切回视频</li>
+</ol>
+</div>
+<div class="arrow">→</div>
+<div class="flowbox">
+<div class="twoclick"><div class="big2">2</div><div><h3>现在</h3><p>项目里点资源。<br>需要记录时按 <strong>Alt + S</strong>。</p></div></div>
+</div>
+</div>
+</div>
+</section>
+
+<section>
+<div class="wrap">
+<div class="card">
+<div class="eyebrow">North star</div>
+<p class="quote">“先让继续学习更容易，再让记录学习更容易。”</p>
+</div>
+</div>
+</section>
+
+<section id="features">
+<div class="wrap">
+<div class="eyebrow">Features</div>
+<h2>一个学习闭环，不是一堆按钮。</h2>
+<div class="grid">
+<div class="card span6"><h3>项目式资源中心</h3><p>本地视频、OpenList、Bilibili、Vault、网页、PDF 放进同一个学习目标里。从“今天学什么”直接进入资源。</p></div>
+<div class="card span6"><h3>Companion 笔记小窗</h3><p>真实 Obsidian Markdown，可拖入、置顶、独立使用，也可以锁定成 Study Mode 的 Capture 目标。</p></div>
+<div class="card span4"><h3>Alt + S HUD</h3><p>时间戳、笔记、评论、截图类动作不再反复切窗口。</p></div>
+<div class="card span4"><h3>轻量 Timeline</h3><p>多视频来源分组，看结构、回正文，不和播放器职责打架。</p></div>
+<div class="card span4"><h3>可恢复的数据安全</h3><p>自动快照、命名长期备份、任意历史备份选择恢复。</p></div>
+</div>
+</div>
+</section>
+
+<section id="bilibili">
+<div class="wrap">
+<div class="eyebrow">Bilibili</div>
+<h2>网页里看，也能直接记。</h2>
+<div class="grid">
+<div class="card span8">
+<h3>不用为了 B站先折腾 PotPlayer</h3>
+<p>安装可选的 Go Study Bilibili Bridge 后，Go Study 可以读取当前活动 B站视频的播放时间，直接通过 HUD 写入 Companion 或 Markdown。</p>
+<br>
+<div class="code">Bilibili video.currentTime
+→ 127.0.0.1
+→ Go Study
+→ Alt + S
+→ [01:09](https://www.bilibili.com/video/BV...?t=69.4)</div>
+</div>
+<div class="card span4"><h3>进阶用户仍然有 PotPlayer</h3><p>本地课程、OpenList、截图、播放器控制继续交给 PotPlayer。网页轻量路线和进阶路线并存。</p></div>
+</div>
+</div>
+</section>
+
+<section id="privacy">
+<div class="wrap">
+<div class="eyebrow">Local first</div>
+<h2>你的笔记，不需要经过另一个云。</h2>
+<div class="grid">
+<div class="card span4"><h3>无遥测</h3><p>不为了统计使用习惯把你的工作流上传出去。</p></div>
+<div class="card span4"><h3>Bridge 只走本机</h3><p>B站桥接只与 127.0.0.1 上的 Go Study 通讯。</p></div>
+<div class="card span4"><h3>恢复是第一等功能</h3><p>不仅会备份，也能明确选择哪一份恢复。</p></div>
+</div>
+</div>
+</section>
+
+<section id="start">
+<div class="wrap">
+<div class="card">
+<div class="status"><span class="dot"></span>Go Study 0.3.0 Release Candidate</div>
+<h2 style="margin-top:14px">准备好之后，只做一件事：继续学习。</h2>
+<p class="lead">完整安装、Bilibili Bridge、OpenList、Companion、HUD、备份恢复与历史兼容说明，请阅读用户说明书。</p>
+<div class="cta"><a class="btn primary" href="USER_GUIDE.md">打开用户说明书</a></div>
+</div>
+</div>
+</section>
+</main>
+
+<footer><div class="wrap">Go Study · Built for Obsidian Desktop · MIT License</div></footer>
+</body>
+</html>
