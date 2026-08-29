@@ -677,3 +677,105 @@ Windows 实机发现发布阻断级数据事故：
 - ZIP SHA256 `770c168a79dd3f16cbbc4ba8afa69e77f31a3f60a291298a8f73b39dedbb083e`
 
 状态：VALIDATING。发布前必须通过“重启两次 + 手工备份恢复 + 原 data.json 不再被空状态覆盖”实机验收。
+
+
+## beta20.9：Portable Backlink / Legacy Relink / Named Backup
+
+beta20.8 数据安全轮用户实机确认可继续进入下一轮。随后暴露新的发布前兼容问题：
+
+1. 旧 Managed 回链仅保存 Resource ID；如果重装插件 / 更换设备 / data.json 丢失，Markdown 虽然还在，但 Resource ID 无法解析；
+2. Managed Bilibili 回链 Ctrl+点击不能像 Freeform 一样打开浏览器；
+3. 浅色模式下部分独立 Modal（尤其添加 / 导入 / “选择保存位置”）因 CSS 变量只定义在 Workbench root，出现白字白底；
+4. 手动备份需要可命名 / 重命名，并且不能被自动 3～10 份 retention 清理；
+5. 完整跨设备 / 账号同步需求存在，但当前明确延期，只记录方案，不在本轮实现。
+
+### 新 Managed v3 回链
+
+新增 `PORTABLE_MANAGED_REFERENCE_VERSION = 3`。
+
+新的 Managed 时间戳继续以 Resource ID 为首要身份，同时在 URI 内隐藏携带可恢复来源：
+
+- `locator`
+- `name`
+- `title`
+- `web`
+- `position`
+
+可见 Markdown 仍然只有时间戳胶囊，例如：
+
+`00:35`
+
+不显示视频标题或来源 metadata。
+
+恢复顺序：
+
+1. 当前 Resource ID；
+2. 已保存的 legacy alias；
+3. v3 locator 精确匹配当前 Resource；
+4. v3 portable name 唯一匹配；
+5. v3 直接降级为 Freeform 打开，不强制重新收录；
+6. legacy v1 尝试从 recovery / legacy backup 中按旧 Resource ID 找回；
+7. 若仍找不到，弹出“重新关联旧时间戳”，用户重新收录一次对应视频并选择 Resource；
+8. 保存 `uiState.referenceAliases[oldResourceId] = currentResourceId`，以后同一旧 ID 的回链自动复用。
+
+重要事实边界：
+
+> 旧 v1 回链本身只有 Resource ID + position。如果当前 Resource、data.json、recovery / backup 都已消失，就无法从链接本身数学上反推出原始 URL / 本地路径。因此必须依赖重新收录后的“一次性 relink”或未来同步层。
+
+### Ctrl+点击浏览器
+
+Ctrl+点击现在覆盖所有 Go Study timestamp：
+
+- Freeform → 现有 web / HTTP locator；
+- Managed 当前 Resource → Resource browser target；
+- Managed v3 丢 Resource → hidden `web` / HTTP locator；
+- legacy v1 → alias / recovery Resource 的 web target（若存在）；
+- Bilibili 保留 `p` 并写入 `t=<seconds>`。
+
+Timeline 仍然只负责**笔记内导航**，不重新承担浏览器 / 播放器职责。
+
+### Timeline source fallback
+
+Managed v3 即使当前 Resource 已经不存在，Timeline 仍可以通过 hidden `title / name / web host` 显示来源标题，而不是只显示“已收录视频”。
+
+### Light Mode Modal
+
+根因：
+- `--rh-accent / --rh-border / --rh-card` 过去只定义在 `.rh-next-view-host`；
+- Obsidian Modal 挂在 Workbench DOM 外；
+- primary button 使用 `var(--rh-accent)` 时背景失效，但 `var(--text-on-accent)` 仍是浅色文字，导致浅色模式白字白底。
+
+修复：
+- `.modal.rh-next-modal` 自己定义完整 theme variables；
+- primary / active button 直接使用 Obsidian accent variables；
+- modal input / select / textarea 显式使用 `text-normal` + form background。
+
+### Named Manual Backup
+
+新增长期保留备份：
+
+- 命名手动备份使用 `saved-*.json`；
+- `saved-*` 不参与自动快照 retention；
+- 可以“新建命名备份”；
+- 可以把最近任意 snapshot “重命名最近快照”，升级为长期命名备份；
+- 自动 3～10 份限制只清理非 named snapshots。
+
+### 开发状态
+
+- branch `work/portable-reference-fallback-beta20-9`
+- Draft PR #38
+- validated CI #274 / publish CI #275 PASS
+- **367 / 367 tests PASS**
+- Preview `Go Study Preview 0.3.0-beta.20.9`
+- release target `71773c2f54550d0d59f991c09ba3de2c80171da9`
+- current PR head after one-shot publisher cleanup `73feb696e6892d6b4f5aa17cd8fb31dfb723e2f5`
+- ZIP SHA256 `9513c5bd4d04a0bc8b3f431ae646d4b9fa131b34e33f58fe7bc1c1fadc78f691`
+
+状态：VALIDATING。重点实机验收：
+- 新 Managed v3 丢 Resource 后仍可 fallback；
+- legacy v1 recovery / one-time relink；
+- Managed Bilibili Ctrl+点击浏览器；
+- 浅色 Add / Import / 保存位置 Modal；
+- named backup 不被 retention 删除。
+
+Obsidian 原生文件树 / Markdown tab 拖入 Study Mode 仍是独立未关闭问题，不因 beta20.9 自动视为修复。
