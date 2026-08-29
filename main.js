@@ -981,7 +981,6 @@ const {
 } = __rhLoad("resource-resolver.cjs");
 const { matchingManagedResource, matchingManagedResourceByPortableName } = __rhLoad("media-session.cjs");
 const { openPortableFreeformReference } = __rhLoad("freeform-playback.cjs");
-const { launchPotPlayerTarget } = __rhLoad("native-potplayer.cjs");
 const { browserModifierActive, browserUrlAtPosition } = __rhLoad("freeform-link-ui.cjs");
 const {
   browserUrlForReference,
@@ -1135,7 +1134,11 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     try {
       const playerTime = formatPotPlayerTime(reference.position);
       new Notice(`正在跳转临时视频 · ${playerTime}`);
-      const opened = await openPortableFreeformReference(reference, { shell, platform: process.platform });
+      const opened = await openPortableFreeformReference(reference, {
+        shell,
+        platform: process.platform,
+        launchPotPlayerTarget: (target, position) => this.launchPotPlayerTarget(target, position)
+      });
       const suffix = opened.positionApplied ? ` · ${playerTime}` : ' · 当前平台暂未应用精确时间';
       new Notice(`已打开临时视频${suffix}`);
       return true;
@@ -1158,13 +1161,13 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
         const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
         const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, playerTime);
+        await this.launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, playerTime);
       } else if (target.type === 'potplayer') {
-        await launchPotPlayerTarget(target.target, playerTime);
+        await this.launchPotPlayerTarget(target.target, playerTime);
       } else if (target.type === 'uri') {
         const legacyBili = model.parseBiliVideoUrl(target.uri);
         if (!legacyBili) throw new Error('当前回链只允许跳转到受支持的视频资源。');
-        await launchPotPlayerTarget(legacyBili.canonicalUrl, playerTime);
+        await this.launchPotPlayerTarget(legacyBili.canonicalUrl, playerTime);
       } else {
         throw new Error('当前资源没有支持定位播放的启动方式。');
       }
@@ -2773,7 +2776,7 @@ try {
   dialog = dialog || remote.dialog;
 } catch { /* Current Obsidian versions expose Electron directly. */ }
 const model = __rhLoad("model.cjs");
-const { launchPotPlayerTarget } = __rhLoad("native-potplayer.cjs");
+const { launchPotPlayerTarget: launchNativePotPlayerTarget } = __rhLoad("native-potplayer.cjs");
 const { legacyJvCompatibilityEnabled, parseLegacyJvUri } = __rhLoad("legacy-jv.cjs");
 const {
   clampMemoHeight,
@@ -3357,6 +3360,20 @@ class ResourceHubNextPlugin extends Plugin {
     await shell.openExternal(safeTarget);
   }
 
+  async launchPotPlayerTarget(target, position = 0) {
+    this.state.uiState ||= {};
+    const configured = String(this.state.uiState.potPlayerExecutablePath || '').trim();
+    const result = await launchNativePotPlayerTarget(target, position, {
+      executable: configured
+    });
+    const detected = String(result?.executable || '').trim();
+    if (detected && detected !== configured) {
+      this.state.uiState.potPlayerExecutablePath = detected;
+      await this.persist();
+    }
+    return result;
+  }
+
   async openResourceAction(resource, actionType, target, options = {}) {
     if (!resource || !target) return false;
     try {
@@ -3377,7 +3394,7 @@ class ResourceHubNextPlugin extends Plugin {
         const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
         const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, 0);
+        await this.launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, 0);
       } else if (target.type === 'openlist-file') {
         const source = this.state.sources[target.sourceId] || Object.values(this.state.sources).find((item) => item.type === 'openlist' && !item.deletedAt);
         if (!source) throw new Error('请先配置 OpenList 来源连接。');
@@ -3388,11 +3405,11 @@ class ResourceHubNextPlugin extends Plugin {
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
         await shell.openExternal(`${baseUrl}/d${encoded}${sign}`);
       } else if (target.type === 'potplayer') {
-        await launchPotPlayerTarget(target.target, 0);
+        await this.launchPotPlayerTarget(target.target, 0);
       } else if (target.type === 'uri') {
         const legacyBili = model.parseBiliVideoUrl(target.uri);
         const legacyOpenListFolder = model.parseOpenListUrl(target.uri, Object.values(this.state.sources));
-        if (legacyBili) await launchPotPlayerTarget(legacyBili.canonicalUrl, 0);
+        if (legacyBili) await this.launchPotPlayerTarget(legacyBili.canonicalUrl, 0);
         else if (legacyOpenListFolder) {
           new Notice('检测到旧版 OpenList 目录条目，请重新导入为可播放的视频合集。', 5000);
           this.openAddModal({ mode: 'source', sourceType: 'openlist', openListInput: target.uri, projectId: this.state.uiState.currentProjectId || '' });
@@ -3401,7 +3418,7 @@ class ResourceHubNextPlugin extends Plugin {
           const validated = model.validateExternalUri(target.uri, ['https:', 'http:', 'jv:']);
           if (/^jv:/i.test(validated) && legacyJvCompatibilityEnabled(this)) {
             const reference = parseLegacyJvUri(validated);
-            await launchPotPlayerTarget(reference.locator, reference.position);
+            await this.launchPotPlayerTarget(reference.locator, reference.position);
           } else {
             await shell.openExternal(validated);
           }
@@ -9178,7 +9195,7 @@ const DEFAULT_IMMERSIVE_SHORTCUTS = Object.freeze({
   captureNote: 'Alt+4'
 });
 
-const POTPLAYER_PROCESS_NAMES = ['PotPlayerMini64', 'PotPlayerMini'];
+const POTPLAYER_PROCESS_NAMES = ['PotPlayerMini64', 'PotPlayerMini', 'PotPlayer64', 'PotPlayer'];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -9394,23 +9411,125 @@ function resolveElectronGlobalShortcut(options = {}) {
 }
 
 
+function potPlayerExecutableNames() {
+  return ['PotPlayerMini64.exe', 'PotPlayerMini.exe', 'PotPlayer64.exe', 'PotPlayer.exe'];
+}
+
 function potPlayerExecutableCandidates(env = process.env) {
   const roots = [
     String(env.ProgramW6432 || '').trim(),
     String(env.ProgramFiles || '').trim(),
     String(env['ProgramFiles(x86)'] || '').trim(),
-    String(env.LOCALAPPDATA || '').trim()
+    String(env.LOCALAPPDATA || '').trim(),
+    String(env.USERPROFILE || '').trim()
   ].filter(Boolean);
   const candidates = [];
   for (const root of roots) {
-    for (const relative of [
-      ['DAUM', 'PotPlayer', 'PotPlayerMini64.exe'],
-      ['DAUM', 'PotPlayer', 'PotPlayerMini.exe'],
-      ['PotPlayer', 'PotPlayerMini64.exe'],
-      ['PotPlayer', 'PotPlayerMini.exe']
-    ]) candidates.push(path.join(root, ...relative));
+    for (const relativeRoot of [
+      ['DAUM', 'PotPlayer'],
+      ['PotPlayer'],
+      ['Programs', 'PotPlayer']
+    ]) {
+      for (const executable of potPlayerExecutableNames()) {
+        candidates.push(path.join(root, ...relativeRoot, executable));
+      }
+    }
   }
   return [...new Set(candidates)];
+}
+
+function potPlayerDiscoveryScript() {
+  const executableNames = potPlayerExecutableNames()
+    .map((name) => "'" + name.replace(/'/g, "''") + "'")
+    .join(',');
+  return [
+    "$ErrorActionPreference = 'SilentlyContinue'",
+    "$exe = ''",
+    "$exeNames = @(" + executableNames + ")",
+    "",
+    "function Resolve-GoStudyPotPlayerPath([string]$candidate) {",
+    "  if (-not $candidate) { return '' }",
+    "  $value = [Environment]::ExpandEnvironmentVariables([string]$candidate).Trim().Trim('\\\"')",
+    "  $value = $value -replace ',\\s*\\d+$', ''",
+    "  if ($value -and (Test-Path -LiteralPath $value -PathType Leaf)) {",
+    "    return [System.IO.Path]::GetFullPath($value)",
+    "  }",
+    "  return ''",
+    "}",
+    "",
+    "# 1. Running process: best source for portable/custom installs.",
+    "foreach ($proc in (Get-Process | Where-Object { $_.ProcessName -like 'PotPlayer*' })) {",
+    "  $candidate = ''",
+    "  try { $candidate = [string]$proc.Path } catch {}",
+    "  if (-not $candidate) { try { $candidate = [string]$proc.MainModule.FileName } catch {} }",
+    "  $resolved = Resolve-GoStudyPotPlayerPath $candidate",
+    "  if ($resolved) { $exe = $resolved; break }",
+    "}",
+    "",
+    "# 2. App Paths registrations.",
+    "if (-not $exe) {",
+    "  $appPathRoots = @(",
+    "    'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths',",
+    "    'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths',",
+    "    'Registry::HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths'",
+    "  )",
+    "  foreach ($root in $appPathRoots) {",
+    "    foreach ($name in $exeNames) {",
+    "      $key = Join-Path $root $name",
+    "      $value = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue).'(default)'",
+    "      $resolved = Resolve-GoStudyPotPlayerPath $value",
+    "      if ($resolved) { $exe = $resolved; break }",
+    "    }",
+    "    if ($exe) { break }",
+    "  }",
+    "}",
+    "",
+    "# 3. Installed-app metadata, including custom drives.",
+    "if (-not $exe) {",
+    "  $uninstallRoots = @(",
+    "    'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',",
+    "    'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',",
+    "    'Registry::HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall'",
+    "  )",
+    "  foreach ($root in $uninstallRoots) {",
+    "    foreach ($item in (Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue })) {",
+    "      if ([string]$item.DisplayName -notmatch 'PotPlayer') { continue }",
+    "      $resolved = Resolve-GoStudyPotPlayerPath ([string]$item.DisplayIcon)",
+    "      if ($resolved) { $exe = $resolved; break }",
+    "      $install = [string]$item.InstallLocation",
+    "      if ($install) {",
+    "        foreach ($name in $exeNames) {",
+    "          $resolved = Resolve-GoStudyPotPlayerPath (Join-Path $install $name)",
+    "          if ($resolved) { $exe = $resolved; break }",
+    "        }",
+    "      }",
+    "      if ($exe) { break }",
+    "    }",
+    "    if ($exe) { break }",
+    "  }",
+    "}",
+    "",
+    "# 4. Start Menu shortcuts.",
+    "if (-not $exe) {",
+    "  try {",
+    "    $wsh = New-Object -ComObject WScript.Shell",
+    "    $shortcutRoots = @(",
+    "      (Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs'),",
+    "      (Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs')",
+    "    )",
+    "    foreach ($root in $shortcutRoots) {",
+    "      foreach ($shortcutFile in (Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'PotPlayer' })) {",
+    "        $shortcut = $wsh.CreateShortcut($shortcutFile.FullName)",
+    "        $resolved = Resolve-GoStudyPotPlayerPath ([string]$shortcut.TargetPath)",
+    "        if ($resolved) { $exe = $resolved; break }",
+    "      }",
+    "      if ($exe) { break }",
+    "    }",
+    "  } catch {}",
+    "}",
+    "",
+    "[pscustomobject]@{ ok = $true; executable = $exe } | ConvertTo-Json -Compress"
+  ].join("\n");
 }
 
 function normalizeSeekSeconds(position) {
@@ -9449,7 +9568,7 @@ function normalizePotPlayerTarget(value) {
 
 async function resolvePotPlayerExecutable(options = {}) {
   const existsSync = options.existsSync || fs.existsSync;
-  const explicit = String(options.executable || '').trim();
+  const explicit = String(options.executable || '').trim().replace(/^"(.*)"$/, '$1');
   if (explicit && existsSync(explicit)) return explicit;
 
   const candidates = options.candidates || potPlayerExecutableCandidates(options.env || process.env);
@@ -9459,31 +9578,15 @@ async function resolvePotPlayerExecutable(options = {}) {
   if (found) return found;
 
   try {
-    const probeScript = `
-$ErrorActionPreference = 'SilentlyContinue'
-$exe = ''
-$names = @('PotPlayerMini64','PotPlayerMini')
-$proc = Get-Process | Where-Object { $names -contains $_.ProcessName -and $_.Path } | Select-Object -First 1
-if ($proc -and $proc.Path) { $exe = [string]$proc.Path }
-if (-not $exe) {
-  foreach ($key in @(
-    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini64.exe',
-    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini.exe',
-    'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini64.exe',
-    'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini.exe'
-  )) {
-    $value = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).'(default)'
-    if ($value -and (Test-Path -LiteralPath $value)) { $exe = [string]$value; break }
-  }
-}
-[pscustomobject]@{ ok = $true; executable = $exe } | ConvertTo-Json -Compress
-`;
-    const probe = await (options.runPowerShell || runPowerShell)(probeScript, options);
+    const probe = await (options.runPowerShell || runPowerShell)(potPlayerDiscoveryScript(), options);
     const executable = String(probe?.executable || '').trim();
     if (executable && existsSync(executable)) return executable;
   } catch {}
 
-  throw new Error('没有找到 PotPlayer 可执行文件。请确认已安装 PotPlayer；Go Study 不再依赖 note2potplayer.exe。');
+  const configuredHint = explicit
+    ? ' 当前配置的 PotPlayer 路径不存在，请在 Go Study 设置中重新自动检测或填写正确路径。'
+    : ' 请先打开一次 PotPlayer 后重试自动检测，或在 Go Study 设置中填写 PotPlayer 程序路径。';
+  throw new Error('没有找到 PotPlayer 可执行文件。' + configuredHint);
 }
 
 async function launchPotPlayerTarget(target, position = null, options = {}) {
@@ -9525,7 +9628,9 @@ module.exports = {
   normalizePotPlayerTarget,
   normalizeSeekSeconds,
   normalizeShortcut,
+  potPlayerDiscoveryScript,
   potPlayerExecutableCandidates,
+  potPlayerExecutableNames,
   potPlayerProbeScript,
   powershellExecutable,
   requestNativePotPlayer,
@@ -9937,7 +10042,7 @@ const {
   resetImmersiveShortcuts,
   updateImmersiveShortcut
 } = __rhLoad("immersive-hotkeys.cjs");
-const { immersiveShortcuts } = __rhLoad("native-potplayer.cjs");
+const { immersiveShortcuts, resolvePotPlayerExecutable } = __rhLoad("native-potplayer.cjs");
 const {
   diagnoseTimelineNavigator,
   refreshTimelineNavigator
@@ -10291,6 +10396,42 @@ class GoStudySettingsTab extends PluginSettingTab {
           await updateProductSetting(this.plugin, 'freeformVideoNotesEnabled', value);
         });
       });
+
+    new Setting(containerEl)
+      .setName('PotPlayer 程序路径（高级）')
+      .setDesc('通常自动识别。自定义 D 盘、便携版或非标准安装时，可自动检测或直接填写 PotPlayer 的 .exe 绝对路径；成功识别后会保存。')
+      .addText((text) => {
+        text.setValue(settings.potPlayerExecutablePath);
+        text.setPlaceholder('例如 D:\\Apps\\PotPlayer\\PotPlayerMini64.exe');
+        const commit = async () => {
+          try {
+            const next = await updateProductSetting(this.plugin, 'potPlayerExecutablePath', text.getValue());
+            text.setValue(next.potPlayerExecutablePath);
+            new Notice(next.potPlayerExecutablePath ? 'PotPlayer 程序路径已保存。' : '已清除自定义 PotPlayer 程序路径，将使用自动检测。');
+          } catch (error) {
+            text.setValue(currentProductSettings(this.plugin).potPlayerExecutablePath);
+            new Notice(commandErrorText('PotPlayer 路径更新失败', error), 6000);
+          }
+        };
+        text.inputEl?.addEventListener('change', () => void commit());
+      })
+      .addButton((button) => button
+        .setButtonText('自动检测')
+        .onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const detected = await resolvePotPlayerExecutable({
+              executable: currentProductSettings(this.plugin).potPlayerExecutablePath
+            });
+            await updateProductSetting(this.plugin, 'potPlayerExecutablePath', detected);
+            new Notice(`已识别 PotPlayer：${detected}`, 7000);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('PotPlayer 自动检测失败', error), 7000);
+          } finally {
+            button.setDisabled(false);
+          }
+        }));
 
     new Setting(containerEl)
       .setName('旧 JV 链接兼容（高级）')
@@ -10811,6 +10952,7 @@ const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   focusStudyNoteAtEnd: true,
   freeformVideoNotesEnabled: true,
   legacyJvCompatibilityEnabled: false,
+  potPlayerExecutablePath: '',
   shortcutMode: 'mixed',
   actionHudShortcut: 'Alt+S',
   actionHudDelayMs: 300,
@@ -10876,6 +11018,18 @@ function normalizeCaptureFolder(value) {
     throw new Error('截图目录必须是 Vault 内的安全相对路径。');
   }
   return parts.join('/');
+}
+
+function normalizePotPlayerExecutablePath(value) {
+  const raw = String(value ?? '').trim().replace(/^"(.*)"$/, '$1');
+  if (!raw) return '';
+  if (raw.length > 4096 || /[\r\n\0]/.test(raw)) throw new Error('PotPlayer 程序路径无效。');
+  const windowsDrive = /^[A-Za-z]:[\\/]/.test(raw);
+  const windowsUnc = /^\\\\[^\\]+\\[^\\]+/.test(raw);
+  if ((!windowsDrive && !windowsUnc) || !/\.exe$/i.test(raw)) {
+    throw new Error('PotPlayer 程序路径必须是 Windows 绝对 .exe 路径。');
+  }
+  return raw;
 }
 
 function normalizeTimeDisplayFormat(value) {
@@ -10951,6 +11105,10 @@ function currentProductSettings(plugin) {
     focusStudyNoteAtEnd: boolOr(ui.focusStudyNoteAtEnd, DEFAULT_PRODUCT_SETTINGS.focusStudyNoteAtEnd),
     freeformVideoNotesEnabled: boolOr(ui.freeformVideoNotesEnabled, DEFAULT_PRODUCT_SETTINGS.freeformVideoNotesEnabled),
     legacyJvCompatibilityEnabled: boolOr(ui.legacyJvCompatibilityEnabled, DEFAULT_PRODUCT_SETTINGS.legacyJvCompatibilityEnabled),
+    potPlayerExecutablePath: (() => {
+      try { return normalizePotPlayerExecutablePath(ui.potPlayerExecutablePath); }
+      catch { return DEFAULT_PRODUCT_SETTINGS.potPlayerExecutablePath; }
+    })(),
     shortcutMode: normalizeShortcutMode(ui.shortcutMode),
     actionHudShortcut: (() => {
       try { return normalizeActionHudShortcut(ui.actionHudShortcut); }
@@ -10994,6 +11152,7 @@ async function updateProductSetting(plugin, key, value) {
   plugin.state.uiState ||= {};
   let next = value;
   if (key === 'captureFolder') next = normalizeCaptureFolder(value);
+  else if (key === 'potPlayerExecutablePath') next = normalizePotPlayerExecutablePath(value);
   else if (key === 'backupRetention') next = clampInteger(value, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention);
   else if (key === 'timeDisplayFormat') next = normalizeTimeDisplayFormat(value);
   else if (key === 'shortcutMode') next = normalizeShortcutMode(value);
@@ -11026,6 +11185,7 @@ module.exports = {
   normalizeActionHudDelayMs,
   normalizeActionHudShortcut,
   normalizeCaptureFolder,
+  normalizePotPlayerExecutablePath,
   normalizeOutputTemplate,
   normalizedBacklinkTemplate,
   normalizeShortcutMode,
