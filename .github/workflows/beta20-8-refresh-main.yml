@@ -1,0 +1,32 @@
+name: beta20-8-refresh-main
+
+on:
+  push:
+    branches:
+      - fix/state-safety-native-drag-beta20-8
+
+permissions:
+  contents: write
+
+jobs:
+  refresh-main:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm run build
+      - name: Commit refreshed bundle
+        run: |
+          if git diff --quiet -- main.js; then
+            echo "main.js already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add main.js
+          git commit -m "build(beta20.8): refresh main.js"
+          git push
