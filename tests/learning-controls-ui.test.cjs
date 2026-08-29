@@ -83,3 +83,23 @@ test('runtime mounts native hotkeys but no longer starts Companion event polling
   assert.match(runtimeSource, /installLearningControls\(this\)/);
   assert.doesNotMatch(runtimeSource, /registerCompanionEventPoller/);
 });
+
+
+test('workbench status dot includes optional Bilibili bridge started/connected state', () => {
+  assert.match(uiSource, /bridgeStatus/);
+  assert.match(uiSource, /B站网页桥接已连接/);
+  assert.match(uiSource, /B站网页桥接已启动/);
+  assert.match(uiSource, /has-web-connected/);
+  assert.match(uiSource, /has-web-listening/);
+  assert.match(uiSource, /go-study-bilibili-bridge-status/);
+  assert.match(uiSource, /goStudyBilibiliStatus/);
+});
+
+test('settings expose a beginner-facing Bilibili bridge install and connection entry', () => {
+  assert.match(settingsSource, /B站网页桥接（可选）/);
+  assert.match(settingsSource, /下载 \/ 安装桥接/);
+  assert.match(settingsSource, /检查连接/);
+  assert.match(settingsSource, /BILIBILI_BRIDGE_RELEASES_URL/);
+  assert.match(settingsSource, /shell\.openExternal\(BILIBILI_BRIDGE_RELEASES_URL\)/);
+  assert.match(settingsSource, /加载解压缩的扩展/);
+});
