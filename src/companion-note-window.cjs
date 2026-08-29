@@ -758,6 +758,7 @@ module.exports = {
   normalizeCompanionScale,
   normalizeStoredGeometry,
   revealCompanionEditorCursor,
+  scheduleCompanionEditorCursorReveal,
   openCompanionNoteWindow,
   registerCompanionNoteCommands,
   resolveCompanionNotePath,
