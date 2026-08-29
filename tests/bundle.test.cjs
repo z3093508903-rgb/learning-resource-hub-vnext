@@ -65,7 +65,9 @@ test('构建产物包含永久删除、OpenList 目录扫描和 PotPlayer 启动
   assert.match(output, /永久删除项目/);
   assert.match(output, /api\/fs\/list/);
   assert.match(output, /x\/web-interface\/view/);
-  assert.match(output, /jv:\/\/open\?path=/);
+  assert.match(output, /native-potplayer-cli/);
+  assert.match(output, /launchPotPlayerTarget/);
+  assert.doesNotMatch(output, /return `jv:\/\/open\?path=/);
   assert.match(output, /launcher\.type === 'potplayer'/);
   assert.match(output, /legacyBili/);
   assert.match(output, /旧版 OpenList 目录条目/);
