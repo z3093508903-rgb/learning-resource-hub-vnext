@@ -125,3 +125,10 @@ test('native Obsidian file-tree and tab drags can summon the global Study Mode t
 test('native drag bridge ignores Go Study workbench rows so only one drop target owns those drags', () => {
   assert.match(uiSource, /target\.closest\('\[data-go-study-study-note-path\]'\)/);
 });
+
+
+test('pointer-based native tab dragging can complete by releasing over the Study Mode target', () => {
+  assert.match(uiSource, /nativeDropEl\?\.getBoundingClientRect/);
+  assert.match(uiSource, /x >= rect\.left && x <= rect\.right/);
+  assert.match(uiSource, /void completeDrop\(pointerCandidate\)/);
+});
