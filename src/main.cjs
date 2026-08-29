@@ -37,6 +37,7 @@ const {
   markLoadedBaseline,
   meaningfulState,
   protectBeforePersist,
+  pruneRecoveryBackups,
   readRawPluginData,
   recoveryDirectory,
   recoveryEntries,
@@ -159,6 +160,11 @@ class ResourceHubNextPlugin extends Plugin {
   async onload() {
     const safetySnapshot = startupSafetySnapshot(this);
     this._goStudyStateSafety = { ...safetySnapshot };
+    try {
+      pruneRecoveryBackups(this, Number(safetySnapshot.rawData?.uiState?.backupRetention || 10));
+    } catch (error) {
+      console.warn('Go Study: failed to prune startup recovery snapshots.', error);
+    }
     let loaded = await this.loadData();
 
     // Obsidian loadData() and direct data.json inspection should describe the same state.
