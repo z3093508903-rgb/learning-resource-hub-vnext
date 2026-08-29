@@ -257,3 +257,53 @@ test('capture path increments instead of overwriting an existing screenshot', ()
   const vault = { getAbstractFileByPath: (value) => occupied.has(value) ? { path: value } : null };
   assert.equal(uniqueCapturePath(vault, resource, position), 'GoStudy/Captures/课程-01-05-2.png');
 });
+
+
+test('learning player falls back from non-foreground PotPlayer to fresh Bilibili web state', async () => {
+  const { requestLearningPlayer } = loadCaptureModule();
+  const plugin = {};
+  const result = await requestLearningPlayer(plugin, 'current', {
+    nativeOptions: { allowNonWindows: true },
+    nativeRequest: async () => { throw new Error('PotPlayer 当前不是前台窗口'); },
+    webRequest: async (_plugin, action) => {
+      assert.equal(action, 'current');
+      return {
+        ok: true,
+        transport: 'bilibili-web',
+        media: {
+          path: 'https://www.bilibili.com/video/BV1WEB',
+          source: 'bilibili-web',
+          positionSeconds: 69.4
+        }
+      };
+    }
+  });
+  assert.equal(result.transport, 'bilibili-web');
+  assert.equal(result.media.positionSeconds, 69.4);
+});
+
+test('Bilibili web current position writes a direct timestamp URL instead of a PotPlayer protocol link', async () => {
+  const { insertCurrentLearningPosition } = loadCaptureModule();
+  const { plugin, inserted } = localPluginFixture();
+  plugin.state.resources = {};
+  plugin.activeMediaSession = null;
+  plugin.resourceActions = () => ({});
+  const result = await insertCurrentLearningPosition(plugin, {
+    bridgeRequest: async () => ({
+      ok: true,
+      transport: 'bilibili-web',
+      media: {
+        path: 'https://www.bilibili.com/video/BV1WEB?p=4',
+        web: 'https://www.bilibili.com/video/BV1WEB?p=4',
+        title: '网页学习',
+        source: 'bilibili-web',
+        transport: 'bilibili-web',
+        positionSeconds: 69.4
+      }
+    }),
+    editor: { replaceSelection: (text) => inserted.push(text) }
+  });
+  assert.equal(result.mode, 'freeform');
+  assert.match(inserted[0], /https:\/\/www\.bilibili\.com\/video\/BV1WEB\?p=4&t=69\.4/);
+  assert.doesNotMatch(inserted[0], /obsidian:\/\/go-study/);
+});
