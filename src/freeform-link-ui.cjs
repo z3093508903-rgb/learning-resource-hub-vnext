@@ -49,17 +49,37 @@ function browserUrlAtPosition(rawUrl, position) {
   return bilibiliUrlAtPosition(source, position) || source;
 }
 
-function installFreeformBrowserModifier(plugin, doc = globalThis.document, options = {}) {
-  if (!doc?.addEventListener) return null;
-  const shellImpl = options.shell || shell;
-  if (!shellImpl?.openExternal) return null;
-  const onClick = (event) => {
+function modifierPressed(event) {
+  return Boolean(event?.ctrlKey || event?.metaKey);
+}
+
+function referenceDocuments(plugin, primaryDoc = globalThis.document) {
+  const docs = new Set();
+  if (primaryDoc?.addEventListener) docs.add(primaryDoc);
+
+  const companionDoc = plugin?._goStudyCompanionWindow?.win?.document;
+  if (companionDoc?.addEventListener) docs.add(companionDoc);
+
+  const activeDoc = plugin?.app?.workspace?.activeLeaf?.view?.containerEl?.ownerDocument;
+  if (activeDoc?.addEventListener) docs.add(activeDoc);
+
+  for (const leaf of plugin?.app?.workspace?.getLeavesOfType?.('markdown') || []) {
+    const doc = leaf?.view?.containerEl?.ownerDocument
+      || leaf?.view?.contentEl?.ownerDocument
+      || leaf?.tabHeaderEl?.ownerDocument;
+    if (doc?.addEventListener) docs.add(doc);
+  }
+  return [...docs];
+}
+
+function makeReferenceClickHandler(plugin, shellImpl) {
+  return (event) => {
     const target = event?.target?.closest?.('a[href]');
     if (!target) return;
     const href = String(target.getAttribute?.('href') || target.href || '');
 
     if (href.startsWith('jv://open?')) {
-      if (!event?.ctrlKey) return;
+      if (!modifierPressed(event)) return;
       const web = jvWebLocator(href);
       if (!web) return;
       stopLinkEvent(event);
@@ -71,7 +91,7 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
     let reference;
     try { reference = parseReferenceUri(href); } catch { return; }
 
-    if (event?.ctrlKey) {
+    if (modifierPressed(event)) {
       stopLinkEvent(event);
       const fallbackWeb = reference?.mode === 'freeform'
         ? (reference.web || httpLocator(reference.locator))
@@ -98,9 +118,54 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
       void Promise.resolve(plugin.openFreeformReference(reference)).catch(() => {});
     }
   };
-  doc.addEventListener('click', onClick, true);
-  plugin?.register?.(() => doc.removeEventListener?.('click', onClick, true));
-  return { onClick };
+}
+
+function installFreeformBrowserModifier(plugin, doc = globalThis.document, options = {}) {
+  const shellImpl = options.shell || shell;
+  if (!shellImpl?.openExternal) return null;
+
+  const bound = new Map();
+  const bindDocument = (targetDoc) => {
+    if (!targetDoc?.addEventListener || bound.has(targetDoc)) return null;
+    const onClick = makeReferenceClickHandler(plugin, shellImpl);
+    targetDoc.addEventListener('click', onClick, true);
+    bound.set(targetDoc, onClick);
+    return onClick;
+  };
+  const refresh = () => {
+    for (const targetDoc of referenceDocuments(plugin, doc)) bindDocument(targetDoc);
+    return bound.size;
+  };
+  const cleanup = () => {
+    for (const [targetDoc, onClick] of bound) {
+      targetDoc.removeEventListener?.('click', onClick, true);
+    }
+    bound.clear();
+    if (plugin?._goStudyBrowserModifier?.refresh === refresh) plugin._goStudyBrowserModifier = null;
+  };
+
+  refresh();
+  plugin._goStudyBrowserModifier = { refresh, cleanup, bound };
+
+  const workspace = plugin?.app?.workspace;
+  const refs = [];
+  for (const eventName of ['layout-change', 'active-leaf-change']) {
+    try {
+      const ref = workspace?.on?.(eventName, refresh);
+      if (ref) refs.push(ref);
+    } catch {}
+  }
+  if (refs.length && typeof plugin?.registerEvent === 'function') {
+    for (const ref of refs) plugin.registerEvent(ref);
+  }
+  plugin?.register?.(cleanup);
+
+  return {
+    onClick: bound.get(doc) || null,
+    refresh,
+    cleanup,
+    bound
+  };
 }
 
 module.exports = {
@@ -109,6 +174,9 @@ module.exports = {
   httpLocator,
   installFreeformBrowserModifier,
   jvWebLocator,
+  makeReferenceClickHandler,
+  modifierPressed,
+  referenceDocuments,
   positionSeconds,
   stopLinkEvent
 };
