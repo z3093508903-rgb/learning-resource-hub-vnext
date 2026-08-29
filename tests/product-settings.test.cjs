@@ -25,6 +25,7 @@ test('video enhancement is opt-in while workbench and note-output defaults stay 
   assert.equal(settings.videoSuccessFeedback, true);
   assert.equal(settings.focusStudyNoteAtEnd, true);
   assert.equal(settings.freeformVideoNotesEnabled, true);
+  assert.equal(settings.legacyJvCompatibilityEnabled, false);
   assert.equal(settings.shortcutMode, 'mixed');
   assert.equal(settings.actionHudShortcut, 'Alt+S');
   assert.equal(settings.actionHudDelayMs, 300);
@@ -48,6 +49,7 @@ test('ensureProductSettings persists normalized defaults into legacy state', () 
   assert.equal(result.changed, true);
   assert.equal(plugin.state.uiState.videoEnhancementEnabled, false);
   assert.equal(plugin.state.uiState.timelineNavigatorEnabled, false);
+  assert.equal(plugin.state.uiState.legacyJvCompatibilityEnabled, false);
   assert.equal(plugin.state.uiState.captureFolder, DEFAULT_PRODUCT_SETTINGS.captureFolder);
   assert.equal(plugin.state.uiState.backlinkTemplate, DEFAULT_PRODUCT_SETTINGS.backlinkTemplate);
   assert.equal(plugin.state.uiState.actionHudShortcut, 'Alt+S');
