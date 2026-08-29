@@ -52,14 +52,18 @@ function normalizeBilibiliWebState(payload, now = Date.now()) {
   const url = normalizeBilibiliPageUrl(body.url);
   const positionSeconds = timestampSeconds(body.positionSeconds ?? body.currentTime);
   const duration = Number(body.duration);
+  const visible = body.visible !== false;
   return {
     url,
     title: cleanBilibiliTitle(body.title) || url,
     positionSeconds,
     duration: Number.isFinite(duration) && duration >= 0 ? duration : null,
     paused: Boolean(body.paused),
-    visible: body.visible !== false,
+    visible,
     focused: Boolean(body.focused),
+    activeTab: body.activeTab == null ? visible : Boolean(body.activeTab),
+    tabId: Number.isFinite(Number(body.tabId)) ? Number(body.tabId) : null,
+    windowId: Number.isFinite(Number(body.windowId)) ? Number(body.windowId) : null,
     receivedAt: Number(now)
   };
 }
@@ -72,8 +76,10 @@ function currentBilibiliWebState(plugin, options = {}) {
   if (now - Number(state.receivedAt || 0) > maxAgeMs) {
     throw new Error('B站网页桥接已超时。请切回正在播放的 B站标签页后重试。');
   }
-  if (!state.visible || !state.focused) {
-    throw new Error('B站网页当前不是前台标签页。');
+  // A Companion popout may own the OS focus while the Bilibili tab is still the
+  // active, visible video source. Do not require document.hasFocus() here.
+  if (!state.visible || !state.activeTab) {
+    throw new Error('B站网页当前不是活动视频标签页。');
   }
   return state;
 }
@@ -101,6 +107,14 @@ async function requestBilibiliWebBridge(plugin, action = 'current', options = {}
       transport: 'bilibili-web'
     }
   };
+}
+
+function dispatchBilibiliBridgeStatus(plugin) {
+  try {
+    globalThis.document?.dispatchEvent?.(new CustomEvent('go-study-bilibili-bridge-status', {
+      detail: bridgeStatus(plugin)
+    }));
+  } catch {}
 }
 
 function bridgeStatus(plugin) {
@@ -156,7 +170,17 @@ function registerBilibiliWebBridge(plugin, options = {}) {
       try {
         const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
         const state = normalizeBilibiliWebState(payload, Date.now());
-        if (plugin) plugin._goStudyBilibiliWebState = state;
+        if (plugin) {
+          plugin._goStudyBilibiliWebState = state;
+          if (plugin._goStudyBilibiliWebDisconnectTimer) {
+            try { clearTimeout(plugin._goStudyBilibiliWebDisconnectTimer); } catch {}
+          }
+          plugin._goStudyBilibiliWebDisconnectTimer = setTimeout(() => {
+            plugin._goStudyBilibiliWebDisconnectTimer = null;
+            dispatchBilibiliBridgeStatus(plugin);
+          }, BILIBILI_WEB_STATE_MAX_AGE_MS + 250);
+          dispatchBilibiliBridgeStatus(plugin);
+        }
         res.setHeader?.('Content-Type', 'application/json; charset=utf-8');
         res.end(JSON.stringify({ ok: true, version: 1 }));
       } catch {
@@ -172,7 +196,10 @@ function registerBilibiliWebBridge(plugin, options = {}) {
   }
 
   server.on?.('listening', () => {
-    if (plugin) plugin._goStudyBilibiliWebBridgeStatus = { listening: true, port, error: '' };
+    if (plugin) {
+      plugin._goStudyBilibiliWebBridgeStatus = { listening: true, port, error: '' };
+      dispatchBilibiliBridgeStatus(plugin);
+    }
   });
   server.on?.('error', (error) => {
     if (plugin) {
@@ -181,6 +208,7 @@ function registerBilibiliWebBridge(plugin, options = {}) {
         port,
         error: error instanceof Error ? error.message : String(error || '')
       };
+      dispatchBilibiliBridgeStatus(plugin);
     }
   });
 
@@ -191,8 +219,15 @@ function registerBilibiliWebBridge(plugin, options = {}) {
 
   const cleanup = () => {
     try { server.close?.(); } catch {}
+    if (plugin?._goStudyBilibiliWebDisconnectTimer) {
+      try { clearTimeout(plugin._goStudyBilibiliWebDisconnectTimer); } catch {}
+      plugin._goStudyBilibiliWebDisconnectTimer = null;
+    }
     if (plugin?._goStudyBilibiliWebServer === server) plugin._goStudyBilibiliWebServer = null;
-    if (plugin) plugin._goStudyBilibiliWebState = null;
+    if (plugin) {
+      plugin._goStudyBilibiliWebState = null;
+      dispatchBilibiliBridgeStatus(plugin);
+    }
   };
   plugin?.register?.(cleanup);
   return server;
@@ -206,6 +241,7 @@ module.exports = {
   bridgeStatus,
   cleanBilibiliTitle,
   currentBilibiliWebState,
+  dispatchBilibiliBridgeStatus,
   isBilibiliVideoUrl,
   normalizeBilibiliPageUrl,
   normalizeBilibiliWebState,
