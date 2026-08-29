@@ -22,6 +22,7 @@ const {
   updateImmersiveShortcut
 } = require('./immersive-hotkeys.cjs');
 const { immersiveShortcuts, resolvePotPlayerExecutable } = require('./native-potplayer.cjs');
+const { bridgeStatus } = require('./bilibili-web-bridge.cjs');
 const {
   diagnoseTimelineNavigator,
   refreshTimelineNavigator
@@ -352,11 +353,11 @@ class GoStudySettingsTab extends PluginSettingTab {
     const enabled = settings.videoEnhancementEnabled;
     const shortcuts = immersiveShortcuts(this.plugin);
 
-    section(containerEl, '视频笔记增强', 'Windows + PotPlayer 原生增强。关闭时 Go Study 仍然可以作为普通资源管理器完整使用。');
+    section(containerEl, '视频笔记增强', '全局 HUD 可用于 PotPlayer；安装可选的 B站网页桥接扩展后，也可直接从前台 B站网页记录时间戳和笔记。');
 
     new Setting(containerEl)
       .setName('启用视频笔记增强')
-      .setDesc('开启后注册全局快捷键，并启用 PotPlayer 时间点、截图和快速笔记能力。无需 markdown2potplayer / AutoHotkey。')
+      .setDesc('开启后注册全局快捷键。PotPlayer 支持时间戳、截图和快速笔记；B站网页桥接支持时间戳、纯笔记和评论 + 时间戳。')
       .addToggle((toggle) => toggle
         .setValue(enabled)
         .onChange(async (value) => {
@@ -364,6 +365,17 @@ class GoStudySettingsTab extends PluginSettingTab {
           registerImmersiveHotkeys(this.plugin);
           this.display();
         }));
+
+    const webBridge = bridgeStatus(this.plugin);
+    new Setting(containerEl)
+      .setName('B站网页桥接（可选）')
+      .setDesc(
+        webBridge.connected
+          ? '已连接前台 B站视频 · HUD 可直接读取网页 currentTime，无需 PotPlayer。'
+          : webBridge.listening
+            ? `等待浏览器扩展连接 · 本地桥接 127.0.0.1:${webBridge.port}。Preview 安装包内附 Go Study Bilibili Bridge 扩展。`
+            : `本地桥接未启动${webBridge.error ? `：${webBridge.error}` : '。'}`
+      );
 
     new Setting(containerEl)
       .setName('未收录视频也启用增强')
