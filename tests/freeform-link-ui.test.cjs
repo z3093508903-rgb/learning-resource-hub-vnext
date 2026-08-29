@@ -21,20 +21,25 @@ test('Ctrl-click opens both freeform and managed Go Study browser sources while 
   assert.match(source, /plugin\?\.browserUrlForReference/);
   assert.match(source, /browserUrlAtPosition\(web, reference\.position\)/);
   assert.match(source, /href\.startsWith\('jv:\/\/open\?'/);
-  assert.match(source, /shellImpl\.openExternal\(web\)/);
+  assert.match(source, /parseLegacyJvUri\(href\)/);
+  assert.match(source, /legacyJvCompatibilityEnabled\(plugin\)/);
 });
 
 test('runtime upgrades freeform to managed before platform fallback', () => {
   assert.match(entry, /matchingManagedResourceByPortableName/);
   assert.match(entry, /openPortableFreeformReference/);
   assert.match(entry, /resourceId:\s*portableManaged\.id/);
+  assert.match(entry, /browserModifierActive\(this\)/);
+  assert.match(entry, /openReferenceInBrowser/);
 });
 
 
 const {
   bilibiliUrlAtPosition,
   browserUrlAtPosition,
-  installFreeformBrowserModifier
+  browserModifierActive,
+  installFreeformBrowserModifier,
+  makeReferenceClickHandler
 } = require('../src/freeform-link-ui.cjs');
 const { buildFreeformReferenceUri } = require('../src/resource-reference.cjs');
 
@@ -109,4 +114,83 @@ test('Ctrl-click browser modifier binds both main Obsidian document and Companio
 test('Command modifier accepts Meta on macOS-style clicks too', () => {
   const sourceText = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'freeform-link-ui.cjs'), 'utf8');
   assert.match(sourceText, /event\?\.ctrlKey \|\| event\?\.metaKey/);
+});
+
+
+test('legacy JV normal click is intercepted only when compatibility is enabled', async () => {
+  const opened = [];
+  const href = 'jv://open?path=' + encodeURIComponent('D:\\Course\\lesson.mp4') + '&time=00%3A00%3A18';
+  const target = {
+    closest() {
+      return {
+        getAttribute(name) { return name === 'href' ? href : ''; },
+        href
+      };
+    }
+  };
+
+  let prevented = 0;
+  const disabledPlugin = {
+    state: { uiState: { legacyJvCompatibilityEnabled: false } },
+    async openFreeformReference(reference) { opened.push(reference); }
+  };
+  makeReferenceClickHandler(disabledPlugin, { openExternal: async () => {} })({
+    target,
+    ctrlKey: false,
+    preventDefault() { prevented += 1; },
+    stopPropagation() {},
+    stopImmediatePropagation() {}
+  });
+  assert.equal(prevented, 0);
+  assert.equal(opened.length, 0);
+
+  const enabledPlugin = {
+    state: { uiState: { legacyJvCompatibilityEnabled: true } },
+    async openFreeformReference(reference) { opened.push(reference); }
+  };
+  makeReferenceClickHandler(enabledPlugin, { openExternal: async () => {} })({
+    target,
+    ctrlKey: false,
+    preventDefault() { prevented += 1; },
+    stopPropagation() {},
+    stopImmediatePropagation() {}
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(prevented, 1);
+  assert.equal(opened[0].locator, 'D:\\Course\\lesson.mp4');
+  assert.equal(opened[0].position.seconds, 18);
+});
+
+test('legacy JV Ctrl-click opens Bilibili browser source at captured time', async () => {
+  const opened = [];
+  const href = 'jv://open?path=' + encodeURIComponent('https://www.bilibili.com/video/BV1TEST?p=3') + '&time=00%3A01%3A05';
+  makeReferenceClickHandler(
+    { state: { uiState: { legacyJvCompatibilityEnabled: true } } },
+    { async openExternal(url) { opened.push(url); } }
+  )({
+    target: {
+      closest() {
+        return {
+          getAttribute(name) { return name === 'href' ? href : ''; },
+          href
+        };
+      }
+    },
+    ctrlKey: true,
+    preventDefault() {},
+    stopPropagation() {},
+    stopImmediatePropagation() {}
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(opened[0], 'https://www.bilibili.com/video/BV1TEST?p=3&t=65');
+});
+
+test('protocol-level modifier fallback survives keyup race briefly', () => {
+  const plugin = {
+    _goStudyBrowserModifier: {
+      modifierState: { ctrl: false, meta: false, lastPressedAt: 1000 }
+    }
+  };
+  assert.equal(browserModifierActive(plugin, 1500), true);
+  assert.equal(browserModifierActive(plugin, 1800), false);
 });
