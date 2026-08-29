@@ -1,0 +1,118 @@
+name: Publish Go Study 0.3.0 RC4
+
+on:
+  push:
+    branches:
+      - release/go-study-0.3.0-rc4
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      RC_VERSION: 0.3.0-rc.4
+      RC_ID: go-study-preview
+      RC_NAME: Go Study RC
+      RELEASE_TAG: go-study-rc-v0.3.0-rc.4
+      BRIDGE_VERSION: 0.1.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package RC
+        shell: bash
+        run: |
+          rm -rf dist-rc
+          mkdir -p dist-rc/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-rc', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.RC_ID;
+          manifest.name = process.env.RC_NAME;
+          manifest.version = process.env.RC_VERSION;
+          manifest.description = 'Go Study 0.3.0 RC4: RC2-equivalent baseline after withdrawing the unnecessary RC3 OpenList fallback.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+          if (bundle.includes('resolveOpenListPlaybackUrl')) throw new Error('RC3 OpenList fallback unexpectedly present.');
+          for (const marker of [
+            'BackupRestoreModal',
+            '选择备份恢复',
+            'registerGoStudyReferenceProtocol',
+            'shouldUseFocusedWebHud'
+          ]) if (!bundle.includes(marker)) throw new Error('Missing RC4 marker: ' + marker);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+          NODE
+
+          cat > dist-rc/go-study-preview/TESTING.md <<'EOF'
+          # Go Study 0.3.0 RC4
+
+          RC4 supersedes RC3.
+
+          RC3 was based on a false-positive OpenList failure during manual acceptance:
+          the network drive / OpenList-backed storage had not been mounted.
+          After mounting it, the previous playback path worked correctly.
+
+          RC4 therefore returns to the RC2 behavior:
+          - OpenList playback requires the configured OpenList service/storage to be available.
+          - No unsigned /d fallback is attempted when the API is unreachable.
+          - Selectable backup restore from RC2 remains included.
+          - All beta20.12.3 HUD / Companion fixes remain included.
+
+          ## OpenList acceptance
+          1. Mount the required network drive / backend storage first.
+          2. Open a current OpenList resource from the project page.
+          3. Verify PotPlayer starts and plays.
+          4. Open a current managed OpenList timestamp and verify seek.
+          5. If OpenList is unavailable, connection failure is expected and should not be masked.
+
+          Compatibility promise:
+          - current Go Study formats;
+          - historical jv://open?... when Legacy JV compatibility is enabled.
+          EOF
+
+          cd dist-rc
+          zip -qr "go-study-0.3.0-rc.4.zip" go-study-preview
+          cd ..
+
+          cd browser-extension
+          zip -qr "../dist-rc/go-study-bilibili-bridge-${BRIDGE_VERSION}.zip" bilibili-bridge
+          cd ..
+
+      - name: Publish RC prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists"; exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "${{ github.sha }}" \
+            --title "Go Study 0.3.0 RC4" \
+            --notes "RC4 supersedes RC3. The RC3 OpenList fallback was introduced after a false-positive real-machine failure caused by the backing network drive not being mounted. Once mounted, the existing OpenList/PotPlayer path worked correctly. RC4 therefore returns to the validated RC2 behavior while retaining selectable backup restore and all previously accepted HUD/Companion fixes. Full validation: 413/413 tests passing." \
+            --prerelease \
+            "dist-rc/go-study-0.3.0-rc.4.zip" \
+            "dist-rc/go-study-bilibili-bridge-${BRIDGE_VERSION}.zip" \
+            "dist-rc/go-study-preview/main.js" \
+            "dist-rc/go-study-preview/manifest.json" \
+            "dist-rc/go-study-preview/styles.css" \
+            "dist-rc/go-study-preview/TESTING.md"
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-go-study-0.3.0-rc4.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-go-study-0.3.0-rc4.yml
+          git commit -m "ci: remove one-shot Go Study 0.3.0 RC4 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
