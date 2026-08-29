@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-rc.3 — Full RC Audit / Resilient OpenList Playback Hotfix**
+**Go Study 0.3.0-rc.4 — Full RC Audit / RC3 Withdrawn, Back to Validated RC2 Behavior**
 
 Stable / Merge：**HOLD**
 
@@ -20,23 +20,23 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：release/go-study-0.3.0-rc3
+- Branch：release/go-study-0.3.0-rc4
 - Base：release/go-study-0.3.0-rc2
 - Draft PR：尚未创建
-- Current HEAD：62e94509eda352be922da147af61595c2b05a9cf
-- RC 发布目标：c0a602028dd51a6a195117b55746f8e5cca7db57
-- Release：Go Study 0.3.0 RC3
-- Tag：go-study-rc-v0.3.0-rc.3
-- RC ZIP SHA256：a409529706d3f266ef78bc72f5133d42f300d631f96d0721af3795e7d156dece
+- Current HEAD：7939905d7f0c40d52a1117103a79ffc73f52371f
+- RC 发布目标：451010743198280f03025fccc3a8ddc2ab49518f
+- Release：Go Study 0.3.0 RC4
+- Tag：go-study-rc-v0.3.0-rc.4
+- RC ZIP SHA256：4eca80f42898add4d02ad4291e61f5afd592eb7ff5953cd9420dfe0db23c7365
 - Bilibili Bridge：0.1.1
 - Bridge ZIP SHA256：cf7970e76894167945b21427900124feef342de42b8e20e76e1558edc71cb7c4
 
 ## 自动化状态
 
-- RC3 validator ✅
-- RC3 publisher ✅
-- **418 / 418 tests PASS**
-- build：38 modules / 776664 bytes ✅
+- RC4 validator ✅
+- RC4 publisher ✅
+- **413 / 413 tests PASS**
+- build：38 modules / 775671 bytes ✅
 - committed main.js consistency ✅
 - Release readiness PASS ✅
 
@@ -1347,3 +1347,35 @@ Not release blockers:
 - beta 开发期间中间版本产生的各种临时 PotPlayer/reference experiments。
 
 不要再为中间实验链接增加新兼容分支。
+
+
+## RC4：Withdraw RC3 False-Positive OpenList Hotfix
+
+RC3 的 OpenList fallback 是基于一次误判：
+
+- 真人验收时项目页 / OpenList 时间戳出现 `net::ERR_CONNECTION_REFUSED`；
+- 后来确认实际原因是**网盘没有挂载**；
+- 挂载网盘后，旧版本 / 原有 OpenList -> PotPlayer 路径可正常工作。
+
+因此：
+
+- RC3 的 unsigned `/d/` fallback **不进入正式版**；
+- 不应掩盖“网盘未挂载 / OpenList 服务未就绪”这种真实依赖问题；
+- RC4 从 RC2 重新建立，保留：
+  - selectable backup restore；
+  - beta20.12.3 HUD / Companion 修复；
+  - legacy protocol coexistence fail-safe；
+- RC4 不包含 RC3 的 OpenList fallback。
+
+OpenList 真人结论更新：
+
+> Required storage mounted -> current project OpenList playback works.
+
+Compatibility policy 不变：
+- Current Go Study formats；
+- historical `jv://open?... ` when Legacy JV compatibility is ON；
+- 中间 beta 实验链接不作为 Stable 兼容承诺。
+
+RC3 状态：
+
+> **WITHDRAWN / DO NOT USE / superseded by RC4**
