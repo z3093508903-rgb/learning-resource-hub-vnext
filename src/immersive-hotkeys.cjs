@@ -21,6 +21,7 @@ const {
   resolveElectronGlobalShortcut
 } = require('./native-potplayer.cjs');
 const { currentProductSettings } = require('./product-settings.cjs');
+const { currentBilibiliWebState } = require('./bilibili-web-bridge.cjs');
 const { formatPositionClock } = require('./resource-note.cjs');
 const { showNativeToast, showQuickNoteInput } = require('./quick-note-window.cjs');
 
@@ -203,6 +204,21 @@ async function runImmersiveAction(plugin, key, options = {}) {
   return runCaptureAction(plugin, actionId, options);
 }
 
+function companionOwnsDesktopFocus(plugin) {
+  const session = plugin?._goStudyCompanionWindow;
+  try { if (session?.nativeWindow?.isFocused?.()) return true; } catch {}
+  try { if (session?.win?.document?.hasFocus?.()) return true; } catch {}
+  return false;
+}
+
+function shouldUseFocusedWebHud(plugin, options = {}) {
+  if (options.forceFocusedHud === true) return true;
+  if (options.forceFocusedHud === false) return false;
+  let state = null;
+  try { state = currentBilibiliWebState(plugin); } catch { return false; }
+  return Boolean(state?.focused || companionOwnsDesktopFocus(plugin));
+}
+
 function closeActionHudSession(plugin) {
   const session = plugin?._goStudyActionHudSession;
   if (!session) return;
@@ -221,11 +237,18 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
     return null;
   }
 
-  const hud = createNativeActionHud(settings.actionHudSlots, options.hudOptions || {});
+  const focusedWebHud = shouldUseFocusedWebHud(plugin, options);
+  let localInputHandler = null;
+  const hud = createNativeActionHud(settings.actionHudSlots, {
+    ...(options.hudOptions || {}),
+    focusable: focusedWebHud,
+    onInput: (key) => localInputHandler?.(key)
+  });
   if (!hud) {
     void feedback('⚠ Go Study 动作盘窗口接口不可用', options);
     return null;
   }
+
   const temporary = [];
   let visible = false;
   let selected = '';
@@ -270,24 +293,27 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
     Enter: () => execute(selected || 'center'),
     Escape: () => cleanup()
   };
+  localInputHandler = (key) => handlers[key]?.();
 
-  const failures = [];
-  for (const [accelerator, handler] of Object.entries(handlers)) {
-    try {
-      const ok = api.register(accelerator, handler);
-      if (ok === false) failures.push(accelerator);
-      else temporary.push(accelerator);
-    } catch {
-      failures.push(accelerator);
+  if (!focusedWebHud) {
+    const failures = [];
+    for (const [accelerator, handler] of Object.entries(handlers)) {
+      try {
+        const ok = api.register(accelerator, handler);
+        if (ok === false) failures.push(accelerator);
+        else temporary.push(accelerator);
+      } catch {
+        failures.push(accelerator);
+      }
+    }
+    if (failures.length) {
+      cleanup();
+      void feedback(`⚠ 动作盘无法临时接管：${failures.join('、')}`, options);
+      return null;
     }
   }
-  if (failures.length) {
-    cleanup();
-    void feedback(`⚠ 动作盘无法临时接管：${failures.join('、')}`, options);
-    return null;
-  }
 
-  const delay = Number(settings.actionHudDelayMs || 0);
+  const delay = focusedWebHud ? 0 : Number(settings.actionHudDelayMs || 0);
   showTimer = setTimeout(() => {
     if (closed) return;
     visible = true;
@@ -299,6 +325,7 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
     close: cleanup,
     execute,
     select: chooseDirection,
+    focusedWebHud,
     get visible() { return visible; }
   };
   return plugin._goStudyActionHudSession;
@@ -439,6 +466,7 @@ module.exports = {
   beginActionHud,
   closeActionHudSession,
   compactError,
+  companionOwnsDesktopFocus,
   feedback,
   immersiveStatus,
   registerImmersiveHotkeys,
@@ -448,6 +476,7 @@ module.exports = {
   runCaptureAction,
   runImmersiveAction,
   setImmersiveStatus,
+  shouldUseFocusedWebHud,
   shortcutConflict,
   successFeedback,
   unregisterImmersiveHotkeys,
