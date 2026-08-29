@@ -20,26 +20,24 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：fix/potplayer-discovery-beta20-9-3
-- Base：fix/legacy-jv-native-beta20-9-2
-- Draft PR：尚未创建；PR #39 仍为 beta20.9.1 历史 Hotfix
-- Current HEAD：7414098298f8e71e7ceee0f13ad89385462d47ef
-- Preview 发布目标：d946176bcd156d0d6c8d4d358c58838449c98dba
-- Preview：Go Study Preview 0.3.0-beta.20.9.3
-- Tag：go-study-preview-v0.3.0-beta.20.9.3
-- ZIP SHA256：6e60b7a5f2fb5335bb43dd70a3d47b176ab8f2376e0b28909641d47e9000ea53
+- Branch：fix/native-obsidian-drag-beta20-10
+- Base：fix/potplayer-discovery-beta20-9-3
+- Draft PR：尚未创建
+- Current HEAD：259038db6f5f91e16e5ddadc0c9c23fb29b95806
+- Preview 发布目标：3d232b98c84e6e2caa0fdee6a34c2cd597578f1b
+- Preview：Go Study Preview 0.3.0-beta.20.10
+- Tag：go-study-preview-v0.3.0-beta.20.10
+- ZIP SHA256：ab3d97d7ee9e1c3f7d9bf6a2a4d40f0ae1e7136836ebb0768c20d3dd82511080
 
 ## 自动化状态
 
-- beta20.9.3 validator run #2 ✅
+- beta20.10 validator ✅
 - Preview publisher ✅
-- **387 / 387 tests PASS**
-- build：37 modules / 745157 bytes ✅
+- **388 / 388 tests PASS**
+- build：37 modules / 746628 bytes ✅
 - committed main.js consistency ✅
 - release validation ✅
 - Release readiness check ✅
-
-第一次 beta20.9.3 validator 失败是开发写入脚本时触发 JavaScript replacement-string 的特殊 `$'` 语义，导致 PotPlayer discovery source 被错误拼接；已从 beta20.9.2 clean base 重建该文件，第 2 次完整验证全绿。
 
 
 ## 当前发布阻断 / 未关闭
@@ -935,3 +933,36 @@ beta20.9.2 Windows 真人结果：
 **beta20.9.3 = ACCEPTED-AS-BEHAVIOR（Windows）**
 
 下一轮进入 beta20.10：Native Obsidian Drag Bridge。
+
+
+## beta20.10：Native Obsidian Drag Bridge
+
+用户明确产品边界：
+
+> Go Study 不得抢占 / 替代 Obsidian 原生拖动。文件树移动、排序、Tab 重排仍由 Obsidian 负责；只有指针真正进入 Go Study 的“拖入 / 右侧小窗 / 学习模式”小目标后，该次 drop 才由 Go Study 接管。
+
+因此 beta20.10 首轮实现采用 **non-invasive observer**：
+
+- 移除 Native Drag Bridge 的全局 `pointerdown / pointermove / pointerup` fallback；
+- 仅监听 Obsidian 原生 `dragstart / dragend / drop`；
+- 普通 dragstart 不调用 `preventDefault / stopPropagation`；
+- 普通区域 drop 不调用 `preventDefault / stopPropagation`；
+- 只有 Go Study 小 Drop Target 自己的 `dragover / drop` 才阻止默认行为；
+- 文件树 / Tab 原生拖动继续由 Obsidian 自己处理；
+- 识别层新增 `event.composedPath()`；
+- 支持 `data-path / data-file-path / data-source-path`；
+- 继续支持 `workspace.getLeavesOfType('markdown') + tabHeaderEl` 反查；
+- 读取 `dataTransfer.types` 与文本 payload；
+- 每次 Native dragstart 输出 `Go Study native drag diagnostic` 到 Console；
+- 若来源像 Obsidian file tree / tab 但没识别到 Markdown path，弹一次轻量诊断 Notice，不接管拖动。
+
+Preview：
+- `Go Study Preview 0.3.0-beta.20.10`
+- ZIP SHA256：`ab3d97d7ee9e1c3f7d9bf6a2a4d40f0ae1e7136836ebb0768c20d3dd82511080`
+
+真人验收：
+1. 左侧 Markdown 原生拖动 → 小 Drop Target 是否出现；
+2. 拖到普通 Obsidian 位置 → 原生移动 / 排序不受影响；
+3. 拖到 Go Study 小 Target → Companion Study Mode；
+4. 顶部 Markdown Tab 同样测试；
+5. 若 Target 不出现，打开 DevTools Console，截图 `Go Study native drag diagnostic`。
