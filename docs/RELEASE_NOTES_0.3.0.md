@@ -142,6 +142,20 @@ YouTube 暂无专门网页学习适配，也不作为 0.3.0 发布阻断。
 
 ---
 
+## Preview → Stable 迁移
+
+0.3.0 使用永久插件 ID `go-study`。
+
+如果首次安装正式版时检测到当前 Stable 还没有数据，而同一 Vault 中存在有效的 `go-study-preview/data.json`，Go Study 会：
+
+- 保留 Preview 原文件；
+- 额外创建迁移恢复备份；
+- 一次性把 Preview 项目和设置迁入 Stable。
+
+已经存在 Stable `data.json` 时绝不会自动覆盖。
+
+---
+
 ## 兼容
 
 长期兼容：
