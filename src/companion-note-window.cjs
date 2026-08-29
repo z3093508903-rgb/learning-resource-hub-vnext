@@ -12,6 +12,7 @@ function resolveRemote(options = {}) {
 }
 
 const { projectIdForResource, recentProjectNote } = require('./project-notes.cjs');
+const { currentProductSettings } = require('./product-settings.cjs');
 
 const DEFAULT_LAYOUT_ID = 'right-rail';
 const BUILTIN_LAYOUTS = Object.freeze({
@@ -243,6 +244,71 @@ function companionTitle(fileOrPath) {
   const path = String(fileOrPath?.path || fileOrPath || '');
   return path.split('/').pop()?.replace(/\.md$/i, '') || '学习笔记';
 }
+
+function companionEditorEndPosition(editor) {
+  if (!editor) return null;
+  try {
+    const lastLine = Math.max(0, Number(typeof editor.lastLine === 'function' ? editor.lastLine() : 0));
+    const lineText = typeof editor.getLine === 'function' ? String(editor.getLine(lastLine) || '') : '';
+    return { line: lastLine, ch: lineText.length };
+  } catch {
+    return null;
+  }
+}
+
+function revealCompanionEditorCursor(plugin, editor, options = {}) {
+  if (!editor) return false;
+  const target = plugin?._goStudyCompanionTarget;
+  if (target?.editor && target.editor !== editor) return false;
+
+  let cursor = null;
+  if (options.moveToEnd && typeof editor.setCursor === 'function') {
+    const end = companionEditorEndPosition(editor);
+    if (end) {
+      try {
+        editor.setCursor(end);
+        cursor = end;
+      } catch {}
+    }
+  }
+  if (!cursor && typeof editor.getCursor === 'function') {
+    try { cursor = editor.getCursor(); } catch {}
+  }
+  if (options.focus !== false) {
+    try { editor.focus?.(); } catch {}
+  }
+
+  const reveal = () => {
+    let current = cursor;
+    if (typeof editor.getCursor === 'function') {
+      try { current = editor.getCursor() || current; } catch {}
+    }
+    if (current && typeof editor.scrollIntoView === 'function') {
+      try {
+        editor.scrollIntoView({ from: current, to: current }, Boolean(options.center));
+      } catch {
+        try { editor.scrollIntoView({ from: current, to: current }); } catch {}
+      }
+    }
+
+    const leaf = target?.leaf || plugin?._goStudyCompanionWindow?.leaf;
+    const scroller = leaf?.view?.containerEl?.querySelector?.('.cm-scroller');
+    const end = companionEditorEndPosition(editor);
+    if (scroller && current && end && end.line - Number(current.line || 0) <= 2) {
+      try { scroller.scrollTop = scroller.scrollHeight; } catch {}
+    }
+  };
+
+  reveal();
+  const win = target?.leaf?.view?.containerEl?.ownerDocument?.defaultView
+    || plugin?._goStudyCompanionWindow?.win;
+  try {
+    if (typeof win?.requestAnimationFrame === 'function') win.requestAnimationFrame(reveal);
+    else setTimeout(reveal, 0);
+  } catch {}
+  return true;
+}
+
 
 function nativeWindowScore(nativeWindow, win) {
   if (!nativeWindow?.getBounds || !win) return Number.POSITIVE_INFINITY;
@@ -499,6 +565,14 @@ async function openCompanionNoteWindow(plugin, options = {}) {
     locked: state.locked,
     openedAt: Date.now()
   };
+  const focusAtEnd = options.focusAtEnd == null
+    ? currentProductSettings(plugin).focusStudyNoteAtEnd
+    : Boolean(options.focusAtEnd);
+  revealCompanionEditorCursor(plugin, view.editor, {
+    moveToEnd: focusAtEnd,
+    focus: options.focusEditor !== false,
+    center: false
+  });
   syncCompanionNativeState(plugin, session, options);
   installCompanionPinControl(plugin, session);
   installGeometryTracking(plugin, session);
@@ -659,6 +733,7 @@ module.exports = {
   listCompanionLayouts,
   normalizeCompanionScale,
   normalizeStoredGeometry,
+  revealCompanionEditorCursor,
   openCompanionNoteWindow,
   registerCompanionNoteCommands,
   resolveCompanionNotePath,
