@@ -1393,6 +1393,8 @@ const {
 const { registerResourceRelinkCommands } = __rhLoad("resource-relink-ui.cjs");
 const { registerLearningCaptureCommands } = __rhLoad("learning-capture.cjs");
 
+const LEGACY_GO_STUDY_PLUGIN_ID = 'learning-resource-hub-next';
+
 class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async onload() {
     this._vaultLifecycleReady = false;
@@ -1401,11 +1403,7 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     registerResourceRelinkCommands(this);
     registerLearningCaptureCommands(this);
 
-    if (typeof this.registerObsidianProtocolHandler === 'function') {
-      this.registerObsidianProtocolHandler(REFERENCE_ACTION, (params) => {
-        void this.handleResourceReference(params);
-      });
-    }
+    this.registerGoStudyReferenceProtocol();
 
     const activateVaultLifecycle = async () => {
       if (this._vaultLifecycleReady) return;
@@ -1420,6 +1418,61 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     } else {
       await activateVaultLifecycle();
     }
+  }
+
+  enabledPluginIds() {
+    const enabled = this.app?.plugins?.enabledPlugins;
+    if (enabled instanceof Set) return new Set(enabled);
+    if (Array.isArray(enabled)) return new Set(enabled.map((value) => String(value || '')));
+    if (enabled && typeof enabled === 'object') {
+      return new Set(Object.keys(enabled).filter((key) => enabled[key]));
+    }
+    return new Set();
+  }
+
+  legacyGoStudyProtocolConflict() {
+    const currentId = String(this.manifest?.id || '').trim();
+    if (!currentId || currentId === LEGACY_GO_STUDY_PLUGIN_ID) return false;
+    return this.enabledPluginIds().has(LEGACY_GO_STUDY_PLUGIN_ID);
+  }
+
+  registerGoStudyReferenceProtocol() {
+    const legacyConflict = this.legacyGoStudyProtocolConflict();
+    let registered = false;
+    let error = '';
+
+    if (typeof this.registerObsidianProtocolHandler !== 'function') {
+      error = '当前 Obsidian 不提供协议注册接口。';
+    } else {
+      try {
+        this.registerObsidianProtocolHandler(REFERENCE_ACTION, (params) => {
+          void this.handleResourceReference(params);
+        });
+        registered = true;
+      } catch (caught) {
+        error = caught instanceof Error ? caught.message : String(caught || '未知错误');
+        console.error('Go Study: protocol registration failed; continuing without owning obsidian://go-study.', caught);
+      }
+    }
+
+    const status = {
+      registered,
+      action: REFERENCE_ACTION,
+      legacyConflict,
+      error,
+      updatedAt: Date.now()
+    };
+    this._goStudyReferenceProtocolStatus = status;
+
+    if ((legacyConflict || !registered) && !this._goStudyProtocolWarningShown) {
+      this._goStudyProtocolWarningShown = true;
+      const message = legacyConflict
+        ? 'Go Study 检测到旧版 Learning Resource Hub Next 同时启用。Go Study 已继续启动，但旧版可能争用时间戳回链协议；请停用旧版并重新加载 Obsidian。'
+        : `Go Study 已继续启动，但时间戳回链协议注册失败：${error || '协议可能已被其他插件占用'}。资源工作台仍可使用，请检查是否同时启用了旧版插件。`;
+      new Notice(message, 10000);
+    }
+
+    return status;
   }
 
   async handleResourceReference(params) {
