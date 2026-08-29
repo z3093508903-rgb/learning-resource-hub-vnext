@@ -42,7 +42,9 @@ const {
   recoveryDirectory,
   recoveryEntries,
   refreshPersistBaseline,
+  renameRecoveryEntry,
   startupSafetySnapshot,
+  writeNamedRecoveryState,
   writeRecoveryState
 } = require('./state-safety.cjs');
 
@@ -460,6 +462,15 @@ class ResourceHubNextPlugin extends Plugin {
   async createStateBackup(label = 'manual') {
     const result = writeRecoveryState(this, this.state, label);
     return result.name;
+  }
+
+  async createNamedStateBackup(label = '手动备份') {
+    const result = writeNamedRecoveryState(this, this.state, label);
+    return result.name;
+  }
+
+  renameStateBackup(backupName, newLabel) {
+    return renameRecoveryEntry(this, backupName, newLabel);
   }
 
   async restoreStateBackup(backupName) {
