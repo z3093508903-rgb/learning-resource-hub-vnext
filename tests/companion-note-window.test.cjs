@@ -14,6 +14,7 @@ const {
   listCompanionLayouts,
   normalizeCompanionScale,
   openCompanionNoteWindow,
+  revealCompanionEditorCursor,
   saveCurrentCompanionLayout,
   setCompanionAlwaysOnTop
 } = require('../src/companion-note-window.cjs');
@@ -220,4 +221,55 @@ test('Companion open refreshes document-scoped Go Study browser modifier', () =>
   const path = require('node:path');
   const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'companion-note-window.cjs'), 'utf8');
   assert.match(source, /_goStudyBrowserModifier\?\.refresh\?\.\(\)/);
+});
+
+
+test('Companion can focus a long Markdown note at the end and reveal the caret', async () => {
+  const { plugin, editor, file, leaf } = pluginFixture();
+  const scroller = { scrollTop: 0, scrollHeight: 2400 };
+  leaf.view.containerEl.querySelector = (selector) => selector === '.cm-scroller' ? scroller : null;
+
+  editor.cursor = { line: 0, ch: 0 };
+  editor.focused = false;
+  editor.scrollCalls = [];
+  editor.lastLine = () => 18;
+  editor.getLine = (line) => line === 18 ? '最后一行内容' : '';
+  editor.setCursor = (cursor) => { editor.cursor = { ...cursor }; };
+  editor.getCursor = () => ({ ...editor.cursor });
+  editor.focus = () => { editor.focused = true; };
+  editor.scrollIntoView = (range, center) => { editor.scrollCalls.push({ range, center }); };
+
+  await openCompanionNoteWindow(plugin, {
+    filePath: file.path,
+    workArea: { x: 0, y: 0, width: 1600, height: 900 },
+    forceLayout: true,
+    focusAtEnd: true
+  });
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.deepEqual(editor.cursor, { line: 18, ch: '最后一行内容'.length });
+  assert.equal(editor.focused, true);
+  assert.ok(editor.scrollCalls.length >= 1);
+  assert.equal(scroller.scrollTop, scroller.scrollHeight);
+});
+
+test('programmatic Companion reveal keeps caret visible without stealing PotPlayer focus', () => {
+  const { plugin, editor, file, leaf } = pluginFixture();
+  const scroller = { scrollTop: 0, scrollHeight: 1800 };
+  leaf.view.containerEl.querySelector = (selector) => selector === '.cm-scroller' ? scroller : null;
+
+  editor.cursor = { line: 9, ch: 4 };
+  editor.focusCount = 0;
+  editor.lastLine = () => 10;
+  editor.getLine = () => 'abc';
+  editor.getCursor = () => ({ ...editor.cursor });
+  editor.focus = () => { editor.focusCount += 1; };
+  editor.scrollIntoView = () => {};
+
+  plugin._goStudyCompanionWindow = { leaf, win: fakeWindow() };
+  plugin._goStudyCompanionTarget = { editor, filePath: file.path, leaf, locked: true };
+
+  assert.equal(revealCompanionEditorCursor(plugin, editor, { focus: false }), true);
+  assert.equal(editor.focusCount, 0);
+  assert.equal(scroller.scrollTop, scroller.scrollHeight);
 });
