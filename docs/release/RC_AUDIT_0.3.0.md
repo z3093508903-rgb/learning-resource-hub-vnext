@@ -4,19 +4,19 @@
 
 ## RC 基线
 
-- Product branch：`release/go-study-0.3.0-rc2`
-- Branch HEAD：`79cba03059a2a3777a4a03fd1139f9791cabf55a`
-- RC release target：`9a07975df00a29bb54b6b589c93aaf4897621801`
-- Release：`Go Study 0.3.0 RC2`
-- Tag：`go-study-rc-v0.3.0-rc.2`
-- RC ZIP SHA256：`8c4b7e676638cb05e744eb1fcedfb4de7772f1ef7845d24bb0e5381ba94791d6`
+- Product branch：`release/go-study-0.3.0-rc3`
+- Branch HEAD：`62e94509eda352be922da147af61595c2b05a9cf`
+- RC release target：`c0a602028dd51a6a195117b55746f8e5cca7db57`
+- Release：`Go Study 0.3.0 RC3`
+- Tag：`go-study-rc-v0.3.0-rc.3`
+- RC ZIP SHA256：`a409529706d3f266ef78bc72f5133d42f300d631f96d0721af3795e7d156dece`
 - Bilibili Bridge：`0.1.1`
 - Bridge ZIP SHA256：`cf7970e76894167945b21427900124feef342de42b8e20e76e1558edc71cb7c4`
 
 自动验证：
 
-- **413 / 413 tests PASS**
-- build：38 source modules / 775671 bytes
+- **418 / 418 tests PASS**
+- build：38 source modules / 776664 bytes
 - committed `main.js` current
 - Release readiness PASS
 
@@ -51,6 +51,24 @@ Stable / Merge：**HOLD**
 | Anki | not part of this non-Anki RC gate | not required for current decision | DEFERRED from this gate |
 
 ## Static audit details
+
+### RC3 OpenList playback fallback
+
+Real-machine RC uncovered that project-page OpenList launch and Managed OpenList timestamps could fail before Native PotPlayer startup with `net::ERR_CONNECTION_REFUSED`.
+
+RC3 centralizes OpenList playback URL resolution:
+
+- healthy API -> signed `/d` URL;
+- network-level API failure -> direct unsigned `/d` fallback;
+- explicit auth/permission/file errors do not silently downgrade.
+
+Current project playback and Managed timestamp playback share this resolver.
+
+Compatibility promise is intentionally narrow:
+- current Go Study formats;
+- historical `jv://open` with Legacy JV switch.
+
+Intermediate beta-era link experiments are not Stable compatibility blockers.
 
 ### RC2 selectable restore
 
