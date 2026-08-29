@@ -1,0 +1,132 @@
+name: Publish Beta20.12.1 Bilibili Companion Focus Preview
+
+on:
+  push:
+    branches:
+      - fix/bilibili-companion-focus-beta20-12-1
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      PREVIEW_VERSION: 0.3.0-beta.20.12.1
+      PREVIEW_ID: go-study-preview
+      PREVIEW_NAME: Go Study Preview
+      RELEASE_TAG: go-study-preview-v0.3.0-beta.20.12.1
+      BRIDGE_VERSION: 0.1.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package preview and browser bridge
+        shell: bash
+        run: |
+          rm -rf dist-preview
+          mkdir -p dist-preview/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-preview', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.PREVIEW_ID;
+          manifest.name = process.env.PREVIEW_NAME;
+          manifest.version = process.env.PREVIEW_VERSION;
+          manifest.description = 'Go Study Preview beta20.12.1: Companion-safe Bilibili web focus + bridge onboarding/status.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+          for (const marker of [
+            'activeTab',
+            'B站网页桥接已连接',
+            'B站网页桥接已启动',
+            '下载 / 安装桥接',
+            'go-study-bilibili-bridge-status'
+          ]) if (!bundle.includes(marker)) throw new Error('Missing beta20.12.1 marker: ' + marker);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+          NODE
+
+          cat > dist-preview/go-study-preview/TESTING.md <<'EOF'
+          # Go Study Preview 0.3.0-beta.20.12.1
+
+          ## Important: update both packages
+          - Go Study Preview -> 0.3.0-beta.20.12.1
+          - Go Study Bilibili Bridge -> 0.1.1
+
+          Remove/reload the previous unpacked 0.1.0 browser bridge before testing.
+
+          ## Companion focus regression
+          1. Completely exit PotPlayer.
+          2. Open a Bilibili video in Chrome/Edge.
+          3. Keep that Bilibili page as the active tab.
+          4. Open a Go Study Companion note and keep Companion always-on-top.
+          5. Click/type in Companion so the browser no longer owns Windows OS focus.
+          6. Press Alt+S and choose timestamp or note+timestamp.
+          7. Expected: Go Study still reads the active Bilibili tab and writes into Companion.
+          8. The browser document does NOT need document.hasFocus() === true.
+
+          ## Native browser boundary
+          - Switching to another browser tab must make the old Bilibili tab ineligible.
+          - A hidden/background Bilibili tab must not be used.
+          - Companion may own OS focus without breaking the bridge.
+
+          ## Onboarding/status
+          Settings -> Go Study -> 视频笔记增强:
+          - B站网页桥接 row shows started / connected state.
+          - “下载 / 安装桥接” opens the project Releases page.
+          - “检查连接” explains whether the local bridge is waiting or connected.
+
+          Workbench header lightweight status:
+          - main dot still represents global shortcut readiness.
+          - small secondary dot indicates Bilibili bridge listening/connected.
+          - click/hover text includes both shortcut and Bilibili bridge state.
+
+          ## Current web-mode boundary
+          Web timestamp / pure note / note+timestamp are supported.
+          Browser screenshot actions remain PotPlayer-only.
+          Web note actions currently do not auto-pause/resume Bilibili.
+          EOF
+
+          cd dist-preview
+          zip -qr "go-study-preview-${PREVIEW_VERSION}.zip" go-study-preview
+          cd ..
+
+          cd browser-extension
+          zip -qr "../dist-preview/go-study-bilibili-bridge-${BRIDGE_VERSION}.zip" bilibili-bridge
+          cd ..
+
+      - name: Publish prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists"; exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "${{ github.sha }}" \
+            --title "Go Study Preview ${PREVIEW_VERSION}" \
+            --notes "beta20.12.1 fixes the Bilibili + always-on-top Companion focus regression. Browser tab activity is now identified separately from OS/document focus, so an active visible Bilibili tab remains a valid HUD source while Companion owns Windows focus. Settings now include bridge download/install guidance and connection checks, and the lightweight workbench status exposes bridge started/connected state. Full validation: 405/405 tests passing." \
+            --prerelease \
+            "dist-preview/go-study-preview-${PREVIEW_VERSION}.zip" \
+            "dist-preview/go-study-bilibili-bridge-${BRIDGE_VERSION}.zip" \
+            "dist-preview/go-study-preview/main.js" \
+            "dist-preview/go-study-preview/manifest.json" \
+            "dist-preview/go-study-preview/styles.css" \
+            "dist-preview/go-study-preview/TESTING.md"
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-beta20-12-1-preview.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-beta20-12-1-preview.yml
+          git commit -m "ci: remove one-shot beta20.12.1 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
