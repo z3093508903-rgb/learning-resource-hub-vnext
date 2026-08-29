@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.9.2 — Pre-RC / Native PotPlayer + Legacy JV Compatibility Hotfix**
+**Go Study 0.3.0-beta.20.9.3 — Pre-RC / PotPlayer Discovery Hotfix**
 
 Stable / Merge：**HOLD**
 
@@ -20,30 +20,31 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：fix/legacy-jv-native-beta20-9-2
-- Base：fix/freeform-bili-ctrlclick-beta20-9-1
-- Draft PR：尚未创建；PR #39 仍保留为 beta20.9.1 历史 Hotfix
-- Current HEAD：9139cbee5f63266eabfd37ef0960905b3d33ba4e
-- Preview 发布目标：217a992ba7df18e4a3caedf4fad3890633b47900
-- Preview：Go Study Preview 0.3.0-beta.20.9.2
-- Tag：go-study-preview-v0.3.0-beta.20.9.2
-- ZIP SHA256：e290e0b5bb243b9f5289dda353123920d74d9992864406ac763f702dd8bdae24
+- Branch：fix/potplayer-discovery-beta20-9-3
+- Base：fix/legacy-jv-native-beta20-9-2
+- Draft PR：尚未创建；PR #39 仍为 beta20.9.1 历史 Hotfix
+- Current HEAD：7414098298f8e71e7ceee0f13ad89385462d47ef
+- Preview 发布目标：d946176bcd156d0d6c8d4d358c58838449c98dba
+- Preview：Go Study Preview 0.3.0-beta.20.9.3
+- Tag：go-study-preview-v0.3.0-beta.20.9.3
+- ZIP SHA256：6e60b7a5f2fb5335bb43dd70a3d47b176ab8f2376e0b28909641d47e9000ea53
 
 ## 自动化状态
 
-- beta20.9.2 one-shot validator run #3 ✅
+- beta20.9.3 validator run #2 ✅
 - Preview publisher ✅
-- **383 / 383 tests PASS**
-- build：37 modules / 737899 bytes ✅
+- **387 / 387 tests PASS**
+- build：37 modules / 745157 bytes ✅
 - committed main.js consistency ✅
 - release validation ✅
 - Release readiness check ✅
 
-前两次 validator 暴露的是测试基线与 Node 测试环境问题（旧 bundle 测试仍要求生成 jv://；Freeform 测试直接加载 Electron），修正后第 3 次完整验证全绿。
+第一次 beta20.9.3 validator 失败是开发写入脚本时触发 JavaScript replacement-string 的特殊 `$'` 语义，导致 PotPlayer discovery source 被错误拼接；已从 beta20.9.2 clean base 重建该文件，第 2 次完整验证全绿。
+
 
 ## 当前发布阻断 / 未关闭
 
-1. beta20.9.2：beta20.9.1 的 Bilibili Freeform Ctrl+点击已在实机确认 FAIL；20.9.2 增加 protocol-level modifier fallback，并移除新 Runtime 对外部 note2potplayer / jv:// 播放生成的依赖，等待 Windows 实机复验；
+1. beta20.9.3：beta20.9.2 Windows 实机确认 Ctrl+点击 Browser 已 PASS、Legacy JV 开关开启后旧协议可 PASS；但新 Freeform 普通点击与资源中心播放共同 FAIL，错误为“没有找到 PotPlayer 可执行文件”。20.9.3 已扩展 PotPlayer discovery 并增加高级手动路径兜底，等待 Windows 实机复验；
 2. Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode 仍未通过实机；
 3. Companion caret 点击定位在 beta20.7 修复后缺少最终实机确认；
 4. Managed v3 fallback、legacy v1 relink、light-mode modal、named backup 需要最终 RC 回归；
@@ -869,3 +870,50 @@ beta20.9.2 候选实现：
 - 开启 Legacy JV 兼容并停止旧 helper 后，旧本地 / Bilibili `jv://` 普通点击仍能由 Go Study 打开 PotPlayer 到正确时间；
 - 旧 Bilibili JV Ctrl+点击 → Browser + 正确时间；
 - 关闭 Legacy JV 兼容后，不应让这层私人历史兼容影响新用户正常 Go Study 链路。
+
+
+## beta20.9.3：PotPlayer Discovery Hotfix
+
+beta20.9.2 Windows 真人结果：
+
+- 新 Bilibili Freeform Ctrl+点击 → Browser：**PASS**；
+- 开启“旧 JV 链接兼容（高级）”后，历史 `jv://` → PotPlayer：**PASS**；
+- 新 Freeform 普通点击 → PotPlayer：**FAIL**；
+- Resource Center 导入视频普通播放 → PotPlayer：**FAIL**；
+- 两条失败共享同一错误：`没有找到 PotPlayer 可执行文件`。
+
+因此问题已缩小到 Native PotPlayer Launcher 的 executable discovery，而不是 Reference / Ctrl modifier / Legacy JV parser。
+
+20.9.3 候选：
+
+1. PotPlayer process name 支持：
+   - PotPlayerMini64
+   - PotPlayerMini
+   - PotPlayer64
+   - PotPlayer
+2. 常见路径扫描扩展；
+3. 正在运行的 `PotPlayer*` 进程优先读取 `Path` / `MainModule.FileName`；
+4. Windows App Paths；
+5. Uninstall metadata：
+   - DisplayIcon
+   - InstallLocation
+6. Start Menu shortcut 解析；
+7. 新增 `potPlayerExecutablePath` 持久设置；
+8. 设置页新增“PotPlayer 程序路径（高级）”：
+   - 自动检测
+   - 手动填写绝对 .exe 路径
+9. 成功自动发现后，Go Study 会保存该 executable，之后 Resource / Freeform / Managed / OpenList 共用同一个启动器。
+
+自动验证：
+- 387 / 387 tests PASS；
+- Release readiness PASS；
+- Preview `Go Study Preview 0.3.0-beta.20.9.3`；
+- ZIP SHA256：`6e60b7a5f2fb5335bb43dd70a3d47b176ab8f2376e0b28909641d47e9000ea53`。
+
+下一步真人只先测播放器路径：
+1. 最好先让 PotPlayer 保持运行；
+2. Settings → Go Study → 视频笔记增强 → “PotPlayer 程序路径（高级）” → 自动检测；
+3. Resource Center 普通点击视频；
+4. 新 Freeform 普通点击；
+5. 再确认 Ctrl+点击 Browser 没回归；
+6. Legacy JV 开关行为不变。
