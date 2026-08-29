@@ -1,7 +1,7 @@
 'use strict';
 
-const { formatPotPlayerTime } = require('./resource-resolver.cjs');
 const { normalizeFreeformLocator } = require('./resource-reference.cjs');
+const { launchPotPlayerTarget } = require('./native-potplayer.cjs');
 
 const VIDEO_EXTENSIONS = new Set([
   'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm4v', 'ts', 'm2ts'
@@ -24,39 +24,38 @@ function localVideoAllowed(locator) {
   return VIDEO_EXTENSIONS.has(ext);
 }
 
-function buildJvPlaybackUri(locator, position) {
-  const target = normalizeFreeformLocator(locator);
-  const playerTime = formatPotPlayerTime(position);
-  return `jv://open?path=${encodeURIComponent(target)}&time=${encodeURIComponent(playerTime)}`;
-}
-
 async function openPortableFreeformReference(reference, options = {}) {
   const locator = normalizeFreeformLocator(reference?.locator ?? reference?.path);
   const kind = locatorKind(locator);
   const platform = String(options.platform || process.platform);
+
+  if (platform === 'win32') {
+    if (kind !== 'web' && kind !== 'windows-local') {
+      throw new Error('这个本地视频链接来自另一平台；请先在当前设备收录同一视频，或等待路径映射功能。');
+    }
+    if (kind === 'windows-local' && !localVideoAllowed(locator)) {
+      throw new Error('Go Study 自由回链只允许打开受支持的视频文件。');
+    }
+    const launcher = options.launchPotPlayerTarget || launchPotPlayerTarget;
+    const launched = await launcher(locator, reference.position, options.launchOptions || {});
+    return {
+      transport: launched?.transport || 'native-potplayer-cli',
+      positionApplied: launched?.positionApplied !== false,
+      locator
+    };
+  }
+
   const shellImpl = options.shell || (() => {
     try { return require('electron').shell; }
     catch { throw new Error('当前运行环境无法访问系统打开能力。'); }
   })();
 
   if (kind === 'web') {
-    if (platform === 'win32') {
-      await shellImpl.openExternal(buildJvPlaybackUri(locator, reference.position));
-      return { transport: 'windows-jv', positionApplied: true, locator };
-    }
     await shellImpl.openExternal(locator);
     return { transport: 'browser', positionApplied: false, locator };
   }
 
   if (!localVideoAllowed(locator)) throw new Error('Go Study 自由回链只允许打开受支持的视频文件。');
-
-  if (platform === 'win32') {
-    if (kind !== 'windows-local') {
-      throw new Error('这个本地视频链接来自另一平台；请先在当前设备收录同一视频，或等待路径映射功能。');
-    }
-    await shellImpl.openExternal(buildJvPlaybackUri(locator, reference.position));
-    return { transport: 'windows-jv', positionApplied: true, locator };
-  }
 
   if (platform === 'darwin' || platform === 'linux') {
     if (kind !== 'posix-local') {
@@ -67,12 +66,11 @@ async function openPortableFreeformReference(reference, options = {}) {
     return { transport: 'system-player', positionApplied: false, locator };
   }
 
-  throw new Error(`当前平台暂不支持直接打开未收录本地视频：${platform}`);
+  throw new Error('当前平台暂不支持直接打开未收录本地视频：' + platform);
 }
 
 module.exports = {
   VIDEO_EXTENSIONS,
-  buildJvPlaybackUri,
   localVideoAllowed,
   locatorKind,
   openPortableFreeformReference
