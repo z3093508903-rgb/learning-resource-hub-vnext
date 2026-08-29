@@ -189,3 +189,18 @@ test('new managed timestamps hide source details visually but embed a self-descr
   assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1EDIT?p=2');
   assert.match(parsed.locator, /^https:\/\/www\.bilibili\.com\/video\/BV1EDIT/);
 });
+
+
+test('corrupted PotPlayer replacement-character title falls back to portable Bilibili identity instead of polluting hidden metadata', () => {
+  const markdown = buildFreeformPositionMarkdown(
+    {
+      path: 'https://www.bilibili.com/video/BV1xJ38z3EkX',
+      title: '��课程��� - PotPlayer'
+    },
+    { type: 'time', seconds: 12.244 }
+  );
+  const uri = markdown.match(/\((obsidian:\/\/go-study\?[^)]+)\)/)?.[1];
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.title, 'BV1xJ38z3EkX');
+  assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1xJ38z3EkX');
+});
