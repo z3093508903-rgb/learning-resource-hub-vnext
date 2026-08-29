@@ -5,7 +5,7 @@
 
 ## 0. 一句话状态
 
-Go Study 已推进到 **beta20.9.3 发布前收口 / PotPlayer Discovery Windows 真人验收阶段**。
+Go Study 已推进到 **beta20.10 发布前收口 / Native Obsidian Drag Bridge 阶段**。
 
 核心链路已经成形：
 
@@ -21,7 +21,7 @@ Resource / Freeform
 
 当前不要继续扩功能。优先完成最后几个真机阻断问题：
 
-1. Bilibili Freeform Ctrl+点击浏览器在 beta20.9.2 已经 Windows 真人 PASS；当前 P0 是 Native PotPlayer executable discovery：新 Freeform 普通点击与 Resource Center 播放均因找不到 PotPlayer .exe 失败，beta20.9.3 已修，等待实机；
+1. beta20.9.3 Windows 真人验收已全部 PASS；当前 P0 转为 Obsidian 原生左侧文件树 / 已打开 Markdown 标签页拖入 Study Mode；
 2. Obsidian 原生左侧文件树 / 已打开 Markdown 标签页拖入 Study Mode：beta20.7 尝试修复，但用户实机仍报告没有出现拖入小窗入口；
 3. Companion 鼠标点击与 caret 落点：beta20.7 已移除 CodeMirror 容器 CSS zoom，但没有收到明确通过结论，需要补一次真机复验；
 4. beta20.9 的 Managed v3 fallback / legacy v1 relink / light-mode modal / named backup 需要最终回归。
@@ -548,6 +548,20 @@ Discovery 顺序：
 - 粘贴完整路径到设置；
 - 如果手动路径可用，则下一轮只补该安装形态的自动发现，不允许回退 note2potplayer runtime。
 
+
+### beta20.9.3 真人最终结论：PASS
+
+用户确认本轮全部通过：
+
+- PotPlayer executable discovery；
+- Resource Center → PotPlayer；
+- Freeform 普通点击 → PotPlayer + seek；
+- Ctrl+点击 → Browser；
+- Legacy JV compatibility；
+- 正常 Runtime 不再依赖 note2potplayer.exe。
+
+因此 beta20.9.3 可视为 Windows accepted behavior，不再继续修改该边界。
+
 ---
 
 ## 12. 明确未关闭：Obsidian 原生拖动 Study Mode
@@ -648,7 +662,7 @@ beta20.7 已处理：
 
 ## 15. 下一任接手后的执行顺序
 
-### 第一优先：复验 beta20.9.3
+### 第一优先：beta20.10 原生拖动诊断与修复
 
 先测新 Go Study Bilibili Freeform：
 1. 普通点击是否由 Go Study 直接启动 PotPlayer 并正确 seek，且不再出现 note2potplayer.exe；
