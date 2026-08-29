@@ -134,3 +134,42 @@ test('native PotPlayer target validation rejects arbitrary protocols and relativ
   assert.throws(() => normalizePotPlayerTarget('jv://open?path=x'), /只允许/);
   assert.throws(() => normalizePotPlayerTarget('relative.mp4'), /只允许/);
 });
+
+
+test('PotPlayer discovery covers running process, registry, uninstall metadata and Start Menu shortcuts', () => {
+  const { potPlayerDiscoveryScript, POTPLAYER_PROCESS_NAMES } = loadNativeModule();
+  const script = potPlayerDiscoveryScript();
+  assert.ok(POTPLAYER_PROCESS_NAMES.includes('PotPlayerMini64'));
+  assert.ok(POTPLAYER_PROCESS_NAMES.includes('PotPlayer'));
+  assert.match(script, /ProcessName -like 'PotPlayer\*'/);
+  assert.match(script, /App Paths/);
+  assert.match(script, /CurrentVersion\\Uninstall/);
+  assert.match(script, /DisplayIcon/);
+  assert.match(script, /InstallLocation/);
+  assert.match(script, /Start Menu\\Programs/);
+  assert.match(script, /WScript\.Shell/);
+});
+
+test('PotPlayer resolver accepts a custom executable discovered outside Program Files', async () => {
+  const { resolvePotPlayerExecutable } = loadNativeModule();
+  const custom = 'D:\\Tools\\PotPlayer\\PotPlayerMini64.exe';
+  const result = await resolvePotPlayerExecutable({
+    candidates: [],
+    existsSync(value) { return value === custom; },
+    runPowerShell: async () => ({ ok: true, executable: custom })
+  });
+  assert.equal(result, custom);
+});
+
+test('PotPlayer resolver ignores stale configured path and can recover through discovery', async () => {
+  const { resolvePotPlayerExecutable } = loadNativeModule();
+  const stale = 'C:\\Missing\\PotPlayer.exe';
+  const discovered = 'E:\\Portable\\PotPlayer\\PotPlayer.exe';
+  const result = await resolvePotPlayerExecutable({
+    executable: stale,
+    candidates: [],
+    existsSync(value) { return value === discovered; },
+    runPowerShell: async () => ({ ok: true, executable: discovered })
+  });
+  assert.equal(result, discovered);
+});
