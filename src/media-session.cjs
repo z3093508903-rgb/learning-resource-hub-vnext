@@ -111,7 +111,9 @@ function matchingManagedResource(state, mediaPath, resolveActions, preferredReso
 function resolveUniversalMediaSession(state, activeSession, bridgeMedia, resolveActions, options = {}) {
   const position = validatedBridgePosition(bridgeMedia);
   const preferredResourceId = String(activeSession?.resourceId || '');
-  const resource = matchingManagedResource(state, bridgeMedia.path, resolveActions, preferredResourceId);
+  const resource = options.preferFreeform
+    ? null
+    : matchingManagedResource(state, bridgeMedia.path, resolveActions, preferredResourceId);
   if (resource) {
     return {
       mode: 'managed',
