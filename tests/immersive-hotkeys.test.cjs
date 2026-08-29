@@ -46,6 +46,9 @@ test('duplicate configured shortcuts are rejected before registration', () => {
   assert.match(source, /不能使用同一个快捷键/);
 });
 
-test('native hotkeys force the plugin-owned PotPlayer path instead of silently using Companion', () => {
-  assert.match(source, /nativeOnly:\s*true/g);
+test('HUD time and note actions may fall back to Bilibili web while screenshot actions stay PotPlayer-only', () => {
+  assert.match(source, /nativeOnly:\s*false/);
+  assert.match(source, /nativeOnly:\s*true/);
+  assert.match(source, /B站网页模式/);
+  assert.match(source, /截图动作仍需要 PotPlayer/);
 });
