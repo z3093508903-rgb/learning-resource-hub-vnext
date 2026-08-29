@@ -377,6 +377,15 @@ class GoStudySettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName('旧 JV 链接兼容（高级）')
+      .setDesc('仅用于历史笔记里的 jv://open 链接。开启后由 Go Study 接管并直接交给 PotPlayer；新链接仍只生成 Go Study 协议，新用户无需开启。')
+      .addToggle((toggle) => toggle
+        .setValue(settings.legacyJvCompatibilityEnabled)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'legacyJvCompatibilityEnabled', value);
+        }));
+
+    new Setting(containerEl)
       .setName('悬浮时间线')
       .setDesc('可选视频功能增强。只在包含 Go Study 时间戳的 Markdown 右侧显示一条极轻量时间线；鼠标移到右边缘才展开来源与时间点。')
       .addToggle((toggle) => {
