@@ -216,7 +216,7 @@ test('freeform v2 can preserve an optional browser source beside the playback lo
     web: 'https://www.bilibili.com/video/BV1TEST?p=2',
     position: { type: 'time', seconds: 65 }
   });
-  assert.match(uri, /web=https%3A%2F%2Fwww\.bilibili\.com%2Fvideo%2FBV1TEST%3Fp%3D2/);
+  assert.match(uri, /web=https%3A%2F%2Fwww%2Ebilibili%2Ecom%2Fvideo%2FBV1TEST%3Fp%3D2/);
   const parsed = parseReferenceUri(uri);
   assert.equal(parsed.locator, 'D:\\Loose\\lesson.mp4');
   assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1TEST?p=2');
@@ -243,4 +243,20 @@ test('managed v1 refuses v3 fallback fields so old semantics stay deterministic'
     () => parseReferenceUri('obsidian://go-study?resource=r1&locator=https%3A%2F%2Fexample.com%2Fv.mp4&position=time%3A1&v=1'),
     /v1 管理型回链不能携带便携来源字段/
   );
+});
+
+
+test('nested Bilibili HTTP values are encoded so Obsidian Markdown cannot auto-link the host inside the Go Study destination', () => {
+  const sourceUrl = 'https://www.bilibili.com/video/BV1xJ38z3EkX';
+  const uri = buildFreeformReferenceUri({
+    locator: sourceUrl,
+    web: sourceUrl,
+    position: { type: 'time', seconds: 12.244 }
+  });
+  assert.doesNotMatch(uri, /www\.bilibili\.com/);
+  assert.match(uri, /www%2Ebilibili%2Ecom/);
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.locator, sourceUrl);
+  assert.equal(parsed.web, sourceUrl);
+  assert.equal(parsed.position.seconds, 12.244);
 });

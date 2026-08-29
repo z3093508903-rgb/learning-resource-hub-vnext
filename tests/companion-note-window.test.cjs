@@ -213,3 +213,11 @@ test('Companion does not CSS-zoom CodeMirror, preserving normal mouse-to-caret h
   assert.doesNotMatch(block, /zoom:\s*var\(--go-study-companion-scale\)/);
   assert.match(block, /font-size:\s*calc\(1em \* var\(--go-study-companion-scale\)\)/);
 });
+
+
+test('Companion open refreshes document-scoped Go Study browser modifier', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'companion-note-window.cjs'), 'utf8');
+  assert.match(source, /_goStudyBrowserModifier\?\.refresh\?\.\(\)/);
+});

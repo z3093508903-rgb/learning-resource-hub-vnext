@@ -502,6 +502,7 @@ async function openCompanionNoteWindow(plugin, options = {}) {
   syncCompanionNativeState(plugin, session, options);
   installCompanionPinControl(plugin, session);
   installGeometryTracking(plugin, session);
+  plugin?._goStudyBrowserModifier?.refresh?.();
   await persistCompanionState(plugin);
   return {
     leaf,

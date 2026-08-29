@@ -30,6 +30,23 @@ function serializeReferencePosition(position) {
   const normalized = normalizeReferencePosition(position);
   return `time:${String(normalized.seconds)}`;
 }
+function markdownSafeReferenceUri(rawUri) {
+  const raw = String(rawUri || '');
+  const queryIndex = raw.indexOf('?');
+  if (queryIndex < 0) return raw;
+  const base = raw.slice(0, queryIndex + 1);
+  const query = raw.slice(queryIndex + 1);
+  const safeQuery = query.split('&').map((part) => {
+    const eq = part.indexOf('=');
+    if (eq < 0) return part;
+    const key = part.slice(0, eq + 1);
+    let value = part.slice(eq + 1);
+    if (/^https?%3A%2F%2F/i.test(value)) value = value.replace(/\./g, '%2E');
+    return key + value;
+  }).join('&');
+  return base + safeQuery;
+}
+
 
 function normalizeReferenceVersion(value) {
   const version = Number(value);
@@ -156,7 +173,7 @@ function buildReferenceUri(input) {
   }
   url.searchParams.set('position', serializeReferencePosition(reference.position));
   url.searchParams.set('v', String(reference.version));
-  return url.toString();
+  return markdownSafeReferenceUri(url.toString());
 }
 
 function buildFreeformReferenceUri(input) {
@@ -169,7 +186,7 @@ function buildFreeformReferenceUri(input) {
   if (reference.web) url.searchParams.set('web', reference.web);
   url.searchParams.set('position', serializeReferencePosition(reference.position));
   url.searchParams.set('v', String(reference.version));
-  return url.toString();
+  return markdownSafeReferenceUri(url.toString());
 }
 
 function parseQueryEntries(searchParams) {
@@ -267,6 +284,7 @@ module.exports = {
   REFERENCE_VERSION,
   buildFreeformReferenceUri,
   buildReferenceUri,
+  markdownSafeReferenceUri,
   freeformLocatorName,
   normalizeFreeformLocator,
   normalizeOptionalManagedLocator,
