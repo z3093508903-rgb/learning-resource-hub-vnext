@@ -132,3 +132,31 @@ test('portable-name upgrade only resolves a unique managed resource across devic
   targets.b = { type: 'potplayer', target: 'E:\\Mirror\\lesson-17.mp4' };
   assert.equal(matchingManagedResourceByPortableName(state, 'lesson-17.mp4', resolve), null);
 });
+
+
+test('browser-origin Bilibili media can intentionally stay freeform even when a managed resource matches', () => {
+  const state = {
+    resources: {
+      bili: { id: 'bili', kind: 'video', title: 'B站课', deletedAt: '' }
+    },
+    sources: {}
+  };
+  const resolveActions = () => ({
+    playTarget: { type: 'potplayer', target: 'https://www.bilibili.com/video/BV1WEB?p=2' }
+  });
+  const resolved = resolveUniversalMediaSession(
+    state,
+    { resourceId: 'bili' },
+    {
+      path: 'https://www.bilibili.com/video/BV1WEB?p=2',
+      title: 'B站课',
+      positionSeconds: 69.4,
+      source: 'bilibili-web'
+    },
+    resolveActions,
+    { allowFreeform: true, preferFreeform: true }
+  );
+  assert.equal(resolved.mode, 'freeform');
+  assert.equal(resolved.resource, null);
+  assert.equal(resolved.position.seconds, 69.4);
+});
