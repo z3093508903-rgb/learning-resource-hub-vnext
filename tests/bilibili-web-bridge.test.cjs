@@ -39,14 +39,17 @@ test('web bridge state keeps exact playback time and strips Bilibili title suffi
   assert.equal(state.receivedAt, 1000);
 });
 
-test('web bridge current requires a fresh foreground Bilibili tab', async () => {
+test('web bridge accepts the active Bilibili tab even when Companion owns OS focus', async () => {
   const plugin = {
     _goStudyBilibiliWebState: normalizeBilibiliWebState({
       url: 'https://www.bilibili.com/video/BV1TEST?p=3',
       title: '课程',
       currentTime: 88.25,
       visible: true,
-      focused: true
+      focused: false,
+      activeTab: true,
+      tabId: 17,
+      windowId: 3
     }, 1000)
   };
   const response = await requestBilibiliWebBridge(plugin, 'current', { now: 1200 });
@@ -54,6 +57,8 @@ test('web bridge current requires a fresh foreground Bilibili tab', async () => 
   assert.equal(response.media.source, 'bilibili-web');
   assert.equal(response.media.positionSeconds, 88.25);
   assert.equal(response.media.path, 'https://www.bilibili.com/video/BV1TEST?p=3');
+  assert.equal(plugin._goStudyBilibiliWebState.focused, false);
+  assert.equal(plugin._goStudyBilibiliWebState.activeTab, true);
 
   assert.throws(
     () => currentBilibiliWebState(plugin, { now: 1000 + BILIBILI_WEB_STATE_MAX_AGE_MS + 1 }),
@@ -63,9 +68,9 @@ test('web bridge current requires a fresh foreground Bilibili tab', async () => 
   plugin._goStudyBilibiliWebState = {
     ...plugin._goStudyBilibiliWebState,
     receivedAt: 2000,
-    focused: false
+    activeTab: false
   };
-  assert.throws(() => currentBilibiliWebState(plugin, { now: 2100 }), /不是前台/);
+  assert.throws(() => currentBilibiliWebState(plugin, { now: 2100 }), /不是活动视频标签页/);
 });
 
 test('web bridge deliberately refuses screenshot/control actions', async () => {
@@ -74,4 +79,14 @@ test('web bridge deliberately refuses screenshot/control actions', async () => {
     () => requestBilibiliWebBridge(plugin, 'capture'),
     /只支持读取当前位置/
   );
+});
+
+
+test('browser extension background reports tab activity separately from document focus', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'browser-extension', 'bilibili-bridge', 'background.js'), 'utf8');
+  assert.match(source, /activeTab:\s*Boolean\(sender\?\.tab\?\.active\)/);
+  assert.match(source, /tabId/);
+  assert.match(source, /windowId/);
 });
