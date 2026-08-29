@@ -84,6 +84,43 @@ function safeStamp(date = new Date()) {
   return date.toISOString().replace(/[:.]/g, '-');
 }
 
+function recoveryEntries(plugin) {
+  const dir = recoveryDirectory(plugin);
+  if (!dir || !fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.json$/i.test(entry.name))
+    .map((entry) => {
+      const fullPath = path.join(dir, entry.name);
+      const stat = fs.statSync(fullPath);
+      return { name: entry.name, fullPath, mtimeMs: Number(stat.mtimeMs || 0), size: Number(stat.size || 0) };
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name));
+}
+
+function pruneRecoveryBackups(plugin, keep = 10) {
+  const retention = Math.max(3, Math.min(100, Math.floor(Number(keep) || 10)));
+  const entries = recoveryEntries(plugin);
+  const removed = [];
+  for (const entry of entries.slice(retention)) {
+    try {
+      fs.unlinkSync(entry.fullPath);
+      removed.push(entry.name);
+    } catch {}
+  }
+  return removed;
+}
+
+function writeRecoveryState(plugin, state, label = 'manual') {
+  const dir = recoveryDirectory(plugin);
+  if (!dir) throw new Error('当前 Vault 不支持本地恢复备份。');
+  fs.mkdirSync(dir, { recursive: true });
+  const safeLabel = String(label || 'manual').replace(/[^a-z0-9_-]+/gi, '-');
+  const name = `state-${safeStamp()}-${safeLabel}.json`;
+  const fullPath = path.join(dir, name);
+  fs.writeFileSync(fullPath, JSON.stringify(state, null, 2), 'utf8');
+  return { name, fullPath };
+}
+
 function protectRawPluginData(plugin, label = 'startup') {
   const raw = readRawPluginData(plugin);
   if (!raw.raw) return { ...raw, recoveryPath: '' };
@@ -107,6 +144,7 @@ function startupSafetySnapshot(plugin) {
     rawData: protectedRaw.data,
     rawCounts: stateCounts(protectedRaw.data),
     rawMeaningful: meaningfulState(protectedRaw.data),
+    rawText: protectedRaw.raw || '',
     readError: protectedRaw.error || null,
     protectionError: protectedRaw.protectionError || null
   };
@@ -131,9 +169,28 @@ function markLoadedBaseline(plugin, rawState = null) {
     ...(plugin._goStudyStateSafety || {}),
     baselineState: baseline ? JSON.parse(JSON.stringify(baseline)) : null,
     baselineCounts: stateCounts(baseline),
+    lastProtectedRaw: plugin?._goStudyStateSafety?.rawText || '',
     allowDestructivePersist: false
   };
   return plugin._goStudyStateSafety;
+}
+
+function refreshPersistBaseline(plugin) {
+  if (!plugin?._goStudyStateSafety) return markLoadedBaseline(plugin, plugin?.state);
+  plugin._goStudyStateSafety.baselineState = plugin?.state ? JSON.parse(JSON.stringify(plugin.state)) : null;
+  plugin._goStudyStateSafety.baselineCounts = stateCounts(plugin?.state);
+  return plugin._goStudyStateSafety;
+}
+
+function protectBeforePersist(plugin, keep = 10) {
+  const safety = plugin?._goStudyStateSafety || (plugin._goStudyStateSafety = {});
+  const raw = readRawPluginData(plugin);
+  if (!raw.raw) return { protected: false, recoveryPath: '' };
+  if (raw.raw === safety.lastProtectedRaw) return { protected: false, recoveryPath: '' };
+  const protectedRaw = protectRawPluginData(plugin, 'before-save');
+  if (protectedRaw.raw) safety.lastProtectedRaw = protectedRaw.raw;
+  pruneRecoveryBackups(plugin, keep);
+  return { protected: Boolean(protectedRaw.recoveryPath), recoveryPath: protectedRaw.recoveryPath || '' };
 }
 
 module.exports = {
@@ -143,10 +200,15 @@ module.exports = {
   meaningfulState,
   pluginDataPath,
   pluginDirectory,
+  protectBeforePersist,
   protectRawPluginData,
+  pruneRecoveryBackups,
   readRawPluginData,
   recoveryDirectory,
+  recoveryEntries,
+  refreshPersistBaseline,
   stateCounts,
   stateWeight,
-  startupSafetySnapshot
+  startupSafetySnapshot,
+  writeRecoveryState
 };
