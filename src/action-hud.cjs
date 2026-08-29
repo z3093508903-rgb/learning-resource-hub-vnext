@@ -43,6 +43,7 @@ function createNativeActionHud(rawSlots, options = {}) {
   const area = display?.workArea || { x: 0, y: 0, width: 1280, height: 720 };
   const width = 460;
   const height = 300;
+  const focusable = Boolean(options.focusable);
   const win = new BrowserWindow({
     width,
     height,
@@ -55,12 +56,29 @@ function createNativeActionHud(rawSlots, options = {}) {
     maximizable: false,
     alwaysOnTop: true,
     skipTaskbar: true,
-    focusable: false,
+    focusable,
     show: false,
     webPreferences: { nodeIntegration: false, contextIsolation: true, sandbox: true }
   });
   let shown = false;
   let closed = false;
+  if (focusable && typeof options.onInput === 'function') {
+    win.webContents?.on?.('before-input-event', (event, input) => {
+      if (closed || input?.type !== 'keyDown' || input?.isAutoRepeat) return;
+      const key = String(input?.key || '');
+      const mapped = {
+        ArrowUp: 'Up',
+        ArrowDown: 'Down',
+        ArrowLeft: 'Left',
+        ArrowRight: 'Right',
+        Enter: 'Enter',
+        Escape: 'Escape'
+      }[key];
+      if (!mapped) return;
+      try { event?.preventDefault?.(); } catch {}
+      try { options.onInput(mapped); } catch {}
+    });
+  }
   const ready = win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(hudHtml(rawSlots))}`).catch(() => {});
   return {
     async show() {
@@ -68,7 +86,14 @@ function createNativeActionHud(rawSlots, options = {}) {
       await ready;
       if (closed || win.isDestroyed?.()) return false;
       shown = true;
-      try { win.showInactive?.(); } catch { try { win.show(); } catch {} }
+      try { win.setAlwaysOnTop?.(true, 'screen-saver'); } catch {}
+      if (focusable) {
+        try { win.show?.(); } catch {}
+        try { win.moveTop?.(); } catch {}
+        try { win.focus?.(); } catch {}
+      } else {
+        try { win.showInactive?.(); } catch { try { win.show(); } catch {} }
+      }
       return true;
     },
     async select(slot) {
@@ -86,7 +111,8 @@ function createNativeActionHud(rawSlots, options = {}) {
       closed = true;
       try { if (!win.isDestroyed?.()) win.close(); } catch {}
     },
-    get shown() { return shown; }
+    get shown() { return shown; },
+    get focusable() { return focusable; }
   };
 }
 
