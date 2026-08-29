@@ -38,6 +38,7 @@ const {
   fallbackFreeformReference,
   recoveredResourceById
 } = require('./reference-fallback.cjs');
+const { chooseReferenceRelinkResource } = require('./reference-relink-ui.cjs');
 const {
   applySafeOpenListPathRemap,
   normalizeStrictOpenListPath,
@@ -131,7 +132,17 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
       }
     }
 
-    throw new Error('Go Study 找不到这条旧回链对应的学习资源，而且旧链接没有携带可恢复的来源信息。重新收录该资源后，新生成的回链将可独立兜底。');
+    const chosen = await chooseReferenceRelinkResource(this, reference);
+    if (chosen?.id) {
+      this.state.uiState ||= {};
+      this.state.uiState.referenceAliases ||= {};
+      this.state.uiState.referenceAliases[String(reference.resourceId || '')] = chosen.id;
+      await this.persist();
+      new Notice(`旧回链已重新关联：${chosen.title || chosen.id}`, 5000);
+      return this.openResourceReference(reference);
+    }
+
+    throw new Error('Go Study 找不到这条旧回链对应的学习资源，而且旧链接没有携带可恢复的来源信息。可先重新收录对应视频，再普通点击旧时间戳进行一次性重新关联。');
   }
 
   browserUrlForReference(reference) {
