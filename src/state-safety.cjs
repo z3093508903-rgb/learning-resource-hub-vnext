@@ -73,6 +73,56 @@ function readRawPluginData(plugin) {
   }
 }
 
+function siblingPluginData(plugin, pluginId) {
+  const basePath = plugin?.app?.vault?.adapter?.getBasePath?.();
+  if (!basePath) return { filePath: '', raw: '', data: null, error: null };
+  const configDir = plugin?.app?.vault?.configDir || '.obsidian';
+  const safeId = String(pluginId || '').trim();
+  if (!safeId || safeId === String(plugin?.manifest?.id || '').trim()) {
+    return { filePath: '', raw: '', data: null, error: null };
+  }
+  const filePath = path.join(basePath, configDir, 'plugins', safeId, 'data.json');
+  if (!fs.existsSync(filePath)) return { filePath, raw: '', data: null, error: null };
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const data = raw.trim() ? JSON.parse(raw) : null;
+    return { filePath, raw, data, error: null };
+  } catch (error) {
+    return { filePath, raw: '', data: null, error };
+  }
+}
+
+function previewMigrationCandidate(plugin) {
+  if (String(plugin?.manifest?.id || '').trim() !== 'go-study') {
+    return { eligible: false, pluginId: '', filePath: '', raw: '', data: null, error: null };
+  }
+  const current = readRawPluginData(plugin);
+  if (current.raw) {
+    return { eligible: false, pluginId: '', filePath: current.filePath, raw: '', data: null, error: null };
+  }
+  const preview = siblingPluginData(plugin, 'go-study-preview');
+  const eligible = Boolean(preview.raw && meaningfulState(preview.data));
+  return {
+    eligible,
+    pluginId: eligible ? 'go-study-preview' : '',
+    ...preview
+  };
+}
+
+function protectPreviewMigration(plugin, candidate) {
+  if (!candidate?.eligible || !candidate?.raw) return { recoveryPath: '' };
+  const dir = recoveryDirectory(plugin);
+  if (!dir) return { recoveryPath: '' };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const recoveryPath = path.join(dir, `saved-preview-migration-${safeStamp()}.json`);
+    fs.writeFileSync(recoveryPath, candidate.raw, 'utf8');
+    return { recoveryPath };
+  } catch (error) {
+    return { recoveryPath: '', error };
+  }
+}
+
 function recoveryDirectory(plugin) {
   const basePath = plugin?.app?.vault?.adapter?.getBasePath?.();
   if (!basePath) return '';
@@ -244,6 +294,8 @@ module.exports = {
   meaningfulState,
   pluginDataPath,
   pluginDirectory,
+  previewMigrationCandidate,
+  protectPreviewMigration,
   protectBeforePersist,
   protectRawPluginData,
   pruneRecoveryBackups,
@@ -253,6 +305,7 @@ module.exports = {
   renameRecoveryEntry,
   refreshPersistBaseline,
   stateCounts,
+  siblingPluginData,
   stateWeight,
   startupSafetySnapshot,
   writeNamedRecoveryState,
