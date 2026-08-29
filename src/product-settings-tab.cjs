@@ -21,7 +21,7 @@ const {
   resetImmersiveShortcuts,
   updateImmersiveShortcut
 } = require('./immersive-hotkeys.cjs');
-const { immersiveShortcuts } = require('./native-potplayer.cjs');
+const { immersiveShortcuts, resolvePotPlayerExecutable } = require('./native-potplayer.cjs');
 const {
   diagnoseTimelineNavigator,
   refreshTimelineNavigator
@@ -375,6 +375,42 @@ class GoStudySettingsTab extends PluginSettingTab {
           await updateProductSetting(this.plugin, 'freeformVideoNotesEnabled', value);
         });
       });
+
+    new Setting(containerEl)
+      .setName('PotPlayer 程序路径（高级）')
+      .setDesc('通常自动识别。自定义 D 盘、便携版或非标准安装时，可自动检测或直接填写 PotPlayer 的 .exe 绝对路径；成功识别后会保存。')
+      .addText((text) => {
+        text.setValue(settings.potPlayerExecutablePath);
+        text.setPlaceholder('例如 D:\\Apps\\PotPlayer\\PotPlayerMini64.exe');
+        const commit = async () => {
+          try {
+            const next = await updateProductSetting(this.plugin, 'potPlayerExecutablePath', text.getValue());
+            text.setValue(next.potPlayerExecutablePath);
+            new Notice(next.potPlayerExecutablePath ? 'PotPlayer 程序路径已保存。' : '已清除自定义 PotPlayer 程序路径，将使用自动检测。');
+          } catch (error) {
+            text.setValue(currentProductSettings(this.plugin).potPlayerExecutablePath);
+            new Notice(commandErrorText('PotPlayer 路径更新失败', error), 6000);
+          }
+        };
+        text.inputEl?.addEventListener('change', () => void commit());
+      })
+      .addButton((button) => button
+        .setButtonText('自动检测')
+        .onClick(async () => {
+          button.setDisabled(true);
+          try {
+            const detected = await resolvePotPlayerExecutable({
+              executable: currentProductSettings(this.plugin).potPlayerExecutablePath
+            });
+            await updateProductSetting(this.plugin, 'potPlayerExecutablePath', detected);
+            new Notice(`已识别 PotPlayer：${detected}`, 7000);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('PotPlayer 自动检测失败', error), 7000);
+          } finally {
+            button.setDisabled(false);
+          }
+        }));
 
     new Setting(containerEl)
       .setName('旧 JV 链接兼容（高级）')
