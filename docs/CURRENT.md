@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.12 — Pre-RC / Bilibili Web Learning & Caret Stabilization**
+**Go Study 0.3.0-beta.20.12.1 — Pre-RC / Bilibili Companion Focus Hotfix**
 
 Stable / Merge：**HOLD**
 
@@ -20,23 +20,23 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：fix/bilibili-web-learning-beta20-12
-- Base：fix/companion-polish-beta20-11
+- Branch：fix/bilibili-companion-focus-beta20-12-1
+- Base：fix/bilibili-web-learning-beta20-12
 - Draft PR：尚未创建
-- Current HEAD：f5ca8b1de91889acb158b39dd8e2bbc47e83c35b
-- Preview 发布目标：01833743de5d0a44a72be6f7d9e74d9a6dd74600
-- Preview：Go Study Preview 0.3.0-beta.20.12
-- Tag：go-study-preview-v0.3.0-beta.20.12
-- Obsidian ZIP SHA256：1a4b1cda7b4dfe6402d560d444ab37a2a2888f481dab75059b3356422e65f063
-- Bilibili Bridge ZIP SHA256：177c5bdd4e33f7ce035ef831a0c6daadb73352add7673f06fe8a94cda7b5c6e0
+- Current HEAD：688c6fcc1a392a505448c9ce9c027eb646aa5408
+- Preview 发布目标：786e848393545f9f636dec75fdf9f6926808afb7
+- Preview：Go Study Preview 0.3.0-beta.20.12.1
+- Tag：go-study-preview-v0.3.0-beta.20.12.1
+- Obsidian ZIP SHA256：68ffdd15a69bcaf458fcf865258e5412f0c82d4ab3a7aa4d45648fcf3ee29f9b
+- Bilibili Bridge 0.1.1 ZIP SHA256：bead8797235b5528be80d7918d909d20e0b42815d8b330085816cd1e7c8a6d13
 
 ## 自动化状态
 
-- beta20.12 validator run #3 ✅
-- Browser extension syntax / Manifest v3 validation ✅
+- beta20.12.1 validator ✅
+- Browser Bridge 0.1.1 syntax / Manifest validation ✅
 - Preview publisher ✅
-- **402 / 402 tests PASS**
-- build：38 modules / 762640 bytes ✅
+- **405 / 405 tests PASS**
+- build：38 modules / 767255 bytes ✅
 - committed main.js consistency ✅
 - release validation ✅
 - Release readiness check ✅
@@ -1100,3 +1100,65 @@ Preview assets：
 - Bridge ZIP SHA256：`177c5bdd4e33f7ce035ef831a0c6daadb73352add7673f06fe8a94cda7b5c6e0`
 
 下一步只做 Windows + Chrome/Edge 真人验收。通过后进入 Full RC Audit，不再增加功能。
+
+
+## beta20.12.1：Bilibili Companion Focus Hotfix
+
+真人发现：
+
+> B站网页单独前台时 HUD 正常；打开 Always-on-top Companion 后，网页虽然仍是当前视频标签页，但浏览器失去 Windows 系统焦点，HUD 不再写入。
+
+Root cause：
+
+beta20.12 使用：
+
+`document.visibilityState === 'visible' && document.hasFocus() === true`
+
+作为“B站当前视频源”的判断。
+
+Companion 置顶 / Quick Note Popup / Obsidian 小窗会合法拿走 OS focus，因此 `document.hasFocus()` 不能代表“这个 B站标签页是否仍是用户当前的视频源”。
+
+Hotfix：
+
+- Browser extension background 从 `sender.tab.active` 单独上报 `activeTab`；
+- 保留 `focused` 仅作诊断，不再作为资格条件；
+- Go Study 接受：
+  - `visible === true`
+  - `activeTab === true`
+  - state fresh
+- 即使 Companion 拿到 Windows focus，B站活动标签页仍可作为 HUD source；
+- 切到另一个 browser tab 后，旧 B站页仍会被拒绝。
+
+新手 Onboarding：
+
+- Settings → 视频笔记增强 → “B站网页桥接（可选）”新增：
+  - 下载 / 安装桥接
+  - 检查连接
+  - started / connected 状态
+- Workbench header 原轻量视频增强状态点：
+  - 主点继续代表全局快捷键 ready；
+  - 小副点表示 Web Bridge started / connected；
+  - click / hover 文案同时说明快捷键和 B站桥接状态；
+- Bridge 状态改变会 dispatch `go-study-bilibili-bridge-status`，主页可实时刷新。
+
+Bridge 升级到 `0.1.1`。
+
+明确边界：
+- Web timestamp / note / time+note 支持；
+- Web screenshot 仍 PotPlayer-only；
+- B站网页笔记目前**不会自动暂停 / 恢复网页视频**。当前桥是 Browser → Go Study 单向媒体状态读取，不在此 hotfix 引入 Go Study → Browser 控制通道。
+
+Preview：
+- Go Study `0.3.0-beta.20.12.1`
+- Bilibili Bridge `0.1.1`
+- 405 / 405 tests PASS
+
+真人复验：
+1. 更新主插件和 Bridge；
+2. 完全退出 PotPlayer；
+3. B站视频保持 browser active tab；
+4. Companion Always-on-top；
+5. 点击 Companion 让 browser 丢失 OS focus；
+6. Alt+S → timestamp / note+timestamp；
+7. 必须继续写入 Companion；
+8. 切换到其他 browser tab 后旧 B站源必须停止可用。
