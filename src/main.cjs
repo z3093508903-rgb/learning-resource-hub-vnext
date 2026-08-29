@@ -40,6 +40,8 @@ const {
   meaningfulState,
   protectBeforePersist,
   pruneRecoveryBackups,
+  previewMigrationCandidate,
+  protectPreviewMigration,
   readRawPluginData,
   recoveryDirectory,
   recoveryEntries,
@@ -170,6 +172,23 @@ class ResourceHubNextPlugin extends Plugin {
       console.warn('Go Study: failed to prune startup recovery snapshots.', error);
     }
     let loaded = await this.loadData();
+    let previewMigration = null;
+
+    // Stable 0.3.0 uses the permanent plugin id "go-study". If this Vault has
+    // never created stable data.json but still has the validated Preview data,
+    // import that state once. Never overwrite an existing stable data.json.
+    if (!safetySnapshot.rawText && !meaningfulState(loaded)) {
+      const candidate = previewMigrationCandidate(this);
+      if (candidate.eligible) {
+        const protectedMigration = protectPreviewMigration(this, candidate);
+        loaded = candidate.data;
+        previewMigration = {
+          sourcePluginId: candidate.pluginId,
+          sourcePath: candidate.filePath,
+          recoveryPath: protectedMigration.recoveryPath || ''
+        };
+      }
+    }
 
     // Obsidian loadData() and direct data.json inspection should describe the same state.
     // If loadData unexpectedly returns empty while a meaningful raw data.json exists,
@@ -191,14 +210,28 @@ class ResourceHubNextPlugin extends Plugin {
       markLoadedBaseline(this, this.state);
     }
 
+    if (previewMigration && !this._goStudyStateSafety?.readOnlySafety) {
+      try {
+        await this.saveData(this.state);
+        refreshPersistBaseline(this);
+        new Notice(
+          'Go Study 已从 Preview 安全迁移现有项目与设置。原 Preview data.json 保持不变，并已额外创建迁移备份。',
+          9000
+        );
+      } catch (error) {
+        console.error('Go Study: failed to persist Preview migration into stable data.json.', error);
+        new Notice('Go Study 已读取 Preview 数据，但写入正式版 data.json 失败。原 Preview 数据未被修改，请先不要卸载 Preview。', 10000);
+      }
+    }
+
     this.memoResizeBindings = new Set();
     this.workbenchLeaf = null;
     this.sidebarWasCollapsed = null;
     this.openListTokens = new Map();
     this.openListLoginTasks = new Map();
     this.registerView(VIEW_TYPE, (leaf) => new ResourceHubNextView(leaf, this));
-    this.registerHoverLinkSource?.(VIEW_TYPE, { display: 'Learning Resource Hub Next', defaultMod: true });
-    this.addRibbonIcon('library-big', '打开学习资源工作台 Next', () => void this.openWorkbench());
+    this.registerHoverLinkSource?.(VIEW_TYPE, { display: 'Go Study', defaultMod: true });
+    this.addRibbonIcon('library-big', '打开 Go Study', () => void this.openWorkbench());
     this.addCommand({ id: 'open-workbench', name: '打开工作台', callback: () => void this.openWorkbench() });
     this.addCommand({ id: 'quick-add', name: '添加资源', callback: () => void this.openAddModal() });
     this.addSettingTab?.(new ResourceHubNextSettingTab(this.app, this));
