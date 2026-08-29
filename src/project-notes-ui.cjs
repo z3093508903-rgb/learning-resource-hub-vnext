@@ -969,9 +969,123 @@ function chooseStudyNote(plugin, projectId, resource) {
   return new Promise((resolve) => new StudyNotePickerModal(plugin.app, plugin, projectId, resource, resolve).open());
 }
 
+function markdownPathIfValid(plugin, value) {
+  const raw = String(value || '').trim().replace(/^obsidian:\/\/open\?path=/i, '');
+  if (!raw) return '';
+  let path = raw;
+  try { path = decodeURIComponent(path); } catch {}
+  path = path.replace(/^\/+/, '').replace(/\\/g, '/');
+  const file = plugin?.app?.vault?.getAbstractFileByPath?.(path);
+  if (!file || Array.isArray(file.children) || String(file.extension || '').toLowerCase() !== 'md') return '';
+  return String(file.path || '');
+}
+
+function markdownPathFromTabTarget(plugin, target) {
+  const tab = target?.closest?.('.workspace-tab-header');
+  if (!tab) return '';
+  const leaves = plugin?.app?.workspace?.getLeavesOfType?.('markdown') || [];
+  for (const leaf of leaves) {
+    const header = leaf?.tabHeaderEl;
+    if (!header) continue;
+    if (header === tab || header.contains?.(target) || tab.contains?.(header)) {
+      const path = markdownPathIfValid(plugin, leaf?.view?.file?.path);
+      if (path) return path;
+    }
+  }
+  return markdownPathIfValid(plugin, tab.dataset?.path || tab.getAttribute?.('data-path'));
+}
+
+function markdownPathFromNativeDragTarget(plugin, target) {
+  if (!target?.closest) return '';
+  if (target.closest('[data-go-study-study-note-path]')) return '';
+  const pathHost = target.closest('.nav-file-title[data-path], .nav-file[data-path], .tree-item-self[data-path], [data-path]');
+  const direct = markdownPathIfValid(plugin, pathHost?.dataset?.path || pathHost?.getAttribute?.('data-path'));
+  if (direct) return direct;
+  return markdownPathFromTabTarget(plugin, target);
+}
+
+function markdownPathFromDragEvent(plugin, event, fallback = '') {
+  const fromTarget = markdownPathFromNativeDragTarget(plugin, event?.target);
+  if (fromTarget) return fromTarget;
+  const data = event?.dataTransfer;
+  for (const type of ['text/plain', 'text/uri-list', 'text']) {
+    let raw = '';
+    try { raw = data?.getData?.(type) || ''; } catch {}
+    const path = markdownPathIfValid(plugin, raw);
+    if (path) return path;
+  }
+  return markdownPathIfValid(plugin, fallback);
+}
+
+function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
+  if (!doc?.addEventListener || !doc?.body) return null;
+  let pointerCandidate = '';
+  let nativeDropEl = null;
+
+  const removeDrop = () => {
+    nativeDropEl?.remove?.();
+    nativeDropEl = null;
+  };
+
+  const showDrop = (path) => {
+    removeDrop();
+    nativeDropEl = workbenchStudyDropTarget(doc, doc.body, async () => {
+      const selectedPath = String(path || pointerCandidate || '').trim();
+      pointerCandidate = '';
+      removeDrop();
+      if (!selectedPath) return;
+      try {
+        const result = await enterCurrentPotPlayerStudyMode(plugin, selectedPath, '');
+        new Notice(`已进入学习模式 · ${noteDisplayName({ path: selectedPath })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
+      } catch (error) {
+        new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      }
+    });
+    nativeDropEl.classList?.add?.('is-native-obsidian');
+  };
+
+  const onPointerDown = (event) => {
+    pointerCandidate = markdownPathFromNativeDragTarget(plugin, event?.target);
+  };
+
+  const onDragStart = (event) => {
+    const path = markdownPathFromDragEvent(plugin, event, pointerCandidate);
+    if (!path) return;
+    pointerCandidate = path;
+    showDrop(path);
+  };
+
+  const onDragEnd = () => {
+    pointerCandidate = '';
+    removeDrop();
+  };
+
+  const onDropAnywhere = (event) => {
+    if (nativeDropEl?.contains?.(event?.target)) return;
+    pointerCandidate = '';
+    removeDrop();
+  };
+
+  doc.addEventListener('pointerdown', onPointerDown, true);
+  doc.addEventListener('dragstart', onDragStart, false);
+  doc.addEventListener('dragend', onDragEnd, true);
+  doc.addEventListener('drop', onDropAnywhere, true);
+
+  const cleanup = () => {
+    doc.removeEventListener?.('pointerdown', onPointerDown, true);
+    doc.removeEventListener?.('dragstart', onDragStart, false);
+    doc.removeEventListener?.('dragend', onDragEnd, true);
+    doc.removeEventListener?.('drop', onDropAnywhere, true);
+    removeDrop();
+  };
+  plugin?.register?.(cleanup);
+  return { cleanup, removeDrop, showDrop };
+}
+
 function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
   if (!doc?.querySelectorAll || !plugin?.manifest?.id) return null;
   installPickerUxStyles(plugin, doc);
+  const nativeStudyDrag = installNativeObsidianStudyDrag(plugin, doc);
   const selector = `.workspace-leaf-content[data-type="${plugin.manifest.id}-workbench"]`;
   let draggedStudyNote = null;
   let workbenchDropEl = null;
@@ -1053,7 +1167,7 @@ function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
     observer?.disconnect?.();
     removeWorkbenchDrop();
   });
-  return { inject, observer, removeWorkbenchDrop };
+  return { inject, observer, removeWorkbenchDrop, nativeStudyDrag };
 }
 
 module.exports = {
@@ -1066,6 +1180,10 @@ module.exports = {
   createProjectNote,
   enterCurrentPotPlayerStudyMode,
   installPickerUxStyles,
+  installNativeObsidianStudyDrag,
+  markdownPathFromDragEvent,
+  markdownPathFromNativeDragTarget,
+  markdownPathFromTabTarget,
   focusProjectNoteAtEnd,
   installProjectNoteEntryPoints,
   markdownFiles,
