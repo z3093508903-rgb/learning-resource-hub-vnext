@@ -86,3 +86,36 @@ Those remain PotPlayer-only to avoid adding browser screenshot permissions befor
 Users who do not install the browser extension retain all existing Go Study behavior.
 
 Therefore the browser bridge can later be distributed through browser stores without changing the Obsidian plugin's core data model.
+
+
+## Focus Semantics
+
+A browser document does **not** need `document.hasFocus() === true` to remain the valid learning source.
+
+Reason:
+
+Go Study Companion is intentionally always-on-top and may own Windows OS focus while the user continues watching the same Bilibili tab.
+
+Eligibility is:
+
+- state is fresh;
+- page is visible;
+- extension background reports `sender.tab.active === true`.
+
+The browser's OS/window focus is diagnostic only.
+
+This separates:
+- **active video tab identity**
+from
+- **which desktop window currently owns keyboard focus**.
+
+## Onboarding
+
+The Obsidian settings page should expose:
+- bridge download / install entry;
+- connection check;
+- started / connected state.
+
+The Workbench's lightweight video-enhancement indicator should include bridge state without turning into a large control strip.
+
+Browser security prevents the Obsidian plugin from silently installing an unpacked extension. Preview builds therefore open the project Releases page and explain Load Unpacked. A production browser-store listing may replace that link later.
