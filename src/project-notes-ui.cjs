@@ -969,9 +969,168 @@ function chooseStudyNote(plugin, projectId, resource) {
   return new Promise((resolve) => new StudyNotePickerModal(plugin.app, plugin, projectId, resource, resolve).open());
 }
 
+function markdownPathIfValid(plugin, value) {
+  const raw = String(value || '').trim().replace(/^obsidian:\/\/open\?path=/i, '');
+  if (!raw) return '';
+  let path = raw;
+  try { path = decodeURIComponent(path); } catch {}
+  path = path.replace(/^\/+/, '').replace(/\\/g, '/');
+  const file = plugin?.app?.vault?.getAbstractFileByPath?.(path);
+  if (!file || Array.isArray(file.children) || String(file.extension || '').toLowerCase() !== 'md') return '';
+  return String(file.path || '');
+}
+
+function markdownPathFromTabTarget(plugin, target) {
+  const tab = target?.closest?.('.workspace-tab-header');
+  if (!tab) return '';
+  const leaves = plugin?.app?.workspace?.getLeavesOfType?.('markdown') || [];
+  for (const leaf of leaves) {
+    const header = leaf?.tabHeaderEl;
+    if (!header) continue;
+    if (header === tab || header.contains?.(target) || tab.contains?.(header)) {
+      const path = markdownPathIfValid(plugin, leaf?.view?.file?.path);
+      if (path) return path;
+    }
+  }
+  return markdownPathIfValid(plugin, tab.dataset?.path || tab.getAttribute?.('data-path'));
+}
+
+function markdownPathFromNativeDragTarget(plugin, target) {
+  if (!target?.closest) return '';
+  if (target.closest('[data-go-study-study-note-path]')) return '';
+  const pathHost = target.closest('.nav-file-title[data-path], .nav-file[data-path], .tree-item-self[data-path], [data-path]');
+  const direct = markdownPathIfValid(plugin, pathHost?.dataset?.path || pathHost?.getAttribute?.('data-path'));
+  if (direct) return direct;
+  return markdownPathFromTabTarget(plugin, target);
+}
+
+function markdownPathFromDragEvent(plugin, event, fallback = '') {
+  const fromTarget = markdownPathFromNativeDragTarget(plugin, event?.target);
+  if (fromTarget) return fromTarget;
+  const data = event?.dataTransfer;
+  for (const type of ['text/plain', 'text/uri-list', 'text']) {
+    let raw = '';
+    try { raw = data?.getData?.(type) || ''; } catch {}
+    const path = markdownPathIfValid(plugin, raw);
+    if (path) return path;
+  }
+  return markdownPathIfValid(plugin, fallback);
+}
+
+function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
+  if (!doc?.addEventListener || !doc?.body) return null;
+  let pointerCandidate = '';
+  let pointerStart = null;
+  let nativeDropEl = null;
+
+  const removeDrop = () => {
+    nativeDropEl?.remove?.();
+    nativeDropEl = null;
+  };
+
+  const completeDrop = async (path) => {
+    const droppedPath = String(path || pointerCandidate || '').trim();
+    pointerCandidate = '';
+    pointerStart = null;
+    removeDrop();
+    if (!droppedPath) return;
+    try {
+      const result = await enterCurrentPotPlayerStudyMode(plugin, droppedPath, '');
+      new Notice(`已进入学习模式 · ${noteDisplayName({ path: droppedPath })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
+    } catch (error) {
+      new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+    }
+  };
+
+  const showDrop = (path) => {
+    const selectedPath = String(path || '').trim();
+    if (!selectedPath) return;
+    if (nativeDropEl?.dataset?.goStudyNativeNotePath === selectedPath) return;
+    removeDrop();
+    nativeDropEl = workbenchStudyDropTarget(doc, doc.body, async () => completeDrop(selectedPath));
+    nativeDropEl.classList?.add?.('is-native-obsidian');
+    if (nativeDropEl?.dataset) nativeDropEl.dataset.goStudyNativeNotePath = selectedPath;
+  };
+
+  const onPointerDown = (event) => {
+    pointerCandidate = markdownPathFromNativeDragTarget(plugin, event?.target);
+    pointerStart = pointerCandidate
+      ? { x: Number(event?.clientX || 0), y: Number(event?.clientY || 0) }
+      : null;
+  };
+
+  const onPointerMove = (event) => {
+    if (!pointerCandidate || !pointerStart || nativeDropEl) return;
+    if (Number(event?.buttons || 0) !== 1) return;
+    const dx = Number(event?.clientX || 0) - pointerStart.x;
+    const dy = Number(event?.clientY || 0) - pointerStart.y;
+    if ((dx * dx) + (dy * dy) < 64) return;
+    showDrop(pointerCandidate);
+  };
+
+  const onDragStart = (event) => {
+    const path = markdownPathFromDragEvent(plugin, event, pointerCandidate);
+    if (!path) return;
+    pointerCandidate = path;
+    showDrop(path);
+  };
+
+  const onDragEnd = () => {
+    pointerCandidate = '';
+    pointerStart = null;
+    removeDrop();
+  };
+
+  const onPointerUp = (event) => {
+    if (pointerCandidate && nativeDropEl?.getBoundingClientRect) {
+      const rect = nativeDropEl.getBoundingClientRect();
+      const x = Number(event?.clientX || 0);
+      const y = Number(event?.clientY || 0);
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        void completeDrop(pointerCandidate);
+        return;
+      }
+    }
+    pointerCandidate = '';
+    pointerStart = null;
+    removeDrop();
+  };
+
+  const onDropAnywhere = (event) => {
+    if (nativeDropEl?.contains?.(event?.target)) return;
+    pointerCandidate = '';
+    pointerStart = null;
+    removeDrop();
+  };
+
+  doc.addEventListener('pointerdown', onPointerDown, true);
+  doc.addEventListener('pointermove', onPointerMove, true);
+  doc.addEventListener('pointerup', onPointerUp, true);
+  doc.addEventListener('pointercancel', onPointerUp, true);
+  doc.addEventListener('dragstart', onDragStart, false);
+  doc.addEventListener('dragend', onDragEnd, true);
+  doc.addEventListener('drop', onDropAnywhere, true);
+
+  const cleanup = () => {
+    doc.removeEventListener?.('pointerdown', onPointerDown, true);
+    doc.removeEventListener?.('pointermove', onPointerMove, true);
+    doc.removeEventListener?.('pointerup', onPointerUp, true);
+    doc.removeEventListener?.('pointercancel', onPointerUp, true);
+    doc.removeEventListener?.('dragstart', onDragStart, false);
+    doc.removeEventListener?.('dragend', onDragEnd, true);
+    doc.removeEventListener?.('drop', onDropAnywhere, true);
+    removeDrop();
+  };
+  plugin?.register?.(cleanup);
+  return { cleanup, removeDrop, showDrop };
+}
+
 function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
   if (!doc?.querySelectorAll || !plugin?.manifest?.id) return null;
   installPickerUxStyles(plugin, doc);
+  const nativeStudyDrag = installNativeObsidianStudyDrag(plugin, doc);
   const selector = `.workspace-leaf-content[data-type="${plugin.manifest.id}-workbench"]`;
   let draggedStudyNote = null;
   let workbenchDropEl = null;
@@ -1053,7 +1212,7 @@ function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
     observer?.disconnect?.();
     removeWorkbenchDrop();
   });
-  return { inject, observer, removeWorkbenchDrop };
+  return { inject, observer, removeWorkbenchDrop, nativeStudyDrag };
 }
 
 module.exports = {
@@ -1066,6 +1225,10 @@ module.exports = {
   createProjectNote,
   enterCurrentPotPlayerStudyMode,
   installPickerUxStyles,
+  installNativeObsidianStudyDrag,
+  markdownPathFromDragEvent,
+  markdownPathFromNativeDragTarget,
+  markdownPathFromTabTarget,
   focusProjectNoteAtEnd,
   installProjectNoteEntryPoints,
   markdownFiles,

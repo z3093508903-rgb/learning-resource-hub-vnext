@@ -2,6 +2,8 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
 
 const {
   BUILTIN_LAYOUTS,
@@ -199,4 +201,15 @@ test('companion defaults to topmost, keeps a short note-only title, and can unpi
   await setCompanionAlwaysOnTop(plugin, false, { nativeWindow });
   assert.equal(plugin.state.uiState.companionNoteWindow.alwaysOnTop, false);
   assert.ok(calls.some(([kind, value]) => kind === 'top' && value === false));
+});
+
+
+test('Companion does not CSS-zoom CodeMirror, preserving normal mouse-to-caret hit testing', () => {
+  const css = fs.readFileSync(path.resolve(__dirname, '..', 'styles.css'), 'utf8');
+  const companionStart = css.indexOf('/* Go Study beta.18 Companion Note Window */');
+  const timelineStart = css.indexOf('/* beta20 · optional lightweight floating timeline */', companionStart);
+  const block = css.slice(companionStart, timelineStart);
+  assert.match(block, /workspace-leaf-content \{[\s\S]*zoom:\s*1 !important/);
+  assert.doesNotMatch(block, /zoom:\s*var\(--go-study-companion-scale\)/);
+  assert.match(block, /font-size:\s*calc\(1em \* var\(--go-study-companion-scale\)\)/);
 });

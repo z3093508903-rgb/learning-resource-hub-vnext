@@ -109,3 +109,26 @@ test('dragging a navigation note into freeform Study Mode does not reopen or res
   assert.match(block, /requestNativePotPlayer\('current'/);
   assert.doesNotMatch(block, /openResource|openPositionedPlayTarget|nativePlay|requestNativePotPlayer\('play'/);
 });
+
+
+test('native Obsidian file-tree and tab drags can summon the global Study Mode target', () => {
+  assert.match(uiSource, /installNativeObsidianStudyDrag/);
+  assert.match(uiSource, /\.nav-file-title\[data-path\]/);
+  assert.match(uiSource, /\.workspace-tab-header/);
+  assert.match(uiSource, /getLeavesOfType\?\.\('markdown'\)/);
+  assert.match(uiSource, /doc\.addEventListener\('dragstart'/);
+  assert.match(uiSource, /doc\.addEventListener\('pointermove'/);
+  assert.match(uiSource, /is-native-obsidian/);
+  assert.match(uiSource, /enterCurrentPotPlayerStudyMode\(plugin, droppedPath, ''\)/);
+});
+
+test('native drag bridge ignores Go Study workbench rows so only one drop target owns those drags', () => {
+  assert.match(uiSource, /target\.closest\('\[data-go-study-study-note-path\]'\)/);
+});
+
+
+test('pointer-based native tab dragging can complete by releasing over the Study Mode target', () => {
+  assert.match(uiSource, /nativeDropEl\?\.getBoundingClientRect/);
+  assert.match(uiSource, /x >= rect\.left && x <= rect\.right/);
+  assert.match(uiSource, /void completeDrop\(pointerCandidate\)/);
+});

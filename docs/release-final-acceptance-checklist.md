@@ -89,9 +89,11 @@
 
 前置：用户已经自己在 PotPlayer 打开一个未收录视频。
 
-### 3.1 导航页拖动
+### 3.1 笔记拖动入口
 - [ ] Go Study 项目导航页中的 Markdown 笔记可拖动
-- [ ] 开始拖动后出现与“开始学习”一致的“右侧小窗 / 学习模式”入口
+- [ ] Obsidian 左侧原生文件树中的 Markdown 笔记可拖动
+- [ ] Obsidian 已打开的 Markdown 标签页可拖动
+- [ ] 从以上任一入口开始拖动后，都出现同款“右侧小窗 / 学习模式”入口
 - [ ] 拖入入口后打开 Companion Note
 - [ ] Companion 默认使用 right-rail
 - [ ] Companion 自动锁定为 Capture Target
@@ -128,6 +130,9 @@
 
 - [ ] 从 Managed Study Mode 打开
 - [ ] 从 Freeform Study Mode 打开
+- [ ] 鼠标点击任意可编辑位置时，光标跟随点击位置
+- [ ] 点击行首 / 行中 / 行尾后输入，文字写入准确位置
+- [ ] 滚动后再次点击，光标命中仍与普通 Obsidian 笔记一致
 - [ ] 标题栏只显示笔记名
 - [ ] 图钉 ON/OFF 正常
 - [ ] 小窗位置与尺寸保存

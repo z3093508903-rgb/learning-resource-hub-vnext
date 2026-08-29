@@ -914,7 +914,12 @@ body.go-study-companion-window .workspace-leaf {
   border: 0 !important;
 }
 body.go-study-companion-window .workspace-leaf-content {
-  zoom: var(--go-study-companion-scale);
+  /* Do not CSS-zoom CodeMirror: Chromium hit-testing can desync from the visual caret. */
+  zoom: 1 !important;
+}
+body.go-study-companion-window .markdown-source-view.mod-cm6 .cm-editor,
+body.go-study-companion-window .markdown-reading-view {
+  font-size: calc(1em * var(--go-study-companion-scale));
 }
 body.go-study-companion-window .view-header {
   min-height: 28px;
@@ -947,10 +952,6 @@ body.go-study-companion-window .go-study-companion-pin.is-active {
 body.go-study-companion-window .go-study-companion-pin:hover {
   color: var(--text-accent);
   background: color-mix(in srgb, var(--interactive-accent) 12%, transparent);
-}
-body.go-study-companion-window .markdown-source-view.mod-cm6 .cm-editor,
-body.go-study-companion-window .markdown-reading-view {
-  font-size: 0.94em;
 }
 body.go-study-companion-window .markdown-source-view.mod-cm6 .cm-contentContainer,
 body.go-study-companion-window .markdown-reading-view .markdown-preview-sizer {
@@ -1264,4 +1265,18 @@ body.go-study-companion-window .go-study-timeline-hover {
 .markdown-source-view.mod-cm6 a[href^="obsidian://go-study"].external-link {
   padding-inline-end: 0.42em !important;
   background-image: none !important;
+}
+
+
+/* beta20.7 · native Obsidian drag target */
+.go-study-study-mode-drop-target.is-native-obsidian {
+  position: fixed;
+  left: auto;
+  right: 24px;
+  top: 50%;
+  z-index: 2147483000;
+  transform: translateY(-50%) rotate(.35deg);
+}
+.go-study-study-mode-drop-target.is-native-obsidian.is-active {
+  transform: translateY(-50%) rotate(0deg) scale(1.035);
 }
