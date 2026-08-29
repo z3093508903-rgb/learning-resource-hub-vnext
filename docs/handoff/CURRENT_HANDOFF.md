@@ -5,7 +5,7 @@
 
 ## 0. 一句话状态
 
-Go Study 已推进到 **beta20.12.1 发布前收口 / Bilibili Companion Focus Hotfix 阶段**。
+Go Study 已推进到 **0.3.0 RC1 / Full RC Audit / Feature Frozen**。
 
 核心链路已经成形：
 
@@ -948,3 +948,38 @@ beta20.12 已重写为 event-driven：
 Go Study 的核心体验已经成形。现在价值最高的工作是：
 
 > 用真实 Obsidian + Windows + PotPlayer 把最后几个交互和数据边界钉死，然后进入 RC。
+
+
+---
+
+## RC1 Full Audit
+
+Current product branch:
+- `release/go-study-0.3.0-rc1`
+- HEAD `2604ff769554792cb7f7b2abad41c48405ccc46c`
+- RC release target `b76dd0d944b3e8f2c6ceb73c5b05525f17c80f20`
+- 412 / 412 tests PASS
+- Release readiness PASS
+
+beta20.12.3 Windows 真人已 PASS。
+
+RC1 新增的唯一代码硬化：
+- `obsidian://go-study` protocol registration fail-safe；
+- 检测 `learning-resource-hub-next` 共存；
+- 协议争用不得让 Go Study 整插件启动失败；
+- 明确提示停用旧版并 reload。
+
+不要再加功能。
+
+下一步只执行：
+1. restart ×2；
+2. named backup + restore；
+3. OpenList auth/playback/seek；
+4. Managed v3 / legacy v1 回链 smoke；
+5. Timeline / Companion caret / Light theme 短回归；
+6. legacy coexistence reload（旧插件仍存在时）；
+7. 决定 Stable permanent plugin identity；
+8. final strict release check；
+9. Publish or Hold。
+
+完整审计表：`docs/release/RC_AUDIT_0.3.0.md`
