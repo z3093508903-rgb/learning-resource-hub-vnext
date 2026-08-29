@@ -981,6 +981,8 @@ const {
 } = __rhLoad("resource-resolver.cjs");
 const { matchingManagedResource, matchingManagedResourceByPortableName } = __rhLoad("media-session.cjs");
 const { openPortableFreeformReference } = __rhLoad("freeform-playback.cjs");
+const { launchPotPlayerTarget } = __rhLoad("native-potplayer.cjs");
+const { browserModifierActive, browserUrlAtPosition } = __rhLoad("freeform-link-ui.cjs");
 const {
   browserUrlForReference,
   currentResourceForReference,
@@ -1029,9 +1031,25 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async handleResourceReference(params) {
     try {
       const reference = parseProtocolParams(params);
+      if (browserModifierActive(this)) return await this.openReferenceInBrowser(reference);
       return await this.openResourceReference(reference);
     } catch (error) {
       new Notice(`Go Study 回链无法打开：${error instanceof Error ? error.message : String(error)}`, 6000);
+      return false;
+    }
+  }
+
+  async openReferenceInBrowser(reference) {
+    try {
+      const web = await Promise.resolve(this.browserUrlForReference(reference));
+      if (!web) {
+        new Notice('这条 Go Study 回链没有可用的网页来源。', 6000);
+        return false;
+      }
+      await shell.openExternal(browserUrlAtPosition(web, reference.position));
+      return true;
+    } catch (error) {
+      new Notice(`Go Study 浏览器跳转失败：${error instanceof Error ? error.message : String(error)}`, 6000);
       return false;
     }
   }
@@ -1140,13 +1158,13 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
         const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
         const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await shell.openExternal(this.toPotPlayerUri(`${baseUrl}/d${encoded}${sign}`, playerTime));
+        await launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, playerTime);
       } else if (target.type === 'potplayer') {
-        await shell.openExternal(this.toPotPlayerUri(target.target, playerTime));
+        await launchPotPlayerTarget(target.target, playerTime);
       } else if (target.type === 'uri') {
         const legacyBili = model.parseBiliVideoUrl(target.uri);
         if (!legacyBili) throw new Error('当前回链只允许跳转到受支持的视频资源。');
-        await shell.openExternal(this.toPotPlayerUri(legacyBili.canonicalUrl, playerTime));
+        await launchPotPlayerTarget(legacyBili.canonicalUrl, playerTime);
       } else {
         throw new Error('当前资源没有支持定位播放的启动方式。');
       }
@@ -1354,6 +1372,10 @@ module.exports = ResourceHubNextPlugin;
 let shell = null;
 try { shell = require('electron').shell; } catch {}
 const { parseReferenceUri } = __rhLoad("resource-reference.cjs");
+const {
+  legacyJvCompatibilityEnabled,
+  parseLegacyJvUri
+} = __rhLoad("legacy-jv.cjs");
 
 function stopLinkEvent(event) {
   event.preventDefault?.();
@@ -1369,10 +1391,10 @@ function httpLocator(value) {
 }
 
 function jvWebLocator(rawUri) {
-  let uri;
-  try { uri = new URL(String(rawUri || '').trim()); } catch { return ''; }
-  if (uri.protocol !== 'jv:' || uri.hostname !== 'open') return '';
-  return httpLocator(uri.searchParams.get('path'));
+  try {
+    const reference = parseLegacyJvUri(rawUri);
+    return reference.web || httpLocator(reference.locator);
+  } catch { return ''; }
 }
 
 function positionSeconds(position) {
@@ -1404,6 +1426,14 @@ function modifierPressed(event) {
   return Boolean(event?.ctrlKey || event?.metaKey);
 }
 
+function browserModifierActive(plugin, now = Date.now()) {
+  const state = plugin?._goStudyBrowserModifier?.modifierState;
+  if (!state) return false;
+  if (state.ctrl || state.meta) return true;
+  const last = Number(state.lastPressedAt || 0);
+  return last > 0 && Number(now) - last <= 750;
+}
+
 function referenceDocuments(plugin, primaryDoc = globalThis.document) {
   const docs = new Set();
   if (primaryDoc?.addEventListener) docs.add(primaryDoc);
@@ -1430,11 +1460,22 @@ function makeReferenceClickHandler(plugin, shellImpl) {
     const href = String(target.getAttribute?.('href') || target.href || '');
 
     if (href.startsWith('jv://open?')) {
-      if (!modifierPressed(event)) return;
-      const web = jvWebLocator(href);
-      if (!web) return;
+      let reference;
+      try { reference = parseLegacyJvUri(href); } catch { return; }
+
+      if (modifierPressed(event)) {
+        const web = reference.web || httpLocator(reference.locator);
+        if (!web) return;
+        stopLinkEvent(event);
+        void shellImpl.openExternal(browserUrlAtPosition(web, reference.position));
+        return;
+      }
+
+      if (!legacyJvCompatibilityEnabled(plugin)) return;
       stopLinkEvent(event);
-      void shellImpl.openExternal(web);
+      if (typeof plugin?.openFreeformReference === 'function') {
+        void Promise.resolve(plugin.openFreeformReference(reference)).catch(() => {});
+      }
       return;
     }
 
@@ -1476,27 +1517,60 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
   if (!shellImpl?.openExternal) return null;
 
   const bound = new Map();
+  const modifierState = {
+    ctrl: false,
+    meta: false,
+    lastPressedAt: 0
+  };
+
+  const rememberModifier = (event, down) => {
+    const hadModifier = modifierState.ctrl || modifierState.meta || Boolean(event?.ctrlKey || event?.metaKey);
+    if (event?.key === 'Control') modifierState.ctrl = Boolean(down);
+    else if (event?.key === 'Meta') modifierState.meta = Boolean(down);
+    else {
+      modifierState.ctrl = Boolean(event?.ctrlKey);
+      modifierState.meta = Boolean(event?.metaKey);
+    }
+    if (down && (modifierState.ctrl || modifierState.meta)) modifierState.lastPressedAt = Date.now();
+    if (!down && hadModifier) modifierState.lastPressedAt = Date.now();
+  };
+
   const bindDocument = (targetDoc) => {
     if (!targetDoc?.addEventListener || bound.has(targetDoc)) return null;
     const onClick = makeReferenceClickHandler(plugin, shellImpl);
+    const onKeyDown = (event) => rememberModifier(event, true);
+    const onKeyUp = (event) => rememberModifier(event, false);
+    const onBlur = () => {
+      if (modifierState.ctrl || modifierState.meta) modifierState.lastPressedAt = Date.now();
+      modifierState.ctrl = false;
+      modifierState.meta = false;
+    };
+
     targetDoc.addEventListener('click', onClick, true);
-    bound.set(targetDoc, onClick);
+    targetDoc.addEventListener('keydown', onKeyDown, true);
+    targetDoc.addEventListener('keyup', onKeyUp, true);
+    targetDoc.defaultView?.addEventListener?.('blur', onBlur, true);
+    bound.set(targetDoc, { onClick, onKeyDown, onKeyUp, onBlur });
     return onClick;
   };
+
   const refresh = () => {
     for (const targetDoc of referenceDocuments(plugin, doc)) bindDocument(targetDoc);
     return bound.size;
   };
   const cleanup = () => {
-    for (const [targetDoc, onClick] of bound) {
-      targetDoc.removeEventListener?.('click', onClick, true);
+    for (const [targetDoc, handlers] of bound) {
+      targetDoc.removeEventListener?.('click', handlers.onClick, true);
+      targetDoc.removeEventListener?.('keydown', handlers.onKeyDown, true);
+      targetDoc.removeEventListener?.('keyup', handlers.onKeyUp, true);
+      targetDoc.defaultView?.removeEventListener?.('blur', handlers.onBlur, true);
     }
     bound.clear();
     if (plugin?._goStudyBrowserModifier?.refresh === refresh) plugin._goStudyBrowserModifier = null;
   };
 
+  plugin._goStudyBrowserModifier = { refresh, cleanup, bound, modifierState };
   refresh();
-  plugin._goStudyBrowserModifier = { refresh, cleanup, bound };
 
   const workspace = plugin?.app?.workspace;
   const refs = [];
@@ -1512,15 +1586,17 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
   plugin?.register?.(cleanup);
 
   return {
-    onClick: bound.get(doc) || null,
+    onClick: bound.get(doc)?.onClick || null,
     refresh,
     cleanup,
-    bound
+    bound,
+    modifierState
   };
 }
 
 module.exports = {
   bilibiliUrlAtPosition,
+  browserModifierActive,
   browserUrlAtPosition,
   httpLocator,
   installFreeformBrowserModifier,
@@ -1536,8 +1612,8 @@ module.exports = {
 "freeform-playback.cjs": (module, exports, require) => {
 'use strict';
 
-const { formatPotPlayerTime } = __rhLoad("resource-resolver.cjs");
 const { normalizeFreeformLocator } = __rhLoad("resource-reference.cjs");
+const { launchPotPlayerTarget } = __rhLoad("native-potplayer.cjs");
 
 const VIDEO_EXTENSIONS = new Set([
   'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm4v', 'ts', 'm2ts'
@@ -1560,39 +1636,38 @@ function localVideoAllowed(locator) {
   return VIDEO_EXTENSIONS.has(ext);
 }
 
-function buildJvPlaybackUri(locator, position) {
-  const target = normalizeFreeformLocator(locator);
-  const playerTime = formatPotPlayerTime(position);
-  return `jv://open?path=${encodeURIComponent(target)}&time=${encodeURIComponent(playerTime)}`;
-}
-
 async function openPortableFreeformReference(reference, options = {}) {
   const locator = normalizeFreeformLocator(reference?.locator ?? reference?.path);
   const kind = locatorKind(locator);
   const platform = String(options.platform || process.platform);
+
+  if (platform === 'win32') {
+    if (kind !== 'web' && kind !== 'windows-local') {
+      throw new Error('这个本地视频链接来自另一平台；请先在当前设备收录同一视频，或等待路径映射功能。');
+    }
+    if (kind === 'windows-local' && !localVideoAllowed(locator)) {
+      throw new Error('Go Study 自由回链只允许打开受支持的视频文件。');
+    }
+    const launcher = options.launchPotPlayerTarget || launchPotPlayerTarget;
+    const launched = await launcher(locator, reference.position, options.launchOptions || {});
+    return {
+      transport: launched?.transport || 'native-potplayer-cli',
+      positionApplied: launched?.positionApplied !== false,
+      locator
+    };
+  }
+
   const shellImpl = options.shell || (() => {
     try { return require('electron').shell; }
     catch { throw new Error('当前运行环境无法访问系统打开能力。'); }
   })();
 
   if (kind === 'web') {
-    if (platform === 'win32') {
-      await shellImpl.openExternal(buildJvPlaybackUri(locator, reference.position));
-      return { transport: 'windows-jv', positionApplied: true, locator };
-    }
     await shellImpl.openExternal(locator);
     return { transport: 'browser', positionApplied: false, locator };
   }
 
   if (!localVideoAllowed(locator)) throw new Error('Go Study 自由回链只允许打开受支持的视频文件。');
-
-  if (platform === 'win32') {
-    if (kind !== 'windows-local') {
-      throw new Error('这个本地视频链接来自另一平台；请先在当前设备收录同一视频，或等待路径映射功能。');
-    }
-    await shellImpl.openExternal(buildJvPlaybackUri(locator, reference.position));
-    return { transport: 'windows-jv', positionApplied: true, locator };
-  }
 
   if (platform === 'darwin' || platform === 'linux') {
     if (kind !== 'posix-local') {
@@ -1603,12 +1678,11 @@ async function openPortableFreeformReference(reference, options = {}) {
     return { transport: 'system-player', positionApplied: false, locator };
   }
 
-  throw new Error(`当前平台暂不支持直接打开未收录本地视频：${platform}`);
+  throw new Error('当前平台暂不支持直接打开未收录本地视频：' + platform);
 }
 
 module.exports = {
   VIDEO_EXTENSIONS,
-  buildJvPlaybackUri,
   localVideoAllowed,
   locatorKind,
   openPortableFreeformReference
@@ -2605,6 +2679,66 @@ module.exports = {
 };
 
 },
+"legacy-jv.cjs": (module, exports, require) => {
+'use strict';
+
+const {
+  FREEFORM_REFERENCE_VERSION,
+  freeformLocatorName,
+  validateFreeformReferenceData
+} = __rhLoad("resource-reference.cjs");
+
+function parseLegacyJvTime(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return 0;
+  if (/^\d+(?:\.\d+)?$/.test(raw)) return Number(raw);
+
+  const parts = raw.split(':');
+  if (parts.length < 2 || parts.length > 3) throw new Error('旧 JV 链接中的时间格式无效。');
+  const values = parts.map(Number);
+  if (values.some((item) => !Number.isFinite(item) || item < 0)) throw new Error('旧 JV 链接中的时间格式无效。');
+  const seconds = values.pop();
+  const minutes = values.pop() || 0;
+  const hours = values.pop() || 0;
+  if (seconds >= 60 || minutes >= 60) throw new Error('旧 JV 链接中的时间格式无效。');
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function legacyJvCompatibilityEnabled(plugin) {
+  return Boolean(plugin?.state?.uiState?.legacyJvCompatibilityEnabled);
+}
+
+function parseLegacyJvUri(rawUri) {
+  let uri;
+  try { uri = new URL(String(rawUri || '').trim()); }
+  catch { throw new Error('旧 JV 链接格式无效。'); }
+
+  if (uri.protocol !== 'jv:' || uri.hostname !== 'open') {
+    throw new Error('这不是受支持的旧 JV 链接。');
+  }
+
+  const locator = String(uri.searchParams.get('path') || '').trim();
+  if (!locator) throw new Error('旧 JV 链接缺少媒体地址。');
+  const seconds = parseLegacyJvTime(uri.searchParams.get('time'));
+  const web = /^https?:\/\//i.test(locator) ? locator : '';
+
+  return validateFreeformReferenceData({
+    mode: 'freeform',
+    locator,
+    name: freeformLocatorName(locator),
+    ...(web ? { web } : {}),
+    position: { type: 'time', seconds },
+    version: FREEFORM_REFERENCE_VERSION
+  });
+}
+
+module.exports = {
+  legacyJvCompatibilityEnabled,
+  parseLegacyJvTime,
+  parseLegacyJvUri
+};
+
+},
 "main.cjs": (module, exports, require) => {
 'use strict';
 
@@ -2633,6 +2767,8 @@ try {
   dialog = dialog || remote.dialog;
 } catch { /* Current Obsidian versions expose Electron directly. */ }
 const model = __rhLoad("model.cjs");
+const { launchPotPlayerTarget } = __rhLoad("native-potplayer.cjs");
+const { legacyJvCompatibilityEnabled, parseLegacyJvUri } = __rhLoad("legacy-jv.cjs");
 const {
   clampMemoHeight,
   deleteMemoHeight,
@@ -3182,10 +3318,6 @@ class ResourceHubNextPlugin extends Plugin {
     }) || null;
   }
 
-  toPotPlayerUri(target, time = '00:00:00') {
-    return `jv://open?path=${encodeURIComponent(String(target || '').trim())}&time=${encodeURIComponent(time)}`;
-  }
-
   resourceActions(resource) {
     return model.resolveResourceActions(resource, this.state.sources);
   }
@@ -3239,7 +3371,7 @@ class ResourceHubNextPlugin extends Plugin {
         const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
         const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await shell.openExternal(this.toPotPlayerUri(`${baseUrl}/d${encoded}${sign}`));
+        await launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, 0);
       } else if (target.type === 'openlist-file') {
         const source = this.state.sources[target.sourceId] || Object.values(this.state.sources).find((item) => item.type === 'openlist' && !item.deletedAt);
         if (!source) throw new Error('请先配置 OpenList 来源连接。');
@@ -3250,16 +3382,24 @@ class ResourceHubNextPlugin extends Plugin {
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
         await shell.openExternal(`${baseUrl}/d${encoded}${sign}`);
       } else if (target.type === 'potplayer') {
-        await shell.openExternal(this.toPotPlayerUri(target.target));
+        await launchPotPlayerTarget(target.target, 0);
       } else if (target.type === 'uri') {
         const legacyBili = model.parseBiliVideoUrl(target.uri);
         const legacyOpenListFolder = model.parseOpenListUrl(target.uri, Object.values(this.state.sources));
-        if (legacyBili) await shell.openExternal(this.toPotPlayerUri(legacyBili.canonicalUrl));
+        if (legacyBili) await launchPotPlayerTarget(legacyBili.canonicalUrl, 0);
         else if (legacyOpenListFolder) {
           new Notice('检测到旧版 OpenList 目录条目，请重新导入为可播放的视频合集。', 5000);
           this.openAddModal({ mode: 'source', sourceType: 'openlist', openListInput: target.uri, projectId: this.state.uiState.currentProjectId || '' });
           return false;
-        } else await shell.openExternal(model.validateExternalUri(target.uri, ['https:', 'http:', 'jv:']));
+        } else {
+          const validated = model.validateExternalUri(target.uri, ['https:', 'http:', 'jv:']);
+          if (/^jv:/i.test(validated) && legacyJvCompatibilityEnabled(this)) {
+            const reference = parseLegacyJvUri(validated);
+            await launchPotPlayerTarget(reference.locator, reference.position);
+          } else {
+            await shell.openExternal(validated);
+          }
+        }
       } else throw new Error('没有可用的启动地址。');
       await this.markResourceStarted(resource);
       new Notice(`已启动并默认完成：${resource.title}`);
@@ -9020,7 +9160,9 @@ module.exports = {
 "native-potplayer.cjs": (module, exports, require) => {
 'use strict';
 
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const { clipboard } = require('electron');
 
 const DEFAULT_IMMERSIVE_SHORTCUTS = Object.freeze({
@@ -9245,17 +9387,143 @@ function resolveElectronGlobalShortcut(options = {}) {
   return null;
 }
 
+
+function potPlayerExecutableCandidates(env = process.env) {
+  const roots = [
+    String(env.ProgramW6432 || '').trim(),
+    String(env.ProgramFiles || '').trim(),
+    String(env['ProgramFiles(x86)'] || '').trim(),
+    String(env.LOCALAPPDATA || '').trim()
+  ].filter(Boolean);
+  const candidates = [];
+  for (const root of roots) {
+    for (const relative of [
+      ['DAUM', 'PotPlayer', 'PotPlayerMini64.exe'],
+      ['DAUM', 'PotPlayer', 'PotPlayerMini.exe'],
+      ['PotPlayer', 'PotPlayerMini64.exe'],
+      ['PotPlayer', 'PotPlayerMini.exe']
+    ]) candidates.push(path.join(root, ...relative));
+  }
+  return [...new Set(candidates)];
+}
+
+function normalizeSeekSeconds(position) {
+  if (position && typeof position === 'object') {
+    const seconds = Number(position.seconds);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+  }
+  const raw = String(position ?? '').trim();
+  if (!raw) return null;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  const parts = raw.split(':');
+  if (parts.length < 2 || parts.length > 3) return null;
+  const values = parts.map(Number);
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) return null;
+  const seconds = values.pop();
+  const minutes = values.pop() || 0;
+  const hours = values.pop() || 0;
+  if (seconds >= 60 || minutes >= 60) return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function normalizePotPlayerTarget(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 8192 || /[\x00-\x1F]/.test(raw)) throw new Error('PotPlayer 启动目标无效。');
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
+    return url.toString();
+  } catch {}
+  const windowsDrive = /^[A-Za-z]:[\\/]/.test(raw);
+  const windowsUnc = /^\\\\[^\\]+\\[^\\]+/.test(raw);
+  if (!windowsDrive && !windowsUnc) throw new Error('PotPlayer 只允许打开 HTTP(S) 地址或 Windows 绝对媒体路径。');
+  return raw;
+}
+
+async function resolvePotPlayerExecutable(options = {}) {
+  const existsSync = options.existsSync || fs.existsSync;
+  const explicit = String(options.executable || '').trim();
+  if (explicit && existsSync(explicit)) return explicit;
+
+  const candidates = options.candidates || potPlayerExecutableCandidates(options.env || process.env);
+  const found = candidates.find((candidate) => {
+    try { return existsSync(candidate); } catch { return false; }
+  });
+  if (found) return found;
+
+  try {
+    const probeScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+$exe = ''
+$names = @('PotPlayerMini64','PotPlayerMini')
+$proc = Get-Process | Where-Object { $names -contains $_.ProcessName -and $_.Path } | Select-Object -First 1
+if ($proc -and $proc.Path) { $exe = [string]$proc.Path }
+if (-not $exe) {
+  foreach ($key in @(
+    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini64.exe',
+    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini.exe',
+    'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini64.exe',
+    'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini.exe'
+  )) {
+    $value = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).'(default)'
+    if ($value -and (Test-Path -LiteralPath $value)) { $exe = [string]$value; break }
+  }
+}
+[pscustomobject]@{ ok = $true; executable = $exe } | ConvertTo-Json -Compress
+`;
+    const probe = await (options.runPowerShell || runPowerShell)(probeScript, options);
+    const executable = String(probe?.executable || '').trim();
+    if (executable && existsSync(executable)) return executable;
+  } catch {}
+
+  throw new Error('没有找到 PotPlayer 可执行文件。请确认已安装 PotPlayer；Go Study 不再依赖 note2potplayer.exe。');
+}
+
+async function launchPotPlayerTarget(target, position = null, options = {}) {
+  if (process.platform !== 'win32' && !options.allowNonWindows) {
+    throw new Error('Go Study 原生 PotPlayer 启动目前只支持 Windows。');
+  }
+  const normalizedTarget = normalizePotPlayerTarget(target);
+  const executable = await resolvePotPlayerExecutable(options);
+  const seconds = normalizeSeekSeconds(position);
+  const args = [normalizedTarget, '/current'];
+  if (seconds != null) args.push('/seek=' + String(seconds));
+
+  const spawnImpl = options.spawn || spawn;
+  const child = spawnImpl(executable, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+    shell: false
+  });
+  child?.unref?.();
+  return {
+    ok: true,
+    transport: 'native-potplayer-cli',
+    executable,
+    target: normalizedTarget,
+    positionApplied: seconds != null,
+    positionSeconds: seconds
+  };
+}
+
 module.exports = {
   DEFAULT_IMMERSIVE_SHORTCUTS,
   POTPLAYER_PROCESS_NAMES,
   immersiveShortcuts,
+  launchPotPlayerTarget,
   nativeCapture,
   nativeCurrent,
   nativePlay,
+  normalizePotPlayerTarget,
+  normalizeSeekSeconds,
   normalizeShortcut,
+  potPlayerExecutableCandidates,
   potPlayerProbeScript,
   powershellExecutable,
   requestNativePotPlayer,
+  resolvePotPlayerExecutable,
   resolveElectronGlobalShortcut,
   runPowerShell,
   sleep,
@@ -10019,6 +10287,15 @@ class GoStudySettingsTab extends PluginSettingTab {
       });
 
     new Setting(containerEl)
+      .setName('旧 JV 链接兼容（高级）')
+      .setDesc('仅用于历史笔记里的 jv://open 链接。开启后由 Go Study 接管并直接交给 PotPlayer；新链接仍只生成 Go Study 协议，新用户无需开启。')
+      .addToggle((toggle) => toggle
+        .setValue(settings.legacyJvCompatibilityEnabled)
+        .onChange(async (value) => {
+          await updateProductSetting(this.plugin, 'legacyJvCompatibilityEnabled', value);
+        }));
+
+    new Setting(containerEl)
       .setName('悬浮时间线')
       .setDesc('可选视频功能增强。只在包含 Go Study 时间戳的 Markdown 右侧显示一条极轻量时间线；鼠标移到右边缘才展开来源与时间点。')
       .addToggle((toggle) => {
@@ -10527,6 +10804,7 @@ const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   videoSuccessFeedback: true,
   focusStudyNoteAtEnd: true,
   freeformVideoNotesEnabled: true,
+  legacyJvCompatibilityEnabled: false,
   shortcutMode: 'mixed',
   actionHudShortcut: 'Alt+S',
   actionHudDelayMs: 300,
@@ -10666,6 +10944,7 @@ function currentProductSettings(plugin) {
     videoSuccessFeedback: boolOr(ui.videoSuccessFeedback, DEFAULT_PRODUCT_SETTINGS.videoSuccessFeedback),
     focusStudyNoteAtEnd: boolOr(ui.focusStudyNoteAtEnd, DEFAULT_PRODUCT_SETTINGS.focusStudyNoteAtEnd),
     freeformVideoNotesEnabled: boolOr(ui.freeformVideoNotesEnabled, DEFAULT_PRODUCT_SETTINGS.freeformVideoNotesEnabled),
+    legacyJvCompatibilityEnabled: boolOr(ui.legacyJvCompatibilityEnabled, DEFAULT_PRODUCT_SETTINGS.legacyJvCompatibilityEnabled),
     shortcutMode: normalizeShortcutMode(ui.shortcutMode),
     actionHudShortcut: (() => {
       try { return normalizeActionHudShortcut(ui.actionHudShortcut); }
