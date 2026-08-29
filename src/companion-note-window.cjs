@@ -259,7 +259,7 @@ function companionEditorEndPosition(editor) {
 function revealCompanionEditorCursor(plugin, editor, options = {}) {
   if (!editor) return false;
   const target = plugin?._goStudyCompanionTarget;
-  if (target?.editor && target.editor !== editor) return false;
+  if (!target?.editor || target.editor !== editor) return false;
 
   let cursor = null;
   if (options.moveToEnd && typeof editor.setCursor === 'function') {
