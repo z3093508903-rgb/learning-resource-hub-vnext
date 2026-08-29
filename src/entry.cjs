@@ -260,12 +260,8 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
         const source = this.state.sources[target.sourceId]
           || Object.values(this.state.sources).find((item) => item.type === 'openlist' && !item.deletedAt);
         if (!source) throw new Error('请先配置 OpenList 来源连接。');
-        const token = await this.loginOpenList(source);
-        const entry = await this.getOpenList(source, target.remotePath, token);
-        const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
-        const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
-        const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await this.launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, playerTime);
+        const playback = await this.resolveOpenListPlaybackUrl(source, target.remotePath);
+        await this.launchPotPlayerTarget(playback.url, playerTime);
       } else if (target.type === 'potplayer') {
         await this.launchPotPlayerTarget(target.target, playerTime);
       } else if (target.type === 'uri') {
