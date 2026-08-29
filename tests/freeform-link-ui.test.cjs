@@ -33,8 +33,10 @@ test('runtime upgrades freeform to managed before platform fallback', () => {
 
 const {
   bilibiliUrlAtPosition,
-  browserUrlAtPosition
+  browserUrlAtPosition,
+  installFreeformBrowserModifier
 } = require('../src/freeform-link-ui.cjs');
+const { buildFreeformReferenceUri } = require('../src/resource-reference.cjs');
 
 test('Bilibili browser adapter preserves multi-P and adds captured seconds', () => {
   assert.equal(
@@ -52,4 +54,59 @@ test('non-Bilibili Ctrl-click browser fallback stays unchanged', () => {
     browserUrlAtPosition('https://example.com/video?id=1', { type: 'time', seconds: 65 }),
     'https://example.com/video?id=1'
   );
+});
+
+
+test('Ctrl-click browser modifier binds both main Obsidian document and Companion popout document', async () => {
+  const handlers = new Map();
+  const fakeDoc = () => ({
+    addEventListener(type, handler) { if (type === 'click') handlers.set(this, handler); },
+    removeEventListener() {}
+  });
+  const mainDoc = fakeDoc();
+  const companionDoc = fakeDoc();
+  const leaf = { view: { containerEl: { ownerDocument: companionDoc } } };
+  const opened = [];
+  const plugin = {
+    app: {
+      workspace: {
+        activeLeaf: leaf,
+        getLeavesOfType() { return [leaf]; },
+        on() { return null; }
+      }
+    },
+    register() {}
+  };
+  const controller = installFreeformBrowserModifier(plugin, mainDoc, {
+    shell: { async openExternal(url) { opened.push(url); } }
+  });
+  assert.equal(controller.bound.size, 2);
+
+  const href = buildFreeformReferenceUri({
+    locator: 'https://www.bilibili.com/video/BV1xJ38z3EkX',
+    web: 'https://www.bilibili.com/video/BV1xJ38z3EkX',
+    position: { type: 'time', seconds: 12.244 }
+  });
+  const handler = handlers.get(companionDoc);
+  handler({
+    ctrlKey: true,
+    preventDefault() {},
+    stopPropagation() {},
+    stopImmediatePropagation() {},
+    target: {
+      closest() {
+        return {
+          getAttribute(name) { return name === 'href' ? href : ''; },
+          href
+        };
+      }
+    }
+  });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(opened[0], 'https://www.bilibili.com/video/BV1xJ38z3EkX?t=12');
+});
+
+test('Command modifier accepts Meta on macOS-style clicks too', () => {
+  const sourceText = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'freeform-link-ui.cjs'), 'utf8');
+  assert.match(sourceText, /event\?\.ctrlKey \|\| event\?\.metaKey/);
 });
