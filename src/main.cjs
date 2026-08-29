@@ -623,6 +623,54 @@ class ResourceHubNextPlugin extends Plugin {
     return result;
   }
 
+  openListDirectUrl(source, remotePath, sign = '') {
+    const baseUrl = String(source?.baseUrl || '').replace(/\/+$/, '');
+    if (!baseUrl) throw new Error('OpenList 来源缺少 baseUrl。');
+    const normalizedPath = model.normalizeOpenListPath(remotePath || '/');
+    const encoded = normalizedPath.split('/').map((part) => encodeURIComponent(part)).join('/');
+    const query = sign ? `?sign=${encodeURIComponent(sign)}` : '';
+    return `${baseUrl}/d${encoded}${query}`;
+  }
+
+  openListNetworkFailure(error) {
+    const message = error instanceof Error ? error.message : String(error || '');
+    return /ERR_CONNECTION_REFUSED|ECONNREFUSED|ERR_NAME_NOT_RESOLVED|ENOTFOUND|ETIMEDOUT|ERR_CONNECTION_TIMED_OUT|ERR_NETWORK_CHANGED|请求超过|登录超过|fetch failed|network/i.test(message);
+  }
+
+  async resolveOpenListPlaybackUrl(source, remotePath, options = {}) {
+    const unsignedUrl = this.openListDirectUrl(source, remotePath);
+    try {
+      const token = await this.loginOpenList(source);
+      const entry = await this.getOpenList(source, remotePath, token);
+      return {
+        url: this.openListDirectUrl(source, remotePath, entry?.sign || ''),
+        signed: Boolean(entry?.sign),
+        fallback: false,
+        apiError: ''
+      };
+    } catch (error) {
+      if (!this.openListNetworkFailure(error)) throw error;
+      const message = error instanceof Error ? error.message : String(error || '');
+      console.warn('Go Study: OpenList API unavailable, falling back to direct /d playback.', {
+        baseUrl: source?.baseUrl,
+        remotePath,
+        error: message
+      });
+      if (options.notice !== false) {
+        new Notice(
+          `OpenList API 暂时不可达（${String(source?.baseUrl || '')}），已尝试直接播放地址。`,
+          6500
+        );
+      }
+      return {
+        url: unsignedUrl,
+        signed: false,
+        fallback: true,
+        apiError: message
+      };
+    }
+  }
+
   async openResourceAction(resource, actionType, target, options = {}) {
     if (!resource || !target) return false;
     try {
@@ -638,21 +686,13 @@ class ResourceHubNextPlugin extends Plugin {
       } else if (target.type === 'openlist') {
         const source = this.state.sources[target.sourceId] || Object.values(this.state.sources).find((item) => item.type === 'openlist' && !item.deletedAt);
         if (!source) throw new Error('请先配置 OpenList 来源连接。');
-        const token = await this.loginOpenList(source);
-        const entry = await this.getOpenList(source, target.remotePath, token);
-        const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
-        const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
-        const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await this.launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, 0);
+        const playback = await this.resolveOpenListPlaybackUrl(source, target.remotePath);
+        await this.launchPotPlayerTarget(playback.url, 0);
       } else if (target.type === 'openlist-file') {
         const source = this.state.sources[target.sourceId] || Object.values(this.state.sources).find((item) => item.type === 'openlist' && !item.deletedAt);
         if (!source) throw new Error('请先配置 OpenList 来源连接。');
-        const token = await this.loginOpenList(source);
-        const entry = await this.getOpenList(source, target.remotePath, token);
-        const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
-        const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
-        const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await shell.openExternal(`${baseUrl}/d${encoded}${sign}`);
+        const playback = await this.resolveOpenListPlaybackUrl(source, target.remotePath);
+        await shell.openExternal(playback.url);
       } else if (target.type === 'potplayer') {
         await this.launchPotPlayerTarget(target.target, 0);
       } else if (target.type === 'uri') {
