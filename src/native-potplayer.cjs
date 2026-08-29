@@ -12,7 +12,7 @@ const DEFAULT_IMMERSIVE_SHORTCUTS = Object.freeze({
   captureNote: 'Alt+4'
 });
 
-const POTPLAYER_PROCESS_NAMES = ['PotPlayerMini64', 'PotPlayerMini'];
+const POTPLAYER_PROCESS_NAMES = ['PotPlayerMini64', 'PotPlayerMini', 'PotPlayer64', 'PotPlayer'];
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -228,23 +228,236 @@ function resolveElectronGlobalShortcut(options = {}) {
 }
 
 
+function potPlayerExecutableNames() {
+  return ['PotPlayerMini64.exe', 'PotPlayerMini.exe', 'PotPlayer64.exe', 'PotPlayer.exe'];
+}
+
 function potPlayerExecutableCandidates(env = process.env) {
   const roots = [
     String(env.ProgramW6432 || '').trim(),
     String(env.ProgramFiles || '').trim(),
     String(env['ProgramFiles(x86)'] || '').trim(),
-    String(env.LOCALAPPDATA || '').trim()
+    String(env.LOCALAPPDATA || '').trim(),
+    String(env.USERPROFILE || '').trim()
   ].filter(Boolean);
   const candidates = [];
   for (const root of roots) {
-    for (const relative of [
-      ['DAUM', 'PotPlayer', 'PotPlayerMini64.exe'],
-      ['DAUM', 'PotPlayer', 'PotPlayerMini.exe'],
-      ['PotPlayer', 'PotPlayerMini64.exe'],
-      ['PotPlayer', 'PotPlayerMini.exe']
-    ]) candidates.push(path.join(root, ...relative));
+    for (const relativeRoot of [
+      ['DAUM', 'PotPlayer'],
+      ['PotPlayer'],
+      ['Programs', 'PotPlayer']
+    ]) {
+      for (const executable of potPlayerExecutableNames()) {
+        candidates.push(path.join(root, ...relativeRoot, executable));
+      }
+    }
   }
   return [...new Set(candidates)];
+}
+
+function potPlayerDiscoveryScript() {
+  const executableNames = potPlayerExecutableNames().map((name) => `'${name.replace(/'/g, "''")}'`).join(',');
+  return `
+$ErrorActionPreference = 'SilentlyContinue'
+$exe = ''
+$exeNames = @(${executableNames})
+
+function Resolve-GoStudyPotPlayerPath([string]$candidate) {
+  if (-not $candidate) { return '' }
+  $value = [Environment]::ExpandEnvironmentVariables([string]$candidate).Trim().Trim('"')
+  $value = $value -replace ',\\s*\\d+
+function normalizeSeekSeconds(position) {
+  if (position && typeof position === 'object') {
+    const seconds = Number(position.seconds);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+  }
+  const raw = String(position ?? '').trim();
+  if (!raw) return null;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  const parts = raw.split(':');
+  if (parts.length < 2 || parts.length > 3) return null;
+  const values = parts.map(Number);
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) return null;
+  const seconds = values.pop();
+  const minutes = values.pop() || 0;
+  const hours = values.pop() || 0;
+  if (seconds >= 60 || minutes >= 60) return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function normalizePotPlayerTarget(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 8192 || /[\x00-\x1F]/.test(raw)) throw new Error('PotPlayer 启动目标无效。');
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
+    return url.toString();
+  } catch {}
+  const windowsDrive = /^[A-Za-z]:[\\/]/.test(raw);
+  const windowsUnc = /^\\\\[^\\]+\\[^\\]+/.test(raw);
+  if (!windowsDrive && !windowsUnc) throw new Error('PotPlayer 只允许打开 HTTP(S) 地址或 Windows 绝对媒体路径。');
+  return raw;
+}
+
+async function resolvePotPlayerExecutable(options = {}) {
+  const existsSync = options.existsSync || fs.existsSync;
+  const explicit = String(options.executable || '').trim().replace(/^"(.*)"$/, '$1');
+  if (explicit && existsSync(explicit)) return explicit;
+
+  const candidates = options.candidates || potPlayerExecutableCandidates(options.env || process.env);
+  const found = candidates.find((candidate) => {
+    try { return existsSync(candidate); } catch { return false; }
+  });
+  if (found) return found;
+
+  try {
+    const probe = await (options.runPowerShell || runPowerShell)(potPlayerDiscoveryScript(), options);
+    const executable = String(probe?.executable || '').trim();
+    if (executable && existsSync(executable)) return executable;
+  } catch {}
+
+  const configuredHint = explicit
+    ? ' 当前配置的 PotPlayer 路径不存在，请在 Go Study 设置中重新自动检测或填写正确路径。'
+    : ' 请先打开一次 PotPlayer 后重试自动检测，或在 Go Study 设置中填写 PotPlayer 程序路径。';
+  throw new Error('没有找到 PotPlayer 可执行文件。' + configuredHint);
+}
+
+async function launchPotPlayerTarget(target, position = null, options = {}) {
+  if (process.platform !== 'win32' && !options.allowNonWindows) {
+    throw new Error('Go Study 原生 PotPlayer 启动目前只支持 Windows。');
+  }
+  const normalizedTarget = normalizePotPlayerTarget(target);
+  const executable = await resolvePotPlayerExecutable(options);
+  const seconds = normalizeSeekSeconds(position);
+  const args = [normalizedTarget, '/current'];
+  if (seconds != null) args.push('/seek=' + String(seconds));
+
+  const spawnImpl = options.spawn || spawn;
+  const child = spawnImpl(executable, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+    shell: false
+  });
+  child?.unref?.();
+  return {
+    ok: true,
+    transport: 'native-potplayer-cli',
+    executable,
+    target: normalizedTarget,
+    positionApplied: seconds != null,
+    positionSeconds: seconds
+  };
+}
+
+module.exports = {
+  DEFAULT_IMMERSIVE_SHORTCUTS,
+  POTPLAYER_PROCESS_NAMES,
+  immersiveShortcuts,
+  launchPotPlayerTarget,
+  nativeCapture,
+  nativeCurrent,
+  nativePlay,
+  normalizePotPlayerTarget,
+  normalizeSeekSeconds,
+  normalizeShortcut,
+  potPlayerDiscoveryScript,
+  potPlayerExecutableCandidates,
+  potPlayerExecutableNames,
+  potPlayerProbeScript,
+  powershellExecutable,
+  requestNativePotPlayer,
+  resolvePotPlayerExecutable,
+  resolveElectronGlobalShortcut,
+  runPowerShell,
+  sleep,
+  validateNativeProbe
+};
+, ''
+  if ($value -and (Test-Path -LiteralPath $value -PathType Leaf)) {
+    return [System.IO.Path]::GetFullPath($value)
+  }
+  return ''
+}
+
+# 1. Running process: this is the most reliable source for portable/custom installs.
+foreach ($proc in (Get-Process | Where-Object { $_.ProcessName -like 'PotPlayer*' })) {
+  $candidate = ''
+  try { $candidate = [string]$proc.Path } catch {}
+  if (-not $candidate) {
+    try { $candidate = [string]$proc.MainModule.FileName } catch {}
+  }
+  $resolved = Resolve-GoStudyPotPlayerPath $candidate
+  if ($resolved) { $exe = $resolved; break }
+}
+
+# 2. App Paths registrations.
+if (-not $exe) {
+  $appPathRoots = @(
+    'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths',
+    'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths',
+    'Registry::HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths'
+  )
+  foreach ($root in $appPathRoots) {
+    foreach ($name in $exeNames) {
+      $key = Join-Path $root $name
+      $value = (Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue).'(default)'
+      $resolved = Resolve-GoStudyPotPlayerPath $value
+      if ($resolved) { $exe = $resolved; break }
+    }
+    if ($exe) { break }
+  }
+}
+
+# 3. Installed-app metadata, including custom installation drives.
+if (-not $exe) {
+  $uninstallRoots = @(
+    'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+    'Registry::HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
+    'Registry::HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall'
+  )
+  foreach ($root in $uninstallRoots) {
+    foreach ($item in (Get-ChildItem -LiteralPath $root -ErrorAction SilentlyContinue | ForEach-Object { Get-ItemProperty -LiteralPath $_.PSPath -ErrorAction SilentlyContinue })) {
+      if ([string]$item.DisplayName -notmatch 'PotPlayer') { continue }
+
+      $resolved = Resolve-GoStudyPotPlayerPath ([string]$item.DisplayIcon)
+      if ($resolved) { $exe = $resolved; break }
+
+      $install = [string]$item.InstallLocation
+      if ($install) {
+        foreach ($name in $exeNames) {
+          $resolved = Resolve-GoStudyPotPlayerPath (Join-Path $install $name)
+          if ($resolved) { $exe = $resolved; break }
+        }
+      }
+      if ($exe) { break }
+    }
+    if ($exe) { break }
+  }
+}
+
+# 4. Start Menu shortcuts catch many portable/custom installers that skip App Paths.
+if (-not $exe) {
+  try {
+    $wsh = New-Object -ComObject WScript.Shell
+    $shortcutRoots = @(
+      (Join-Path $env:APPDATA 'Microsoft\\Windows\\Start Menu\\Programs'),
+      (Join-Path $env:ProgramData 'Microsoft\\Windows\\Start Menu\\Programs')
+    )
+    foreach ($root in $shortcutRoots) {
+      foreach ($shortcutFile in (Get-ChildItem -LiteralPath $root -Filter '*.lnk' -Recurse -ErrorAction SilentlyContinue | Where-Object { $_.Name -match 'PotPlayer' })) {
+        $shortcut = $wsh.CreateShortcut($shortcutFile.FullName)
+        $resolved = Resolve-GoStudyPotPlayerPath ([string]$shortcut.TargetPath)
+        if ($resolved) { $exe = $resolved; break }
+      }
+      if ($exe) { break }
+    }
+  } catch {}
+}
+
+[pscustomobject]@{ ok = $true; executable = $exe } | ConvertTo-Json -Compress
+`;
 }
 
 function normalizeSeekSeconds(position) {
