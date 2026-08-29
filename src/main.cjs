@@ -238,8 +238,6 @@ class ResourceHubNextPlugin extends Plugin {
     protectBeforePersist(this, retention);
     await this.saveData(this.state);
     refreshPersistBaseline(this);
-    const latest = readRawPluginData(this);
-    if (latest.raw && this._goStudyStateSafety) this._goStudyStateSafety.lastProtectedRaw = latest.raw;
   }
 
   bindMemoHeight(textarea, projectId, memoId) {
