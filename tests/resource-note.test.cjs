@@ -204,3 +204,22 @@ test('corrupted PotPlayer replacement-character title falls back to portable Bil
   assert.equal(parsed.title, 'BV1xJ38z3EkX');
   assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1xJ38z3EkX');
 });
+
+
+test('Bilibili web HUD writes a direct native browser timestamp URL with fractional seconds', () => {
+  const markdown = buildFreeformPositionMarkdown(
+    {
+      path: 'https://www.bilibili.com/video/BV1o9R9B7Ecw?p=2',
+      web: 'https://www.bilibili.com/video/BV1o9R9B7Ecw?p=2',
+      title: '网页课程',
+      source: 'bilibili-web',
+      transport: 'bilibili-web'
+    },
+    { type: 'time', seconds: 69.4 }
+  );
+  assert.equal(
+    markdown,
+    '[01:09](https://www.bilibili.com/video/BV1o9R9B7Ecw?p=2&t=69.4)'
+  );
+  assert.doesNotMatch(markdown, /obsidian:\/\/go-study/);
+});
