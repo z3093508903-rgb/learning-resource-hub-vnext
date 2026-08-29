@@ -53,7 +53,7 @@ const {
   buildPositionMarkdown
 } = require('./resource-note.cjs');
 
-const BILIBILI_BRIDGE_RELEASES_URL = 'https://github.com/z3093508903-rgb/learning-resource-hub-vnext/releases';
+const BILIBILI_BRIDGE_RELEASES_URL = 'https://github.com/z3093508903-rgb/go-study/releases';
 const GO_STUDY_PROJECT_URL = 'https://github.com/z3093508903-rgb/go-study';
 
 class BackupNameModal extends Modal {
