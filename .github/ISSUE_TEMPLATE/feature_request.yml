@@ -1,0 +1,34 @@
+name: Feature request
+description: Suggest an improvement to the Go Study learning workflow
+title: "[Feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: pain
+    attributes:
+      label: What learning friction are you trying to remove?
+      description: Describe the current workflow and where it becomes annoying or repetitive.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed behavior
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Current workaround or alternatives
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Project / resource management
+        - Companion
+        - PotPlayer
+        - Bilibili / web video
+        - Timeline
+        - Backup / restore
+        - Other
