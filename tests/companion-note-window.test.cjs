@@ -185,7 +185,8 @@ test('companion defaults to topmost, keeps a short note-only title, and can unpi
     },
     getTitle() { return this.title; },
     setTitle(value) { this.title = value; calls.push(['title', value]); },
-    setAlwaysOnTop(value) { calls.push(['top', value]); }
+    setAlwaysOnTop(value, level) { calls.push(['top', value, level]); },
+    moveTop() { calls.push(['moveTop']); }
   };
 
   const result = await openCompanionNoteWindow(plugin, {
@@ -198,7 +199,8 @@ test('companion defaults to topmost, keeps a short note-only title, and can unpi
   assert.equal(result.alwaysOnTop, true);
   assert.equal(win.document.title, 'Course');
   assert.equal(nativeWindow.title, 'Course');
-  assert.ok(calls.some(([kind, value]) => kind === 'top' && value === true));
+  assert.ok(calls.some(([kind, value, level]) => kind === 'top' && value === true && level === 'screen-saver'));
+  assert.ok(calls.some(([kind]) => kind === 'moveTop'));
 
   await setCompanionAlwaysOnTop(plugin, false, { nativeWindow });
   assert.equal(plugin.state.uiState.companionNoteWindow.alwaysOnTop, false);
@@ -272,4 +274,12 @@ test('scheduled Companion reveal does not fight user typing or steal focus', asy
   assert.equal(revealCompanionEditorCursor(plugin, editor, { focus: false }), true);
   assert.equal(editor.focusCount, 0);
   assert.equal(editor.scrollCalls, 1);
+});
+
+
+test('Companion uses strong topmost level so it stays above Chrome and Edge', () => {
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'companion-note-window.cjs'), 'utf8');
+  assert.match(source, /function applyStrongCompanionTopmost/);
+  assert.match(source, /setAlwaysOnTop\(on, on \? 'screen-saver' : 'normal'\)/);
+  assert.match(source, /moveTop\?\.\(\)/);
 });
