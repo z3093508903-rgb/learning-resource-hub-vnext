@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-rc.2 — Full RC Audit / Selectable Backup Restore Hotfix**
+**Go Study 0.3.0-rc.3 — Full RC Audit / Resilient OpenList Playback Hotfix**
 
 Stable / Merge：**HOLD**
 
@@ -20,23 +20,23 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：release/go-study-0.3.0-rc2
-- Base：release/go-study-0.3.0-rc1
+- Branch：release/go-study-0.3.0-rc3
+- Base：release/go-study-0.3.0-rc2
 - Draft PR：尚未创建
-- Current HEAD：79cba03059a2a3777a4a03fd1139f9791cabf55a
-- RC 发布目标：9a07975df00a29bb54b6b589c93aaf4897621801
-- Release：Go Study 0.3.0 RC2
-- Tag：go-study-rc-v0.3.0-rc.2
-- RC ZIP SHA256：8c4b7e676638cb05e744eb1fcedfb4de7772f1ef7845d24bb0e5381ba94791d6
+- Current HEAD：62e94509eda352be922da147af61595c2b05a9cf
+- RC 发布目标：c0a602028dd51a6a195117b55746f8e5cca7db57
+- Release：Go Study 0.3.0 RC3
+- Tag：go-study-rc-v0.3.0-rc.3
+- RC ZIP SHA256：a409529706d3f266ef78bc72f5133d42f300d631f96d0721af3795e7d156dece
 - Bilibili Bridge：0.1.1
 - Bridge ZIP SHA256：cf7970e76894167945b21427900124feef342de42b8e20e76e1558edc71cb7c4
 
 ## 自动化状态
 
-- RC2 validator ✅
-- RC2 publisher ✅
-- **413 / 413 tests PASS**
-- build：38 modules / 775671 bytes ✅
+- RC3 validator ✅
+- RC3 publisher ✅
+- **418 / 418 tests PASS**
+- build：38 modules / 776664 bytes ✅
 - committed main.js consistency ✅
 - Release readiness PASS ✅
 
@@ -1297,3 +1297,53 @@ RC2 修复：
 4. 选择一个**不是最新**的命名备份；
 5. 恢复后确认状态回到该备份；
 6. 该命名备份仍然存在。
+
+
+## RC3：Resilient OpenList Playback Hotfix
+
+RC 真人发现：
+
+- 项目页 Current OpenList 视频启动 PotPlayer 时，在播放器启动前报 `net::ERR_CONNECTION_REFUSED`；
+- 之前的 Current/Managed OpenList 时间戳也同样失败；
+- Bilibili Freeform `obsidian://go-study?mode=freeform...` 仍可正常启动 Native PotPlayer。
+
+结论：
+
+Native PotPlayer launcher 正常；共同失败点位于 OpenList API/sign 解析层。
+
+当前 OpenList 播放原逻辑：
+
+`loginOpenList -> /api/fs/get -> sign -> /d/path?sign=... -> Native PotPlayer`
+
+RC3 改为统一 resilient resolver：
+
+1. API 正常：
+   - 获取最新 sign；
+   - signed `/d/<remotePath>?sign=...`；
+   - Native PotPlayer。
+2. API 发生网络层错误（connection refused / timeout / DNS/network）：
+   - 不在 PotPlayer 启动前直接 abort；
+   - 提示 OpenList API 不可达；
+   - 回退到 unsigned `baseUrl/d/<remotePath>`；
+   - 继续交给 Native PotPlayer。
+3. HTTP 401/403、明确权限/文件错误：
+   - 不静默 unsigned fallback；
+   - 保持显式错误。
+
+项目页 Current OpenList 和 Managed OpenList timestamp 共用同一个 resolver，因此同修。
+
+自动验证：
+- 418 / 418 tests PASS；
+- Release readiness PASS；
+- RC `0.3.0-rc.3`。
+
+Compatibility policy（明确收窄）：
+
+Guaranteed:
+- Current Go Study reference/resource formats；
+- historical `jv://open?... ` when Legacy JV compatibility is ON。
+
+Not release blockers:
+- beta 开发期间中间版本产生的各种临时 PotPlayer/reference experiments。
+
+不要再为中间实验链接增加新兼容分支。
