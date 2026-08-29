@@ -958,7 +958,6 @@ installModelResourceLocatorV2(model);
 const BaseResourceHubNextPlugin = __rhLoad("main.cjs");
 const { Notice } = require('obsidian');
 const { shell } = require('electron');
-const path = require('node:path');
 const {
   launchAnkiProcess,
   resolveAnkiExecutable,
@@ -967,9 +966,7 @@ const {
 const { findOpenVaultLeaf } = __rhLoad("usage-polish.cjs");
 const {
   DEFAULT_ANKI_ENDPOINT,
-  DEFAULT_BACKUP_RETENTION,
   normalizeAnkiEndpoint,
-  pruneStateBackups,
   revealLoadedLeaf
 } = __rhLoad("release-hardening.cjs");
 const {
@@ -1231,14 +1228,7 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   }
 
   async createStateBackup(label = 'manual') {
-    const backupName = await super.createStateBackup(label);
-    const backupDir = path.join(this.pluginStorageDir(), 'backups');
-    try {
-      pruneStateBackups(backupDir, DEFAULT_BACKUP_RETENTION);
-    } catch (error) {
-      console.warn('Learning Resource Hub: failed to prune old state backups.', error);
-    }
-    return backupName;
+    return super.createStateBackup(label);
   }
 
   resolveAnkiExecutable(configured = '') {
@@ -2512,6 +2502,20 @@ const {
   getMemoHeight,
   setMemoHeight
 } = __rhLoad("usage-polish.cjs");
+const {
+  assertSafePersist,
+  catastrophicStateDrop,
+  markLoadedBaseline,
+  meaningfulState,
+  protectBeforePersist,
+  pruneRecoveryBackups,
+  readRawPluginData,
+  recoveryDirectory,
+  recoveryEntries,
+  refreshPersistBaseline,
+  startupSafetySnapshot,
+  writeRecoveryState
+} = __rhLoad("state-safety.cjs");
 
 const VIEW_TYPE = 'learning-resource-hub-next-workbench';
 const ROUTES = ['today', 'project', 'library', 'subscriptions'];
@@ -2625,7 +2629,35 @@ function input(parent, options = {}) {
 
 class ResourceHubNextPlugin extends Plugin {
   async onload() {
-    this.state = model.normalizeState(await this.loadData());
+    const safetySnapshot = startupSafetySnapshot(this);
+    this._goStudyStateSafety = { ...safetySnapshot };
+    try {
+      pruneRecoveryBackups(this, Number(safetySnapshot.rawData?.uiState?.backupRetention || 10));
+    } catch (error) {
+      console.warn('Go Study: failed to prune startup recovery snapshots.', error);
+    }
+    let loaded = await this.loadData();
+
+    // Obsidian loadData() and direct data.json inspection should describe the same state.
+    // If loadData unexpectedly returns empty while a meaningful raw data.json exists,
+    // prefer the protected raw file instead of allowing startup normalization to erase it.
+    if (safetySnapshot.rawMeaningful && !meaningfulState(loaded)) {
+      console.error('Go Study: loadData returned an empty state while data.json contains meaningful data. Falling back to protected raw data.');
+      loaded = safetySnapshot.rawData;
+      new Notice('Go Study 检测到异常空状态，已阻止覆盖并从原 data.json 继续加载。', 8000);
+    }
+
+    const normalized = model.normalizeState(loaded);
+    if (catastrophicStateDrop(loaded, normalized)) {
+      this._goStudyStateSafety.readOnlySafety = true;
+      this.state = normalized;
+      markLoadedBaseline(this, loaded);
+      new Notice('Go Study 检测到数据迁移会异常清空项目，已进入只读保护并阻止覆盖 data.json。', 10000);
+    } else {
+      this.state = normalized;
+      markLoadedBaseline(this, this.state);
+    }
+
     this.memoResizeBindings = new Set();
     this.workbenchLeaf = null;
     this.sidebarWasCollapsed = null;
@@ -2675,7 +2707,14 @@ class ResourceHubNextPlugin extends Plugin {
   }
 
   async persist() {
+    assertSafePersist(this);
+    if (this._goStudyStateSafety?.readOnlySafety) {
+      throw new Error('Go Study 当前处于数据只读保护状态，已阻止覆盖 data.json。');
+    }
+    const retention = Math.max(3, Math.min(10, Number(this.state?.uiState?.backupRetention || 10)));
+    protectBeforePersist(this, retention);
     await this.saveData(this.state);
+    refreshPersistBaseline(this);
   }
 
   bindMemoHeight(textarea, projectId, memoId) {
@@ -2883,27 +2922,49 @@ class ResourceHubNextPlugin extends Plugin {
     return fs.existsSync(candidate) ? candidate : fallback;
   }
 
+  stateBackupDir() {
+    const dir = recoveryDirectory(this);
+    if (!dir) throw new Error('当前仓库不支持本地恢复备份。');
+    return dir;
+  }
+
   async createStateBackup(label = 'manual') {
-    const safeLabel = String(label || 'manual').replace(/[^a-z0-9_-]+/gi, '-');
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupName = `state-${timestamp}-${safeLabel}.json`;
-    const backupDir = path.join(this.pluginStorageDir(), 'backups');
-    fs.mkdirSync(backupDir, { recursive: true });
-    fs.writeFileSync(path.join(backupDir, backupName), JSON.stringify(this.state), 'utf8');
-    return backupName;
+    const result = writeRecoveryState(this, this.state, label);
+    return result.name;
   }
 
   async restoreStateBackup(backupName) {
     const safeName = path.basename(String(backupName || ''));
-    if (!safeName) throw new Error('找不到清理前备份。');
-    const backupPath = path.join(this.pluginStorageDir(), 'backups', safeName);
-    if (!fs.existsSync(backupPath)) throw new Error('清理前备份已经不存在。');
-    const restored = model.normalizeState(JSON.parse(fs.readFileSync(backupPath, 'utf8')));
+    if (!safeName) throw new Error('找不到状态备份。');
+
+    const externalPath = path.join(this.stateBackupDir(), safeName);
+    const legacyPath = path.join(this.pluginStorageDir(), 'backups', safeName);
+    const backupPath = fs.existsSync(externalPath) ? externalPath : legacyPath;
+    if (!fs.existsSync(backupPath)) throw new Error('状态备份已经不存在。');
+
+    const parsed = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+    const restored = model.normalizeState(parsed);
+    if (catastrophicStateDrop(parsed, restored)) {
+      throw new Error('这个备份无法安全迁移，已拒绝覆盖当前 data.json。');
+    }
+
     restored.uiState.lastAction = null;
     this.state = restored;
-    await this.persist();
+    if (this._goStudyStateSafety) {
+      this._goStudyStateSafety.readOnlySafety = false;
+      this._goStudyStateSafety.allowDestructivePersist = true;
+    }
+    try {
+      await this.persist();
+    } finally {
+      if (this._goStudyStateSafety) this._goStudyStateSafety.allowDestructivePersist = false;
+    }
     await this.workbenchLeaf?.view?.render?.();
     return restored;
+  }
+
+  stateBackupEntries() {
+    return recoveryEntries(this);
   }
 
   async mutate(callback, { render = true } = {}) {
@@ -9439,6 +9500,7 @@ const {
   PluginSettingTab = class {},
   Setting = class {}
 } = require('obsidian');
+const { shell } = require('electron');
 const {
   captureFrameAndInsertLearningPosition,
   checkPotPlayerBridge,
@@ -10129,11 +10191,21 @@ class GoStudySettingsTab extends PluginSettingTab {
 
   renderDataSettings(containerEl) {
     const settings = currentProductSettings(this.plugin);
-    section(containerEl, '数据与安全', '只影响 Go Study 自己的状态备份，不会删除 Vault、OpenList、B站或 Anki 原始资料。');
+    section(containerEl, '数据与安全', 'Go Study 会在启动前和后续保存前创建状态恢复快照，备份放在插件目录之外，覆盖升级插件不会顺手删除这些备份。');
+
+    const backupDir = (() => {
+      try { return this.plugin.stateBackupDir?.() || ''; } catch { return ''; }
+    })();
+    const dataPath = (() => {
+      try { return `${this.plugin.pluginStorageDir?.() || ''}\\data.json`; } catch { return ''; }
+    })();
+    const entries = (() => {
+      try { return this.plugin.stateBackupEntries?.() || []; } catch { return []; }
+    })();
 
     new Setting(containerEl)
       .setName('自动备份保留数量')
-      .setDesc('保留最近 3～10 份 Go Study 状态备份。')
+      .setDesc('保留最近 3～10 份真实恢复快照；启动前和保存前都会自动保护旧状态。')
       .addDropdown((dropdown) => {
         for (let value = 3; value <= 10; value += 1) dropdown.addOption(String(value), `${value} 份`);
         dropdown.setValue(String(settings.backupRetention));
@@ -10141,6 +10213,55 @@ class GoStudySettingsTab extends PluginSettingTab {
           await updateProductSetting(this.plugin, 'backupRetention', Number(value));
         });
       });
+
+    new Setting(containerEl)
+      .setName('恢复备份位置')
+      .setDesc(backupDir || '当前环境无法解析本地恢复目录。')
+      .addButton((button) => button
+        .setButtonText('打开备份文件夹')
+        .setDisabled(!backupDir)
+        .onClick(async () => {
+          const error = await shell.openPath(backupDir);
+          if (error) new Notice(`无法打开备份文件夹：${error}`, 6000);
+        }))
+      .addButton((button) => button
+        .setButtonText('立即备份')
+        .onClick(async () => {
+          try {
+            const name = await this.plugin.createStateBackup('manual');
+            new Notice(`已创建状态备份：${name}`, 5000);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('创建状态备份失败', error), 6000);
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('当前 data.json')
+      .setDesc(dataPath || '当前环境无法解析 data.json 路径。');
+
+    const latest = entries[0];
+    new Setting(containerEl)
+      .setName('最近恢复快照')
+      .setDesc(latest ? `${latest.name} · ${Math.max(1, Math.round(latest.size / 1024))} KB` : '还没有恢复快照。重新加载插件后至少会生成一份启动前快照。')
+      .addButton((button) => button
+        .setButtonText('恢复最近备份')
+        .setDisabled(!latest)
+        .onClick(async () => {
+          if (!latest) return;
+          const approved = typeof window?.confirm === 'function'
+            ? window.confirm(`确定恢复最近备份？\\n\\n${latest.name}\\n\\n恢复前当前状态也会被自动保护。`)
+            : true;
+          if (!approved) return;
+          try {
+            await this.plugin.createStateBackup('before-manual-restore');
+            await this.plugin.restoreStateBackup(latest.name);
+            new Notice('Go Study 已恢复最近备份。', 6000);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('恢复状态备份失败', error), 8000);
+          }
+        }));
 
     new Setting(containerEl)
       .setName('当前插件版本')
@@ -13692,7 +13813,6 @@ module.exports = {
 "runtime-entry.cjs": (module, exports, require) => {
 'use strict';
 
-const path = require('node:path');
 const ResourceHubNextPlugin = __rhLoad("entry.cjs");
 const { installScopedUiFixes } = __rhLoad("ui-fixes.cjs");
 const { registerRememberedNoteTarget } = __rhLoad("note-target.cjs");
@@ -13704,7 +13824,6 @@ const { currentProductSettings, ensureProductSettings } = __rhLoad("product-sett
 const { registerCompanionNoteCommands } = __rhLoad("companion-note-window.cjs");
 const { enterStudyMode, exitStudyMode, studyModeState } = __rhLoad("study-mode.cjs");
 const { installTimelineNavigator } = __rhLoad("timeline-navigator.cjs");
-const { pruneStateBackups } = __rhLoad("release-hardening.cjs");
 const {
   clearProjectNoteFoldersOnDelete,
   ensureProjectNotesState,
@@ -13859,19 +13978,234 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
 
   async createStateBackup(label = 'manual') {
     const backupName = await super.createStateBackup(label);
-    const retention = currentProductSettings(this).backupRetention;
-    if (retention < 10) {
-      try {
-        pruneStateBackups(path.join(this.pluginStorageDir(), 'backups'), retention);
-      } catch (error) {
-        console.warn('Go Study: failed to apply custom backup retention.', error);
-      }
+    const { pruneRecoveryBackups } = __rhLoad("state-safety.cjs");
+    try {
+      pruneRecoveryBackups(this, currentProductSettings(this).backupRetention);
+    } catch (error) {
+      console.warn('Go Study: failed to apply recovery backup retention.', error);
     }
     return backupName;
   }
 }
 
 module.exports = ResourceHubNextRuntimePlugin;
+
+},
+"state-safety.cjs": (module, exports, require) => {
+'use strict';
+
+const fs = require('node:fs');
+const path = require('node:path');
+
+function objectCount(value) {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? Object.keys(value).length
+    : 0;
+}
+
+function stateCounts(state) {
+  const source = state && typeof state === 'object' ? state : {};
+  return {
+    projects: objectCount(source.projects),
+    modules: objectCount(source.modules),
+    resources: objectCount(source.resources),
+    sources: objectCount(source.sources),
+    vaultRefs: objectCount(source.vaultRefs),
+    notes: objectCount(source.notes),
+    projectNotes: objectCount(source.projectNotes),
+    inbox: Array.isArray(source.inbox) ? source.inbox.length : 0
+  };
+}
+
+function stateWeight(counts) {
+  return Object.values(counts || {}).reduce((sum, value) => sum + Math.max(0, Number(value || 0)), 0);
+}
+
+function meaningfulState(state) {
+  const counts = stateCounts(state);
+  return stateWeight(counts) > 0;
+}
+
+function catastrophicStateDrop(before, after) {
+  const a = stateCounts(before);
+  const b = stateCounts(after);
+  const beforeWeight = stateWeight(a);
+  const afterWeight = stateWeight(b);
+  if (beforeWeight <= 0) return false;
+  if (afterWeight === 0) return true;
+  const criticalBefore = a.projects + a.resources + a.modules;
+  const criticalAfter = b.projects + b.resources + b.modules;
+  return criticalBefore >= 3
+    && criticalAfter === 0
+    && afterWeight <= Math.max(1, Math.floor(beforeWeight * 0.05));
+}
+
+function pluginDirectory(plugin) {
+  const basePath = plugin?.app?.vault?.adapter?.getBasePath?.();
+  if (!basePath) return '';
+  const manifestDir = String(plugin?.manifest?.dir || '').trim();
+  if (manifestDir) return path.isAbsolute(manifestDir) ? manifestDir : path.join(basePath, manifestDir);
+  const configDir = plugin?.app?.vault?.configDir || '.obsidian';
+  const id = plugin?.manifest?.id || 'go-study-preview';
+  return path.join(basePath, configDir, 'plugins', id);
+}
+
+function pluginDataPath(plugin) {
+  const dir = pluginDirectory(plugin);
+  return dir ? path.join(dir, 'data.json') : '';
+}
+
+function readRawPluginData(plugin) {
+  const filePath = pluginDataPath(plugin);
+  if (!filePath || !fs.existsSync(filePath)) return { filePath, raw: '', data: null, error: null };
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const data = raw.trim() ? JSON.parse(raw) : null;
+    return { filePath, raw, data, error: null };
+  } catch (error) {
+    return { filePath, raw: '', data: null, error };
+  }
+}
+
+function recoveryDirectory(plugin) {
+  const basePath = plugin?.app?.vault?.adapter?.getBasePath?.();
+  if (!basePath) return '';
+  const configDir = plugin?.app?.vault?.configDir || '.obsidian';
+  return path.join(basePath, configDir, 'go-study-recovery');
+}
+
+function safeStamp(date = new Date()) {
+  return date.toISOString().replace(/[:.]/g, '-');
+}
+
+function recoveryEntries(plugin) {
+  const dir = recoveryDirectory(plugin);
+  if (!dir || !fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir, { withFileTypes: true })
+    .filter((entry) => entry.isFile() && /\.json$/i.test(entry.name))
+    .map((entry) => {
+      const fullPath = path.join(dir, entry.name);
+      const stat = fs.statSync(fullPath);
+      return { name: entry.name, fullPath, mtimeMs: Number(stat.mtimeMs || 0), size: Number(stat.size || 0) };
+    })
+    .sort((left, right) => right.mtimeMs - left.mtimeMs || right.name.localeCompare(left.name));
+}
+
+function pruneRecoveryBackups(plugin, keep = 10) {
+  const retention = Math.max(3, Math.min(100, Math.floor(Number(keep) || 10)));
+  const entries = recoveryEntries(plugin);
+  const removed = [];
+  for (const entry of entries.slice(retention)) {
+    try {
+      fs.unlinkSync(entry.fullPath);
+      removed.push(entry.name);
+    } catch {}
+  }
+  return removed;
+}
+
+function writeRecoveryState(plugin, state, label = 'manual') {
+  const dir = recoveryDirectory(plugin);
+  if (!dir) throw new Error('当前 Vault 不支持本地恢复备份。');
+  fs.mkdirSync(dir, { recursive: true });
+  const safeLabel = String(label || 'manual').replace(/[^a-z0-9_-]+/gi, '-');
+  const name = `state-${safeStamp()}-${safeLabel}.json`;
+  const fullPath = path.join(dir, name);
+  fs.writeFileSync(fullPath, JSON.stringify(state, null, 2), 'utf8');
+  return { name, fullPath };
+}
+
+function protectRawPluginData(plugin, label = 'startup') {
+  const raw = readRawPluginData(plugin);
+  if (!raw.raw) return { ...raw, recoveryPath: '' };
+  const dir = recoveryDirectory(plugin);
+  if (!dir) return { ...raw, recoveryPath: '' };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const recoveryPath = path.join(dir, `data-${safeStamp()}-${String(label || 'startup').replace(/[^a-z0-9_-]+/gi, '-')}.json`);
+    fs.writeFileSync(recoveryPath, raw.raw, 'utf8');
+    return { ...raw, recoveryPath };
+  } catch (error) {
+    return { ...raw, recoveryPath: '', protectionError: error };
+  }
+}
+
+function startupSafetySnapshot(plugin) {
+  const protectedRaw = protectRawPluginData(plugin, 'before-load');
+  return {
+    filePath: protectedRaw.filePath,
+    recoveryPath: protectedRaw.recoveryPath,
+    rawData: protectedRaw.data,
+    rawCounts: stateCounts(protectedRaw.data),
+    rawMeaningful: meaningfulState(protectedRaw.data),
+    rawText: protectedRaw.raw || '',
+    readError: protectedRaw.error || null,
+    protectionError: protectedRaw.protectionError || null
+  };
+}
+
+function assertSafePersist(plugin) {
+  const safety = plugin?._goStudyStateSafety;
+  if (!safety?.baselineState || safety.allowDestructivePersist) return true;
+  if (!catastrophicStateDrop(safety.baselineState, plugin.state)) return true;
+  const emergency = protectRawPluginData(plugin, 'blocked-destructive-save');
+  const error = new Error(
+    'Go Study 检测到状态将从有数据异常变为空状态，已阻止写入 data.json。'
+      + (emergency.recoveryPath ? ` 原始数据已保护到：${emergency.recoveryPath}` : '')
+  );
+  error.code = 'GO_STUDY_STATE_GUARD';
+  throw error;
+}
+
+function markLoadedBaseline(plugin, rawState = null) {
+  const baseline = meaningfulState(rawState) ? rawState : plugin?.state;
+  plugin._goStudyStateSafety = {
+    ...(plugin._goStudyStateSafety || {}),
+    baselineState: baseline ? JSON.parse(JSON.stringify(baseline)) : null,
+    baselineCounts: stateCounts(baseline),
+    lastProtectedRaw: plugin?._goStudyStateSafety?.rawText || '',
+    allowDestructivePersist: false
+  };
+  return plugin._goStudyStateSafety;
+}
+
+function refreshPersistBaseline(plugin) {
+  if (!plugin?._goStudyStateSafety) return markLoadedBaseline(plugin, plugin?.state);
+  plugin._goStudyStateSafety.baselineState = plugin?.state ? JSON.parse(JSON.stringify(plugin.state)) : null;
+  plugin._goStudyStateSafety.baselineCounts = stateCounts(plugin?.state);
+  return plugin._goStudyStateSafety;
+}
+
+function protectBeforePersist(plugin, keep = 10) {
+  const safety = plugin?._goStudyStateSafety || (plugin._goStudyStateSafety = {});
+  const raw = readRawPluginData(plugin);
+  if (!raw.raw) return { protected: false, recoveryPath: '' };
+  if (raw.raw === safety.lastProtectedRaw) return { protected: false, recoveryPath: '' };
+  const protectedRaw = protectRawPluginData(plugin, 'before-save');
+  if (protectedRaw.raw) safety.lastProtectedRaw = protectedRaw.raw;
+  pruneRecoveryBackups(plugin, keep);
+  return { protected: Boolean(protectedRaw.recoveryPath), recoveryPath: protectedRaw.recoveryPath || '' };
+}
+
+module.exports = {
+  assertSafePersist,
+  catastrophicStateDrop,
+  markLoadedBaseline,
+  meaningfulState,
+  pluginDataPath,
+  pluginDirectory,
+  protectBeforePersist,
+  protectRawPluginData,
+  pruneRecoveryBackups,
+  readRawPluginData,
+  recoveryDirectory,
+  recoveryEntries,
+  refreshPersistBaseline,
+  stateCounts,
+  stateWeight,
+  startupSafetySnapshot,
+  writeRecoveryState
+};
 
 },
 "study-mode.cjs": (module, exports, require) => {

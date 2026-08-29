@@ -10,7 +10,6 @@ installModelResourceLocatorV2(model);
 const BaseResourceHubNextPlugin = require('./main.cjs');
 const { Notice } = require('obsidian');
 const { shell } = require('electron');
-const path = require('node:path');
 const {
   launchAnkiProcess,
   resolveAnkiExecutable,
@@ -19,9 +18,7 @@ const {
 const { findOpenVaultLeaf } = require('./usage-polish.cjs');
 const {
   DEFAULT_ANKI_ENDPOINT,
-  DEFAULT_BACKUP_RETENTION,
   normalizeAnkiEndpoint,
-  pruneStateBackups,
   revealLoadedLeaf
 } = require('./release-hardening.cjs');
 const {
@@ -283,14 +280,7 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   }
 
   async createStateBackup(label = 'manual') {
-    const backupName = await super.createStateBackup(label);
-    const backupDir = path.join(this.pluginStorageDir(), 'backups');
-    try {
-      pruneStateBackups(backupDir, DEFAULT_BACKUP_RETENTION);
-    } catch (error) {
-      console.warn('Learning Resource Hub: failed to prune old state backups.', error);
-    }
-    return backupName;
+    return super.createStateBackup(label);
   }
 
   resolveAnkiExecutable(configured = '') {

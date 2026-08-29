@@ -6,6 +6,7 @@ const {
   PluginSettingTab = class {},
   Setting = class {}
 } = require('obsidian');
+const { shell } = require('electron');
 const {
   captureFrameAndInsertLearningPosition,
   checkPotPlayerBridge,
@@ -696,11 +697,21 @@ class GoStudySettingsTab extends PluginSettingTab {
 
   renderDataSettings(containerEl) {
     const settings = currentProductSettings(this.plugin);
-    section(containerEl, '数据与安全', '只影响 Go Study 自己的状态备份，不会删除 Vault、OpenList、B站或 Anki 原始资料。');
+    section(containerEl, '数据与安全', 'Go Study 会在启动前和后续保存前创建状态恢复快照，备份放在插件目录之外，覆盖升级插件不会顺手删除这些备份。');
+
+    const backupDir = (() => {
+      try { return this.plugin.stateBackupDir?.() || ''; } catch { return ''; }
+    })();
+    const dataPath = (() => {
+      try { return `${this.plugin.pluginStorageDir?.() || ''}\\data.json`; } catch { return ''; }
+    })();
+    const entries = (() => {
+      try { return this.plugin.stateBackupEntries?.() || []; } catch { return []; }
+    })();
 
     new Setting(containerEl)
       .setName('自动备份保留数量')
-      .setDesc('保留最近 3～10 份 Go Study 状态备份。')
+      .setDesc('保留最近 3～10 份真实恢复快照；启动前和保存前都会自动保护旧状态。')
       .addDropdown((dropdown) => {
         for (let value = 3; value <= 10; value += 1) dropdown.addOption(String(value), `${value} 份`);
         dropdown.setValue(String(settings.backupRetention));
@@ -708,6 +719,55 @@ class GoStudySettingsTab extends PluginSettingTab {
           await updateProductSetting(this.plugin, 'backupRetention', Number(value));
         });
       });
+
+    new Setting(containerEl)
+      .setName('恢复备份位置')
+      .setDesc(backupDir || '当前环境无法解析本地恢复目录。')
+      .addButton((button) => button
+        .setButtonText('打开备份文件夹')
+        .setDisabled(!backupDir)
+        .onClick(async () => {
+          const error = await shell.openPath(backupDir);
+          if (error) new Notice(`无法打开备份文件夹：${error}`, 6000);
+        }))
+      .addButton((button) => button
+        .setButtonText('立即备份')
+        .onClick(async () => {
+          try {
+            const name = await this.plugin.createStateBackup('manual');
+            new Notice(`已创建状态备份：${name}`, 5000);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('创建状态备份失败', error), 6000);
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('当前 data.json')
+      .setDesc(dataPath || '当前环境无法解析 data.json 路径。');
+
+    const latest = entries[0];
+    new Setting(containerEl)
+      .setName('最近恢复快照')
+      .setDesc(latest ? `${latest.name} · ${Math.max(1, Math.round(latest.size / 1024))} KB` : '还没有恢复快照。重新加载插件后至少会生成一份启动前快照。')
+      .addButton((button) => button
+        .setButtonText('恢复最近备份')
+        .setDisabled(!latest)
+        .onClick(async () => {
+          if (!latest) return;
+          const approved = typeof window?.confirm === 'function'
+            ? window.confirm(`确定恢复最近备份？\\n\\n${latest.name}\\n\\n恢复前当前状态也会被自动保护。`)
+            : true;
+          if (!approved) return;
+          try {
+            await this.plugin.createStateBackup('before-manual-restore');
+            await this.plugin.restoreStateBackup(latest.name);
+            new Notice('Go Study 已恢复最近备份。', 6000);
+            this.display();
+          } catch (error) {
+            new Notice(commandErrorText('恢复状态备份失败', error), 8000);
+          }
+        }));
 
     new Setting(containerEl)
       .setName('当前插件版本')

@@ -31,6 +31,20 @@ const {
   getMemoHeight,
   setMemoHeight
 } = require('./usage-polish.cjs');
+const {
+  assertSafePersist,
+  catastrophicStateDrop,
+  markLoadedBaseline,
+  meaningfulState,
+  protectBeforePersist,
+  pruneRecoveryBackups,
+  readRawPluginData,
+  recoveryDirectory,
+  recoveryEntries,
+  refreshPersistBaseline,
+  startupSafetySnapshot,
+  writeRecoveryState
+} = require('./state-safety.cjs');
 
 const VIEW_TYPE = 'learning-resource-hub-next-workbench';
 const ROUTES = ['today', 'project', 'library', 'subscriptions'];
@@ -144,7 +158,35 @@ function input(parent, options = {}) {
 
 class ResourceHubNextPlugin extends Plugin {
   async onload() {
-    this.state = model.normalizeState(await this.loadData());
+    const safetySnapshot = startupSafetySnapshot(this);
+    this._goStudyStateSafety = { ...safetySnapshot };
+    try {
+      pruneRecoveryBackups(this, Number(safetySnapshot.rawData?.uiState?.backupRetention || 10));
+    } catch (error) {
+      console.warn('Go Study: failed to prune startup recovery snapshots.', error);
+    }
+    let loaded = await this.loadData();
+
+    // Obsidian loadData() and direct data.json inspection should describe the same state.
+    // If loadData unexpectedly returns empty while a meaningful raw data.json exists,
+    // prefer the protected raw file instead of allowing startup normalization to erase it.
+    if (safetySnapshot.rawMeaningful && !meaningfulState(loaded)) {
+      console.error('Go Study: loadData returned an empty state while data.json contains meaningful data. Falling back to protected raw data.');
+      loaded = safetySnapshot.rawData;
+      new Notice('Go Study 检测到异常空状态，已阻止覆盖并从原 data.json 继续加载。', 8000);
+    }
+
+    const normalized = model.normalizeState(loaded);
+    if (catastrophicStateDrop(loaded, normalized)) {
+      this._goStudyStateSafety.readOnlySafety = true;
+      this.state = normalized;
+      markLoadedBaseline(this, loaded);
+      new Notice('Go Study 检测到数据迁移会异常清空项目，已进入只读保护并阻止覆盖 data.json。', 10000);
+    } else {
+      this.state = normalized;
+      markLoadedBaseline(this, this.state);
+    }
+
     this.memoResizeBindings = new Set();
     this.workbenchLeaf = null;
     this.sidebarWasCollapsed = null;
@@ -194,7 +236,14 @@ class ResourceHubNextPlugin extends Plugin {
   }
 
   async persist() {
+    assertSafePersist(this);
+    if (this._goStudyStateSafety?.readOnlySafety) {
+      throw new Error('Go Study 当前处于数据只读保护状态，已阻止覆盖 data.json。');
+    }
+    const retention = Math.max(3, Math.min(10, Number(this.state?.uiState?.backupRetention || 10)));
+    protectBeforePersist(this, retention);
     await this.saveData(this.state);
+    refreshPersistBaseline(this);
   }
 
   bindMemoHeight(textarea, projectId, memoId) {
@@ -402,27 +451,49 @@ class ResourceHubNextPlugin extends Plugin {
     return fs.existsSync(candidate) ? candidate : fallback;
   }
 
+  stateBackupDir() {
+    const dir = recoveryDirectory(this);
+    if (!dir) throw new Error('当前仓库不支持本地恢复备份。');
+    return dir;
+  }
+
   async createStateBackup(label = 'manual') {
-    const safeLabel = String(label || 'manual').replace(/[^a-z0-9_-]+/gi, '-');
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    const backupName = `state-${timestamp}-${safeLabel}.json`;
-    const backupDir = path.join(this.pluginStorageDir(), 'backups');
-    fs.mkdirSync(backupDir, { recursive: true });
-    fs.writeFileSync(path.join(backupDir, backupName), JSON.stringify(this.state), 'utf8');
-    return backupName;
+    const result = writeRecoveryState(this, this.state, label);
+    return result.name;
   }
 
   async restoreStateBackup(backupName) {
     const safeName = path.basename(String(backupName || ''));
-    if (!safeName) throw new Error('找不到清理前备份。');
-    const backupPath = path.join(this.pluginStorageDir(), 'backups', safeName);
-    if (!fs.existsSync(backupPath)) throw new Error('清理前备份已经不存在。');
-    const restored = model.normalizeState(JSON.parse(fs.readFileSync(backupPath, 'utf8')));
+    if (!safeName) throw new Error('找不到状态备份。');
+
+    const externalPath = path.join(this.stateBackupDir(), safeName);
+    const legacyPath = path.join(this.pluginStorageDir(), 'backups', safeName);
+    const backupPath = fs.existsSync(externalPath) ? externalPath : legacyPath;
+    if (!fs.existsSync(backupPath)) throw new Error('状态备份已经不存在。');
+
+    const parsed = JSON.parse(fs.readFileSync(backupPath, 'utf8'));
+    const restored = model.normalizeState(parsed);
+    if (catastrophicStateDrop(parsed, restored)) {
+      throw new Error('这个备份无法安全迁移，已拒绝覆盖当前 data.json。');
+    }
+
     restored.uiState.lastAction = null;
     this.state = restored;
-    await this.persist();
+    if (this._goStudyStateSafety) {
+      this._goStudyStateSafety.readOnlySafety = false;
+      this._goStudyStateSafety.allowDestructivePersist = true;
+    }
+    try {
+      await this.persist();
+    } finally {
+      if (this._goStudyStateSafety) this._goStudyStateSafety.allowDestructivePersist = false;
+    }
     await this.workbenchLeaf?.view?.render?.();
     return restored;
+  }
+
+  stateBackupEntries() {
+    return recoveryEntries(this);
   }
 
   async mutate(callback, { render = true } = {}) {

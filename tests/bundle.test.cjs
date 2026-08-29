@@ -23,11 +23,13 @@ test('构建结果内联模型且不依赖源码目录', () => {
   assert.doesNotMatch(output, /require\('\.\/model\.cjs'\)/);
 });
 
-test('新版本不读取旧版 data.json 或项目 Markdown 块', () => {
-  const files = ['src/main.cjs', 'src/model.cjs', 'styles.css'];
+test('新版本不扫描旧插件数据或项目 Markdown 块，但允许保护当前插件 data.json', () => {
+  const files = ['src/main.cjs', 'src/model.cjs', 'src/state-safety.cjs', 'styles.css'];
   const source = files.map((file) => fs.readFileSync(path.join(root, file), 'utf8')).join('\n');
   assert.doesNotMatch(source, /resource-hub:block/);
-  assert.doesNotMatch(source, /data\.json/);
+  assert.doesNotMatch(source, /\.obsidian[\\/]+plugins[\\/]+learning-resource-hub(?:[^-]|$)/);
+  assert.match(source, /go-study-recovery/);
+  assert.match(source, /data\.json/);
 });
 
 test('添加链路不再调用 Obsidian 不支持的原生 prompt', () => {
