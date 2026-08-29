@@ -1537,7 +1537,15 @@ function installFreeformBrowserModifier(plugin, doc = globalThis.document, optio
 
   const bindDocument = (targetDoc) => {
     if (!targetDoc?.addEventListener || bound.has(targetDoc)) return null;
-    const onClick = makeReferenceClickHandler(plugin, shellImpl);
+    const handleReferenceClick = makeReferenceClickHandler(plugin, shellImpl);
+    const onClick = (event) => {
+      if (modifierPressed(event)) {
+        modifierState.ctrl = Boolean(event?.ctrlKey);
+        modifierState.meta = Boolean(event?.metaKey);
+        modifierState.lastPressedAt = Date.now();
+      }
+      return handleReferenceClick(event);
+    };
     const onKeyDown = (event) => rememberModifier(event, true);
     const onKeyUp = (event) => rememberModifier(event, false);
     const onBlur = () => {
