@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.9.3 — Pre-RC / PotPlayer Discovery Hotfix**
+**Go Study 0.3.0-beta.20.10 — Pre-RC / Native Obsidian Drag Bridge**
 
 Stable / Merge：**HOLD**
 
@@ -44,7 +44,7 @@ Stable / Merge：**HOLD**
 
 ## 当前发布阻断 / 未关闭
 
-1. beta20.9.3：beta20.9.2 Windows 实机确认 Ctrl+点击 Browser 已 PASS、Legacy JV 开关开启后旧协议可 PASS；但新 Freeform 普通点击与资源中心播放共同 FAIL，错误为“没有找到 PotPlayer 可执行文件”。20.9.3 已扩展 PotPlayer discovery 并增加高级手动路径兜底，等待 Windows 实机复验；
+1. beta20.9.3 Windows 真人验收已全部 PASS：PotPlayer 自动发现 / Resource Center 播放 / Freeform 普通点击与 seek / Ctrl+点击 Browser / Legacy JV compatibility 均正常；当前最高优先级转为 Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode；
 2. Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode 仍未通过实机；
 3. Companion caret 点击定位在 beta20.7 修复后缺少最终实机确认；
 4. Managed v3 fallback、legacy v1 relink、light-mode modal、named backup 需要最终 RC 回归；
@@ -917,3 +917,21 @@ beta20.9.2 Windows 真人结果：
 4. 新 Freeform 普通点击；
 5. 再确认 Ctrl+点击 Browser 没回归；
 6. Legacy JV 开关行为不变。
+
+
+## beta20.9.3 Windows 真人验收：PASS
+
+用户确认 beta20.9.3 所有本轮测试通过：
+
+- PotPlayer executable discovery 正常；
+- Resource Center 导入视频普通播放正常；
+- 新 Freeform 普通点击 → PotPlayer + 正确 seek 正常；
+- Ctrl+点击 → Browser 正常；
+- Legacy JV compatibility ON → 历史 jv:// 正常；
+- 不再需要 note2potplayer.exe 作为正常 Runtime 依赖。
+
+结论：
+
+**beta20.9.3 = ACCEPTED-AS-BEHAVIOR（Windows）**
+
+下一轮进入 beta20.10：Native Obsidian Drag Bridge。
