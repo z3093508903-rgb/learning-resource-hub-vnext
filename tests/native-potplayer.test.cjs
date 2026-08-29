@@ -90,3 +90,47 @@ test('native play uses the same fixed PotPlayer window-message adapter', async (
   assert.match(script, /\$true -and \$status -ne 2/);
   assert.match(script, /20000/);
 });
+
+
+test('native launcher passes target and exact seek directly to PotPlayer without shell protocol', async () => {
+  const { launchPotPlayerTarget } = loadNativeModule();
+  const calls = [];
+  const child = { unref() { calls.push(['unref']); } };
+  const result = await launchPotPlayerTarget(
+    'https://www.bilibili.com/video/BV1TEST?p=2',
+    { type: 'time', seconds: 27.716 },
+    {
+      allowNonWindows: true,
+      executable: 'C:\\Program Files\\DAUM\\PotPlayer\\PotPlayerMini64.exe',
+      existsSync: () => true,
+      spawn(executable, args, options) {
+        calls.push([executable, args, options]);
+        return child;
+      }
+    }
+  );
+  assert.equal(result.transport, 'native-potplayer-cli');
+  assert.equal(result.positionApplied, true);
+  assert.deepEqual(calls[0][1], [
+    'https://www.bilibili.com/video/BV1TEST?p=2',
+    '/current',
+    '/seek=27.716'
+  ]);
+  assert.equal(calls[0][2].shell, false);
+  assert.deepEqual(calls[1], ['unref']);
+});
+
+test('native launcher accepts HH:MM:SS seek values used by managed resume paths', async () => {
+  const { normalizeSeekSeconds } = loadNativeModule();
+  assert.equal(normalizeSeekSeconds('00:01:30.500'), 90.5);
+  assert.equal(normalizeSeekSeconds('02:00:00'), 7200);
+  assert.equal(normalizeSeekSeconds({ seconds: 12.25 }), 12.25);
+});
+
+test('native PotPlayer target validation rejects arbitrary protocols and relative paths', () => {
+  const { normalizePotPlayerTarget } = loadNativeModule();
+  assert.equal(normalizePotPlayerTarget('D:\\Course\\lesson.mp4'), 'D:\\Course\\lesson.mp4');
+  assert.equal(normalizePotPlayerTarget('https://example.com/video'), 'https://example.com/video');
+  assert.throws(() => normalizePotPlayerTarget('jv://open?path=x'), /只允许/);
+  assert.throws(() => normalizePotPlayerTarget('relative.mp4'), /只允许/);
+});
