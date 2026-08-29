@@ -59,8 +59,13 @@ function recoveredResourceById(plugin, resourceId) {
 }
 
 function currentResourceForReference(plugin, reference) {
-  const exact = plugin?.state?.resources?.[String(reference?.resourceId || '')];
+  const resourceId = String(reference?.resourceId || '');
+  const exact = plugin?.state?.resources?.[resourceId];
   if (exact && !exact.deletedAt) return exact;
+
+  const aliasId = String(plugin?.state?.uiState?.referenceAliases?.[resourceId] || '');
+  const aliased = aliasId ? plugin?.state?.resources?.[aliasId] : null;
+  if (aliased && !aliased.deletedAt) return aliased;
 
   const resolveActions = (resource) => plugin?.resourceActions?.(resource) || {};
   if (reference?.locator) {
