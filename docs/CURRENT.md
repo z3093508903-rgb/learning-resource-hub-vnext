@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.11 — Pre-RC / Companion Polish & Standalone Note Window**
+**Go Study 0.3.0-beta.20.12 — Pre-RC / Bilibili Web Learning & Caret Stabilization**
 
 Stable / Merge：**HOLD**
 
@@ -20,33 +20,33 @@ Stable / Merge：**HOLD**
 
 ## 当前开发候选
 
-- Branch：fix/companion-polish-beta20-11
-- Base：fix/native-obsidian-drag-beta20-10
+- Branch：fix/bilibili-web-learning-beta20-12
+- Base：fix/companion-polish-beta20-11
 - Draft PR：尚未创建
-- Current HEAD：2d0015ab52fbb7aaed2ec16e85391f312b376b0d
-- Preview 发布目标：e0a68f259274fe737da4fb874ae77695132bfb19
-- Preview：Go Study Preview 0.3.0-beta.20.11
-- Tag：go-study-preview-v0.3.0-beta.20.11
-- ZIP SHA256：4f2f5a25d7592306b8240aff45cd47613ac20b15c35329b8b924afb935287cda
+- Current HEAD：f5ca8b1de91889acb158b39dd8e2bbc47e83c35b
+- Preview 发布目标：01833743de5d0a44a72be6f7d9e74d9a6dd74600
+- Preview：Go Study Preview 0.3.0-beta.20.12
+- Tag：go-study-preview-v0.3.0-beta.20.12
+- Obsidian ZIP SHA256：1a4b1cda7b4dfe6402d560d444ab37a2a2888f481dab75059b3356422e65f063
+- Bilibili Bridge ZIP SHA256：177c5bdd4e33f7ce035ef831a0c6daadb73352add7673f06fe8a94cda7b5c6e0
 
 ## 自动化状态
 
-- beta20.11 validator run #2 ✅
+- beta20.12 validator run #3 ✅
+- Browser extension syntax / Manifest v3 validation ✅
 - Preview publisher ✅
-- **394 / 394 tests PASS**
-- build：37 modules / 752289 bytes ✅
+- **402 / 402 tests PASS**
+- build：38 modules / 762640 bytes ✅
 - committed main.js consistency ✅
 - release validation ✅
 - Release readiness check ✅
-
-第一次 validator 仅有 1 个测试断言仍检查旧函数边界，代码逻辑本身已通过其余 393 项；修正测试后第 2 次全绿。
 
 
 ## 当前发布阻断 / 未关闭
 
 1. beta20.9.3 Windows 真人验收已全部 PASS：PotPlayer 自动发现 / Resource Center 播放 / Freeform 普通点击与 seek / Ctrl+点击 Browser / Legacy JV compatibility 均正常；当前最高优先级转为 Obsidian 原生左侧文件树 / 已打开 Markdown tab 拖入 Study Mode；
 2. beta20.10 Native Obsidian Drag 已真人确认可用，并保持普通 Obsidian 拖动边界；beta20.11 正在收口 Companion 体验：项目笔记盒拖入、无 PotPlayer 纯笔记小窗、成功提示乱码、长笔记焦点/滚动；
-3. Companion caret 点击定位在 beta20.7 修复后缺少最终实机确认；
+3. beta20.11 长笔记自动聚焦真人反馈出现持续刷新/抽搐；beta20.12 已改为一次性、事件驱动 caret reveal，并在用户继续输入/移动光标时自动放弃滚动，等待实机；
 4. Managed v3 fallback、legacy v1 relink、light-mode modal、named backup 需要最终 RC 回归；
 5. data.json 自动归零事故已做 fail-closed + external recovery；用户后续未再次报告归零，但 RC 前仍需 restart ×2 + restore 复验。
 
@@ -1019,3 +1019,84 @@ Preview：
 - 394 / 394 tests PASS。
 
 本轮真人验收通过后，下一阶段不再开发功能，进入 **Full RC Audit / Polish**。
+
+
+## beta20.12：Bilibili Web Learning + Caret Stabilization
+
+用户提出首发前最后一个降低门槛的增强：
+
+> B站用户不应为了时间戳 / HUD 笔记必须先配置 PotPlayer 网络播放；直接在 B站网页播放时，也应该能用 Go Study 小窗或后台 Markdown 做时间戳与快捷笔记。
+
+技术边界：
+
+- Obsidian 插件无法直接读取外部 Chrome / Edge 页面里的 `<video>.currentTime`；
+- 因此采用**可选的极轻浏览器桥接扩展**，不把它变成主插件硬依赖；
+- 不采用更重的 Native Messaging 安装链；
+- 首版网页模式不申请截图权限。
+
+架构：
+
+~~~text
+Bilibili page <video>.currentTime
+→ Go Study Bilibili Bridge (MV3)
+→ POST 127.0.0.1:27124/v1/state
+→ Obsidian Go Study in-memory state
+→ global Alt+S HUD
+→ Companion / remembered Markdown
+~~~
+
+隐私 /安全边界：
+
+- Bridge server 只绑定 `127.0.0.1`；
+- 扩展只匹配 `https://www.bilibili.com/video/*`；
+- 只传 URL / title / currentTime / duration / paused / foreground state；
+- 不读取 Obsidian 笔记；
+- 不上传到外部服务；
+- 服务端严格验证 Bilibili video URL 和 payload 大小。
+
+网页 HUD 首版支持：
+
+- 仅时间戳；
+- 纯笔记；
+- 评论 + 时间戳。
+
+网页截图动作仍明确保持 PotPlayer-only。
+
+网页生成的 timestamp 直接使用 Bilibili 原生 URL：
+
+`https://www.bilibili.com/video/BV...?p=2&t=69.4`
+
+因此：
+- 普通点击直接回网页；
+- 不经过 Go Study custom protocol；
+- 不经过 PotPlayer；
+- 保留 B站分 P query；
+- 支持毫秒级小数时间。
+
+Source routing：
+
+- 前台 PotPlayer → 优先使用 Native PotPlayer；
+- PotPlayer 不在前台 / 不可用 → 尝试 fresh + foreground Bilibili web state；
+- Bilibili web source 强制按 Web Freeform 记录，即使同 URL 已有 Managed Resource，也不把本次网页 timestamp 改回 PotPlayer 链路。
+
+Companion caret 稳定化：
+
+beta20.11 的 reveal helper 会在 open / programmatic insert 后主动滚动，真人反馈长笔记手打时有抽搐感。
+
+beta20.12 改为：
+- open 时只把 cursor 定位一次；
+- layout 稳定后只 schedule 一次 reveal；
+- HUD / programmatic insert 后记录 expected cursor；
+- 延迟 reveal 前重新读取 cursor；
+- 用户若已输入、点击或移动 caret → 自动取消这次 reveal；
+- 不再强制 `.cm-scroller.scrollTop = scrollHeight`；
+- 不再 requestAnimationFrame 二次纠正；
+- 不抢 PotPlayer / Browser 焦点。
+
+Preview assets：
+- Go Study Preview `0.3.0-beta.20.12`
+- Go Study Bilibili Bridge `0.1.0`
+- Obsidian ZIP SHA256：`1a4b1cda7b4dfe6402d560d444ab37a2a2888f481dab75059b3356422e65f063`
+- Bridge ZIP SHA256：`177c5bdd4e33f7ce035ef831a0c6daadb73352add7673f06fe8a94cda7b5c6e0`
+
+下一步只做 Windows + Chrome/Edge 真人验收。通过后进入 Full RC Audit，不再增加功能。
