@@ -1379,3 +1379,26 @@ Compatibility policy 不变：
 RC3 状态：
 
 > **WITHDRAWN / DO NOT USE / superseded by RC4**
+
+
+## Public launch docs
+
+Release-facing documentation is now prepared on `release/go-study-0.3.0-rc4`:
+
+- root `README.md` rewritten for Go Study public positioning;
+- `docs/USER_GUIDE.md` added as the full user manual;
+- `docs/index.html` added as a standalone one-page product/landing site;
+- `docs/RELEASE_NOTES_0.3.0.md` added for the first stable release.
+
+Messaging focus:
+
+- pain point first, not feature list first;
+- traditional multi-step video-note workflow vs Go Study's short path;
+- “项目 → 点资源 → 学习”;
+- “Alt + S → 写”;
+- Companion as a lightweight real-Obsidian Markdown window;
+- Bilibili web learning as a low-barrier path;
+- PotPlayer/OpenList as the advanced path;
+- local-first, recoverable data.
+
+Do not add new product features during final release preparation. Remaining work is release identity, final packaging, screenshots/visual assets, and publish metadata.
