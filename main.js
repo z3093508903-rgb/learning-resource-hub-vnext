@@ -12191,35 +12191,115 @@ function markdownPathFromTabTarget(plugin, target) {
       if (path) return path;
     }
   }
-  return markdownPathIfValid(plugin, tab.dataset?.path || tab.getAttribute?.('data-path'));
+  return markdownPathIfValid(
+    plugin,
+    tab.dataset?.path
+      || tab.dataset?.filePath
+      || tab.getAttribute?.('data-path')
+      || tab.getAttribute?.('data-file-path')
+  );
+}
+
+function markdownPathFromNativeNode(plugin, node) {
+  if (!node) return '';
+  const directValues = [
+    node.dataset?.path,
+    node.dataset?.filePath,
+    node.dataset?.sourcePath,
+    node.getAttribute?.('data-path'),
+    node.getAttribute?.('data-file-path'),
+    node.getAttribute?.('data-source-path')
+  ];
+  for (const value of directValues) {
+    const path = markdownPathIfValid(plugin, value);
+    if (path) return path;
+  }
+  return markdownPathFromTabTarget(plugin, node);
 }
 
 function markdownPathFromNativeDragTarget(plugin, target) {
   if (!target?.closest) return '';
   if (target.closest('[data-go-study-study-note-path]')) return '';
-  const pathHost = target.closest('.nav-file-title[data-path], .nav-file[data-path], .tree-item-self[data-path], [data-path]');
-  const direct = markdownPathIfValid(plugin, pathHost?.dataset?.path || pathHost?.getAttribute?.('data-path'));
+  const pathHost = target.closest(
+    '.nav-file-title[data-path], .nav-file[data-path], .tree-item-self[data-path], ' +
+    '[data-file-path], [data-source-path], [data-path]'
+  );
+  const direct = markdownPathFromNativeNode(plugin, pathHost);
   if (direct) return direct;
   return markdownPathFromTabTarget(plugin, target);
+}
+
+function markdownPathFromComposedPath(plugin, event) {
+  let nodes = [];
+  try { nodes = event?.composedPath?.() || []; } catch {}
+  for (const node of nodes) {
+    const path = markdownPathFromNativeNode(plugin, node);
+    if (path) return path;
+  }
+  return '';
 }
 
 function markdownPathFromDragEvent(plugin, event, fallback = '') {
   const fromTarget = markdownPathFromNativeDragTarget(plugin, event?.target);
   if (fromTarget) return fromTarget;
+
+  const fromComposedPath = markdownPathFromComposedPath(plugin, event);
+  if (fromComposedPath) return fromComposedPath;
+
   const data = event?.dataTransfer;
-  for (const type of ['text/plain', 'text/uri-list', 'text']) {
+  const types = Array.from(data?.types || []);
+  for (const type of [...types, 'text/plain', 'text/uri-list', 'text']) {
     let raw = '';
     try { raw = data?.getData?.(type) || ''; } catch {}
-    const path = markdownPathIfValid(plugin, raw);
-    if (path) return path;
+    if (!raw) continue;
+
+    const direct = markdownPathIfValid(plugin, raw);
+    if (direct) return direct;
+
+    for (const candidate of String(raw).split(/[\r\n]+/).map((part) => part.trim()).filter(Boolean)) {
+      const path = markdownPathIfValid(plugin, candidate);
+      if (path) return path;
+    }
   }
   return markdownPathIfValid(plugin, fallback);
 }
 
+function nativeDragDiagnostic(plugin, event, resolvedPath = '') {
+  let composed = [];
+  try { composed = event?.composedPath?.() || []; } catch {}
+  const summarizeNode = (node) => {
+    if (!node) return null;
+    const className = typeof node.className === 'string' ? node.className : '';
+    return {
+      tag: String(node.tagName || '').toLowerCase(),
+      className: className.slice(0, 180),
+      path: String(
+        node.dataset?.path
+          || node.dataset?.filePath
+          || node.dataset?.sourcePath
+          || node.getAttribute?.('data-path')
+          || node.getAttribute?.('data-file-path')
+          || node.getAttribute?.('data-source-path')
+          || ''
+      ).slice(0, 300),
+      ariaLabel: String(node.getAttribute?.('aria-label') || '').slice(0, 180),
+      title: String(node.getAttribute?.('title') || '').slice(0, 180)
+    };
+  };
+  const diagnostic = {
+    resolvedPath: String(resolvedPath || ''),
+    target: summarizeNode(event?.target),
+    composedPath: composed.slice(0, 12).map(summarizeNode).filter(Boolean),
+    dataTransferTypes: Array.from(event?.dataTransfer?.types || []),
+    defaultPrevented: Boolean(event?.defaultPrevented)
+  };
+  console.info('Go Study native drag diagnostic', diagnostic);
+  return diagnostic;
+}
+
 function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
   if (!doc?.addEventListener || !doc?.body) return null;
-  let pointerCandidate = '';
-  let pointerStart = null;
+  let dragCandidate = '';
   let nativeDropEl = null;
 
   const removeDrop = () => {
@@ -12228,9 +12308,8 @@ function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
   };
 
   const completeDrop = async (path) => {
-    const droppedPath = String(path || pointerCandidate || '').trim();
-    pointerCandidate = '';
-    pointerStart = null;
+    const droppedPath = String(path || dragCandidate || '').trim();
+    dragCandidate = '';
     removeDrop();
     if (!droppedPath) return;
     try {
@@ -12251,79 +12330,49 @@ function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
     if (nativeDropEl?.dataset) nativeDropEl.dataset.goStudyNativeNotePath = selectedPath;
   };
 
-  const onPointerDown = (event) => {
-    pointerCandidate = markdownPathFromNativeDragTarget(plugin, event?.target);
-    pointerStart = pointerCandidate
-      ? { x: Number(event?.clientX || 0), y: Number(event?.clientY || 0) }
-      : null;
-  };
-
-  const onPointerMove = (event) => {
-    if (!pointerCandidate || !pointerStart || nativeDropEl) return;
-    if (Number(event?.buttons || 0) !== 1) return;
-    const dx = Number(event?.clientX || 0) - pointerStart.x;
-    const dy = Number(event?.clientY || 0) - pointerStart.y;
-    if ((dx * dx) + (dy * dy) < 64) return;
-    showDrop(pointerCandidate);
-  };
-
   const onDragStart = (event) => {
-    const path = markdownPathFromDragEvent(plugin, event, pointerCandidate);
-    if (!path) return;
-    pointerCandidate = path;
+    if (event?.target?.closest?.('[data-go-study-study-note-path]')) return;
+    const path = markdownPathFromDragEvent(plugin, event);
+    nativeDragDiagnostic(plugin, event, path);
+    if (!path) {
+      const sourceLooksRelevant = Boolean(
+        event?.target?.closest?.('.nav-file, .nav-file-title, .tree-item-self, .workspace-tab-header')
+      );
+      if (sourceLooksRelevant) {
+        new Notice('Go Study 拖拽诊断：检测到 Obsidian 原生拖动，但暂未识别 Markdown 路径。诊断信息已写入开发者控制台。', 5500);
+      }
+      return;
+    }
+    dragCandidate = path;
     showDrop(path);
   };
 
   const onDragEnd = () => {
-    pointerCandidate = '';
-    pointerStart = null;
-    removeDrop();
-  };
-
-  const onPointerUp = (event) => {
-    if (pointerCandidate && nativeDropEl?.getBoundingClientRect) {
-      const rect = nativeDropEl.getBoundingClientRect();
-      const x = Number(event?.clientX || 0);
-      const y = Number(event?.clientY || 0);
-      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
-        event?.preventDefault?.();
-        event?.stopPropagation?.();
-        void completeDrop(pointerCandidate);
-        return;
-      }
-    }
-    pointerCandidate = '';
-    pointerStart = null;
+    dragCandidate = '';
     removeDrop();
   };
 
   const onDropAnywhere = (event) => {
+    // Go Study must not take ownership of normal Obsidian drops.
+    // Only workbenchStudyDropTarget() calls preventDefault/stopPropagation,
+    // and only when the pointer is actually over that small target.
     if (nativeDropEl?.contains?.(event?.target)) return;
-    pointerCandidate = '';
-    pointerStart = null;
+    dragCandidate = '';
     removeDrop();
   };
 
-  doc.addEventListener('pointerdown', onPointerDown, true);
-  doc.addEventListener('pointermove', onPointerMove, true);
-  doc.addEventListener('pointerup', onPointerUp, true);
-  doc.addEventListener('pointercancel', onPointerUp, true);
   doc.addEventListener('dragstart', onDragStart, false);
   doc.addEventListener('dragend', onDragEnd, true);
   doc.addEventListener('drop', onDropAnywhere, true);
 
   const cleanup = () => {
-    doc.removeEventListener?.('pointerdown', onPointerDown, true);
-    doc.removeEventListener?.('pointermove', onPointerMove, true);
-    doc.removeEventListener?.('pointerup', onPointerUp, true);
-    doc.removeEventListener?.('pointercancel', onPointerUp, true);
     doc.removeEventListener?.('dragstart', onDragStart, false);
     doc.removeEventListener?.('dragend', onDragEnd, true);
     doc.removeEventListener?.('drop', onDropAnywhere, true);
     removeDrop();
   };
   plugin?.register?.(cleanup);
-  return { cleanup, removeDrop, showDrop };
+  return { cleanup, removeDrop, showDrop, nativeDragDiagnostic };
 }
 
 function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
