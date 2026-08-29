@@ -1,92 +1,244 @@
-# Learning Resource Hub vNext
+# Go Study
 
-Learning Resource Hub vNext is a desktop Obsidian plugin for organizing and launching learning resources from one workspace.
+> 把“打开资源 → 进入学习 → 记录笔记 → 回到原位置继续”压缩成一个稳定的学习工作流。
 
-The current public snapshot is a pre-release build. It supports project-based organization for videos, Anki decks, Vault files, local files, PDFs, web resources, Bilibili collections, and OpenList directories.
+Go Study 是一个面向 **Obsidian Desktop** 的学习工作台。
 
-## Status
+它解决的不是“把视频放进 Obsidian”，而是一个更日常的问题：
 
-- Version: `0.2.0-alpha.12.4`
-- Platform: Obsidian desktop
-- Release stage: public beta preparation
-- Mobile support: not available
+> **我明明只是想继续昨天的视频、记一句笔记，为什么每次都要重新找资源、打开播放器、切窗口、找笔记、手动写时间？**
 
-This repository is not yet an Obsidian Community Plugin release. The final public documentation, screenshots, compatibility matrix, and release notes are still being prepared.
+Go Study 把资源、项目、播放位置和 Markdown 笔记连接起来，让你更快回到学习现场。
 
-## Main capabilities
+---
 
-- Today, Projects, Library, and Subscriptions workspaces.
-- Project, learning module, resource, task, Vault reference, and memo organization.
-- Bilibili video, multi-part video, collection, and creator subscription import.
-- OpenList directory browsing and explicit resource import.
-- Local folder scanning with an import preview.
-- AnkiConnect integration with optional Anki Profile launch.
-- PotPlayer, local file, Vault file, and browser launch actions.
-- Project-page snap layout with persisted card positions.
-- Recoverable archive, trash, undo, and orphan-resource cleanup flows.
+## 为什么做 Go Study
 
-## Privacy and external access
+传统的视频学习流程通常像这样：
 
-- Plugin data is stored locally in the Obsidian plugin data file and is not included in this repository.
-- The plugin does not include telemetry or advertising.
-- Bilibili features access public Bilibili endpoints.
-- OpenList features access the service configured by the user. Remote OpenList connections require HTTPS; loopback HTTP remains available for local services.
-- AnkiConnect requests are restricted to the local machine (`127.0.0.1`, `localhost`, or `::1`).
-- Local-folder import only scans a folder explicitly selected by the user.
-- Removing an indexed Vault reference does not delete the underlying Vault file.
-- State backups are stored under the plugin's local `backups/` directory; the newest 10 `state-*.json` backups are retained automatically.
+1. 找到课程文件或网页；
+2. 打开 PotPlayer / 浏览器；
+3. 找到上次看到的位置；
+4. 打开 Obsidian；
+5. 找到对应项目；
+6. 找到对应笔记；
+7. 手动记录时间；
+8. 再切回视频继续。
 
-Never commit `data.json`, `.deploy.local.json`, credentials, tokens, cookies, local backups, or real user screenshots.
+Go Study 希望把它变成：
 
-## Development
+**项目 → 点资源 → 开始学习。**
 
-Requirements:
+需要记笔记时：
 
-- Node.js
-- Obsidian desktop for manual acceptance
+**Alt + S → 选动作 → 写一句话。**
 
-Syntax check:
+就这么简单。
 
-```powershell
-npm run check
-```
+---
 
-Build:
+## 核心能力
 
-```powershell
-npm run build
-```
+### 1. 项目式学习资源工作台
 
-Tests:
+把一个学习目标相关的内容放在同一个项目里：
 
-```powershell
-npm test
-```
+- 本地视频
+- OpenList 视频
+- Bilibili
+- Vault Markdown
+- PDF / 网页 / 本地文件
+- 任务与备忘
 
-Release check:
+Go Study 不是单纯的视频插件，而是围绕“继续学习”设计的资源工作台。
 
-```powershell
-npm run release:check
-```
+### 2. 一键回到播放器
 
-`npm run release:check` performs syntax checks, rebuilds `main.js`, runs the test suite, and validates the release workspace. GitHub Actions runs the same check for pull requests. A formal `x.y.z` tag additionally runs the strict release gate and, if it passes, publishes `main.js`, `manifest.json`, and `styles.css` as GitHub Release assets.
+支持：
 
-The generated plugin files are:
+- PotPlayer 本地视频
+- OpenList 视频
+- Bilibili Freeform
+- Bilibili 网页学习增强
+
+保存时间点后，可以从 Markdown 直接回到对应视频与位置。
+
+### 3. Companion 轻量笔记小窗
+
+任意 Markdown 都可以拖入右侧 Companion 小窗：
+
+- 可置顶
+- 是真实 Obsidian Markdown
+- 不要求必须打开 PotPlayer
+- 可作为纯轻量笔记小窗
+- Study Mode 下可锁定为 Capture 目标
+
+### 4. HUD 快捷记录
+
+按下：
+
+`Alt + S`
+
+可快速记录：
+
+- 时间戳
+- 纯笔记
+- 评论 + 时间戳
+- PotPlayer 截图类动作
+
+视频继续在原来的播放器中，笔记写回真实 Markdown。
+
+### 5. Bilibili 网页学习
+
+安装可选的 **Go Study Bilibili Bridge** 后，可以直接在 Chrome / Edge 的 B站网页里学习：
+
+- 读取当前网页视频时间
+- Alt + S 记录时间戳
+- 写入 Companion / Markdown
+- 生成 Bilibili 原生 `t=` 时间链接
+
+不需要为了 B站网页学习先配置 PotPlayer 网络播放。
+
+### 6. 轻量 Timeline
+
+视频笔记可以显示轻量时间线：
+
+- 默认收起
+- 一条视频 / 来源一个轻量节点
+- hover 展开
+- 点击定位到 Markdown 对应行
+- 正文里的时间戳负责打开视频
+
+Timeline 用来“看笔记结构”，不是再造一个视频播放器。
+
+### 7. 数据安全
+
+Go Study 会：
+
+- 在加载和保存前保护 `data.json`
+- 阻止异常的“有数据 → 空数据”覆盖
+- 创建自动恢复快照
+- 支持命名长期备份
+- 支持从备份列表中选择任意历史备份恢复
+
+数据仍保存在你的本地 Obsidian 环境中。
+
+---
+
+## 两种使用方式
+
+### 轻量用户
 
 ```text
-main.js
-manifest.json
-styles.css
+Bilibili 网页
++ Go Study Bilibili Bridge
++ Companion
++ Alt + S
 ```
 
-## Manual installation
+不需要 PotPlayer。
 
-Copy the three generated plugin files into an Obsidian plugin directory named `learning-resource-hub-next`, then reload Obsidian and enable the plugin.
+### 进阶用户
 
-## Known pre-release boundaries
+```text
+PotPlayer
++ 本地视频 / OpenList
++ Companion
++ HUD
++ 截图
++ 时间戳
+```
 
-Real-environment acceptance is still required for themes, narrow windows, keyboard and accessibility behavior, Anki cold start, OpenList authentication and playback, Bilibili network behavior, PotPlayer launch, restart persistence, and large imports.
+适合需要播放器控制和更完整视频学习工作流的用户。
+
+---
+
+## 安装
+
+Go Study 当前是 Desktop-only 插件。
+
+发布前 RC 建议使用 GitHub Releases 中提供的 ZIP 包。
+
+正式版目录建议为：
+
+```text
+<Vault>/.obsidian/plugins/go-study/
+├─ main.js
+├─ manifest.json
+└─ styles.css
+```
+
+然后：
+
+1. 重启或重新加载 Obsidian；
+2. 设置 → 第三方插件；
+3. 启用 Go Study。
+
+### Bilibili 网页增强
+
+如果需要 B站网页时间戳/HUD：
+
+1. 下载 `Go Study Bilibili Bridge`；
+2. 解压；
+3. Chrome / Edge → 扩展管理；
+4. 开启开发者模式；
+5. 加载解压缩的扩展；
+6. Go Study 设置页会显示桥接“已启动 / 已连接”。
+
+正式浏览器商店版本上线后，这一步会简化。
+
+---
+
+## 兼容边界
+
+正式兼容承诺：
+
+- 当前 Go Study 资源 / 回链格式；
+- 历史 `jv://open?... ` 链接（开启 Legacy JV Compatibility 后）。
+
+开发阶段中间 beta 产生的实验型 PotPlayer 链接，不作为长期 Stable 兼容承诺。
+
+---
+
+## 隐私
+
+- 无广告
+- 无遥测
+- 不上传你的 Obsidian 笔记
+- Bilibili Bridge 只通过 `127.0.0.1` 与本机 Go Study 通讯
+- OpenList 只访问用户自己配置的服务
+- 本地文件扫描只扫描用户明确选择的位置
+
+---
+
+## 当前状态
+
+Go Study 0.3.0 正在 Release Candidate 阶段。
+
+发布前已经覆盖：
+
+- 资源中心 / 项目学习
+- PotPlayer
+- OpenList
+- Bilibili Freeform
+- Bilibili Web Bridge
+- Companion
+- HUD
+- Timeline
+- Native Markdown Drag
+- Backup / Restore
+- Legacy JV compatibility
+
+完整用户说明见：
+
+`docs/USER_GUIDE.md`
+
+单页产品介绍见：
+
+`docs/index.html`
+
+---
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License.
