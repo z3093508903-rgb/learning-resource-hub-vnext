@@ -5,7 +5,7 @@
 
 ## 0. 一句话状态
 
-Go Study 已推进到 **beta20.9.2 发布前收口 / Windows 真人验收阶段**。
+Go Study 已推进到 **beta20.9.3 发布前收口 / PotPlayer Discovery Windows 真人验收阶段**。
 
 核心链路已经成形：
 
@@ -21,7 +21,7 @@ Resource / Freeform
 
 当前不要继续扩功能。优先完成最后几个真机阻断问题：
 
-1. PotPlayer 打开的 Bilibili Freeform 时间戳 Ctrl+点击浏览器：beta20.9.1 真人复验 FAIL；beta20.9.2 已增加 protocol-level modifier fallback，并把正常播放从外部 JV helper 迁到 Go Study 原生 PotPlayer CLI，等待实机复验；
+1. Bilibili Freeform Ctrl+点击浏览器在 beta20.9.2 已经 Windows 真人 PASS；当前 P0 是 Native PotPlayer executable discovery：新 Freeform 普通点击与 Resource Center 播放均因找不到 PotPlayer .exe 失败，beta20.9.3 已修，等待实机；
 2. Obsidian 原生左侧文件树 / 已打开 Markdown 标签页拖入 Study Mode：beta20.7 尝试修复，但用户实机仍报告没有出现拖入小窗入口；
 3. Companion 鼠标点击与 caret 落点：beta20.7 已移除 CodeMirror 容器 CSS zoom，但没有收到明确通过结论，需要补一次真机复验；
 4. beta20.9 的 Managed v3 fallback / legacy v1 relink / light-mode modal / named backup 需要最终回归。
@@ -61,38 +61,39 @@ z3093508903-rgb/learning-resource-hub-vnext
 
 ### 最新 Hotfix
 
-- Branch：fix/legacy-jv-native-beta20-9-2
-- Base：fix/freeform-bili-ctrlclick-beta20-9-1
-- Draft PR：尚未创建；PR #39 仍为 beta20.9.1 历史 Hotfix
-- Current HEAD：9139cbee5f63266eabfd37ef0960905b3d33ba4e
-- Preview 发布目标：217a992ba7df18e4a3caedf4fad3890633b47900
-- Preview：Go Study Preview 0.3.0-beta.20.9.2
-- Tag：go-study-preview-v0.3.0-beta.20.9.2
-- ZIP SHA256：e290e0b5bb243b9f5289dda353123920d74d9992864406ac763f702dd8bdae24
+- Branch：fix/potplayer-discovery-beta20-9-3
+- Base：fix/legacy-jv-native-beta20-9-2
+- Draft PR：尚未创建
+- Current HEAD：7414098298f8e71e7ceee0f13ad89385462d47ef
+- Preview 发布目标：d946176bcd156d0d6c8d4d358c58838449c98dba
+- Preview：Go Study Preview 0.3.0-beta.20.9.3
+- Tag：go-study-preview-v0.3.0-beta.20.9.3
+- ZIP SHA256：6e60b7a5f2fb5335bb43dd70a3d47b176ab8f2376e0b28909641d47e9000ea53
 
 ### 自动验证
 
-- beta20.9.2 validator run #3：PASS
+- validator run #2：PASS
 - Preview publisher：PASS
-- **383 / 383 tests PASS**
-- build：37 modules / 737899 bytes
+- **387 / 387 tests PASS**
+- build：37 modules / 745157 bytes
 - committed main.js current
 - Release readiness：PASS
 
-前两次 one-shot validator 失败均已定位并修复：
-- bundle regression 仍把“必须生成 jv://”当旧行为；
-- Freeform Node test 在无 Electron 环境提前加载 native module。
+### beta20.9.2 Windows 真人结论
 
-最终第 3 次完整验证全绿，随后发布 beta20.9.2 Preview。
+已确认：
+- 新 Freeform Ctrl+点击 → Browser：PASS；
+- Legacy JV compatibility ON → 旧 `jv://` 可回 PotPlayer：PASS。
 
-### beta20.9.1 真人结论
+未通过：
+- 新 Freeform 普通点击 → PotPlayer：FAIL；
+- Resource Center 导入视频普通点击 → PotPlayer：FAIL。
 
-用户用 beta20.9.1 重新生成的真实 Bilibili Freeform URI 已确认：
-- `www%2Ebilibili%2Ecom` 生效 → Markdown-safe URI PASS；
-- Ctrl+点击仍打开 PotPlayer → Browser modifier 真人 FAIL；
-- Obsidian 外部打开时出现 `note2potplayer.exe` 报错 → 暴露正常 Runtime 仍通过旧 JV transport 调用外部 helper。
+共同错误：
+- “没有找到 PotPlayer 可执行文件”。
 
-因此 beta20.9.1 不再继续作为 RC 候选。
+因此 20.9.3 只修 executable discovery，不重开已通过的 browser modifier / legacy parser 设计。
+
 
 ---
 
@@ -498,6 +499,55 @@ C. 新用户边界
 
 注意：Native PotPlayer CLI 的真实 Windows 安装路径解析、Bilibili 页面 URL 启动及 seek 必须真人验证；自动测试不能替代。
 
+
+## 11C. beta20.9.3 PotPlayer Discovery
+
+### Root cause
+
+beta20.9.2 把正常播放迁出 `jv:// → note2potplayer.exe` 后，Go Study 必须自己找到 PotPlayer executable。
+
+初版只覆盖有限的：
+- Program Files 常见目录；
+- 少量 App Paths；
+- PotPlayerMini64 / PotPlayerMini 进程名。
+
+用户机器真实安装未命中，因此所有需要原生启动 PotPlayer 的入口同时失败。
+
+### beta20.9.3
+
+Discovery 顺序：
+
+1. 已配置的 `potPlayerExecutablePath`；
+2. 常见 Program Files / LocalAppData 路径；
+3. 正在运行的 `PotPlayer*` 进程的真实 executable；
+4. Windows App Paths；
+5. Uninstall registry 的 DisplayIcon / InstallLocation；
+6. Start Menu PotPlayer shortcut；
+7. 全部失败时提示用户在设置里自动检测或手动填写 .exe。
+
+设置页新增：
+- PotPlayer 程序路径（高级）
+- 自动检测
+- 手动输入自定义 D/E 盘 / portable .exe
+
+成功自动发现后会持久保存路径，因此 Resource Center、Managed、Freeform、OpenList 共用同一个 Launcher。
+
+### 真人验收
+
+先只测：
+1. PotPlayer 保持运行；
+2. 设置 → Go Study → 视频笔记增强 → PotPlayer 程序路径（高级） → 自动检测；
+3. 是否显示并保存真实 .exe；
+4. Resource Center 普通播放；
+5. 新 Freeform 普通点击 + seek；
+6. Ctrl+点击仍 Browser；
+7. Legacy JV 开关 ON 后旧协议仍正常。
+
+如果 Auto Detect 仍失败：
+- 直接用 Task Manager / PotPlayer shortcut properties 找到实际 .exe；
+- 粘贴完整路径到设置；
+- 如果手动路径可用，则下一轮只补该安装形态的自动发现，不允许回退 note2potplayer runtime。
+
 ---
 
 ## 12. 明确未关闭：Obsidian 原生拖动 Study Mode
@@ -598,7 +648,7 @@ beta20.7 已处理：
 
 ## 15. 下一任接手后的执行顺序
 
-### 第一优先：复验 beta20.9.2
+### 第一优先：复验 beta20.9.3
 
 先测新 Go Study Bilibili Freeform：
 1. 普通点击是否由 Go Study 直接启动 PotPlayer 并正确 seek，且不再出现 note2potplayer.exe；
