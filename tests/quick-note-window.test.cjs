@@ -52,3 +52,12 @@ test('quick note popup is draggable, remembers geometry and uses a subtle scroll
   assert.match(source, /getBounds/);
   assert.match(source, /area\.height \* 0\.36/);
 });
+
+
+test('quick note prompt forces a strong topmost level before taking focus', () => {
+  const fs = require('node:fs');
+  const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'quick-note-window.cjs'), 'utf8');
+  assert.match(source, /setAlwaysOnTop\?\.\(true, 'screen-saver'\)/);
+  assert.match(source, /moveTop\?\.\(\)/);
+  assert.match(source, /win\.focus\(\)/);
+});
