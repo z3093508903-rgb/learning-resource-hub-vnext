@@ -113,6 +113,35 @@ Alt + S → 写
 
 ---
 
+## Free & Open Source
+
+**Go Study is free and open source.**
+
+**Core features will not be locked behind a paywall.**  
+If this project saves you time, you can optionally support its continued development.
+
+> **Go Study 免费且开源，0.3.0 的核心功能将永久免费且开源，不会在未来被移到付费墙后。**
+>
+> 如果它确实帮你节省了一些时间，可以选择赞助项目继续开发。
+
+未来只有 AI、云同步、托管服务等需要持续运营成本的新能力，才可能作为可选付费服务提供。
+
+---
+
+## 视频平台范围
+
+0.3.0 首发专门适配并验证：
+
+- Bilibili Web Bridge
+- PotPlayer
+- OpenList
+
+YouTube 暂无专门网页学习适配，也不作为 0.3.0 发布阻断。
+
+如果未来出现真实海外用户需求，会再按实际使用习惯设计 YouTube / 其他平台 Adapter。
+
+---
+
 ## 兼容
 
 长期兼容：
