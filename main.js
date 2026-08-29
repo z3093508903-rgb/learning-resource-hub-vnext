@@ -10643,6 +10643,7 @@ const {
 } = __rhLoad("resource-note.cjs");
 
 const BILIBILI_BRIDGE_RELEASES_URL = 'https://github.com/z3093508903-rgb/learning-resource-hub-vnext/releases';
+const GO_STUDY_PROJECT_URL = 'https://github.com/z3093508903-rgb/go-study';
 
 class BackupNameModal extends Modal {
   constructor(app, title, initialValue, onSubmit) {
@@ -10884,6 +10885,7 @@ class GoStudySettingsTab extends PluginSettingTab {
     this.renderVideoSettings(containerEl);
     this.renderNoteOutputSettings(containerEl);
     this.renderDataSettings(containerEl);
+    this.renderSupportSettings(containerEl);
   }
 
   refreshOutputPreview() {
@@ -11519,6 +11521,31 @@ class GoStudySettingsTab extends PluginSettingTab {
     void refresh();
   }
 
+  renderSupportSettings(containerEl) {
+    section(
+      containerEl,
+      '支持 Go Study',
+      'Go Study 免费且开源。现有核心功能将保持永久免费且开源，不会在未来被移到付费墙后。'
+    );
+
+    new Setting(containerEl)
+      .setName('Free & Open Source')
+      .setDesc('未来只有 AI、云同步、托管服务等需要持续运营成本的能力，才可能提供可选付费服务；当前核心学习体验不会因此收费。');
+
+    new Setting(containerEl)
+      .setName('如果它帮你节省了时间')
+      .setDesc('可以选择赞助项目继续开发。赞助完全自愿，不影响任何现有功能，也不会出现弹窗或功能内提醒。')
+      .addButton((button) => button
+        .setButtonText('支持 Go Study')
+        .onClick(async () => {
+          try {
+            await shell.openExternal(GO_STUDY_PROJECT_URL);
+          } catch (error) {
+            new Notice(commandErrorText('打开 Go Study 项目主页失败', error), 6000);
+          }
+        }));
+  }
+
   renderDataSettings(containerEl) {
     const settings = currentProductSettings(this.plugin);
     section(containerEl, '数据与安全', 'Go Study 会在启动前和后续保存前创建状态恢复快照，备份放在插件目录之外，覆盖升级插件不会顺手删除这些备份。');
@@ -11635,6 +11662,7 @@ module.exports = {
   BackupNameModal,
   BackupRestoreModal,
   backupEntryDescription,
+  GO_STUDY_PROJECT_URL,
   GoStudySettingsTab,
   noteOutputOptions,
   noteOutputPreview,
