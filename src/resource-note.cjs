@@ -14,6 +14,7 @@ const {
   normalizeOutputTemplate,
   normalizeTimeDisplayFormat
 } = require('./product-settings.cjs');
+const { bilibiliTimestampUrl, isBilibiliVideoUrl } = require('./bilibili-web-bridge.cjs');
 
 function formatPositionClock(position, mode = 'smart') {
   const normalized = normalizeReferencePosition(position);
@@ -143,11 +144,16 @@ function freeformWebLocator(media = {}) {
 function buildFreeformPositionMarkdown(media, position, options = {}) {
   const normalized = normalizeReferencePosition(position);
   const locator = String(media?.path || '').trim();
-  const uri = buildFreeformReferenceUri({
+  const source = String(media?.source || media?.transport || '').trim().toLowerCase();
+  const web = freeformWebLocator(media);
+  const directBilibili = source === 'bilibili-web' && isBilibiliVideoUrl(web || locator)
+    ? bilibiliTimestampUrl(web || locator, normalized.seconds)
+    : '';
+  const uri = directBilibili || buildFreeformReferenceUri({
     locator,
     name: freeformLocatorName(locator),
     title: freeformMediaTitle(media),
-    web: freeformWebLocator(media),
+    web,
     position: normalized
   });
   const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
