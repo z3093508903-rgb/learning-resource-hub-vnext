@@ -133,7 +133,7 @@ test('资源清理前状态可备份并从备份恢复', async () => {
     await plugin.restoreStateBackup(backupName);
     assert.equal(plugin.state.resources.r1.title, '保留资源');
     assert.equal(plugin.state.uiState.lastAction, null);
-    assert.ok(fs.existsSync(path.join(tempRoot, '.obsidian', 'plugins', 'learning-resource-hub-next', 'backups', backupName)));
+    assert.ok(fs.existsSync(path.join(tempRoot, '.obsidian', 'go-study-recovery', backupName)));
   } finally {
     Module._load = originalLoad;
     fs.rmSync(tempRoot, { recursive: true, force: true });
