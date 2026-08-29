@@ -120,7 +120,8 @@ function buildPositionMarkdown(resource, position, options = {}) {
 
 function freeformMediaTitle(media = {}) {
   const explicit = String(media.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '').trim();
-  if (explicit && explicit.toLowerCase() !== 'potplayer') return explicit;
+  const corrupt = /\uFFFD/.test(explicit);
+  if (explicit && !corrupt && explicit.toLowerCase() !== 'potplayer') return explicit;
   const raw = String(media.path || '').trim();
   try {
     const url = new URL(raw);
