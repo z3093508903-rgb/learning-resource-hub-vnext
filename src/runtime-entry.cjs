@@ -9,6 +9,7 @@ const { installFreeformBrowserModifier } = require('./freeform-link-ui.cjs');
 const { GoStudySettingsTab } = require('./product-settings-tab.cjs');
 const { currentProductSettings, ensureProductSettings } = require('./product-settings.cjs');
 const { registerCompanionNoteCommands } = require('./companion-note-window.cjs');
+const { registerBilibiliWebBridge } = require('./bilibili-web-bridge.cjs');
 const { enterStudyMode, exitStudyMode, studyModeState } = require('./study-mode.cjs');
 const { installTimelineNavigator } = require('./timeline-navigator.cjs');
 const {
@@ -50,6 +51,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     installTimelineNavigator(this);
     registerRememberedNoteTarget(this);
     registerCompanionNoteCommands(this);
+    registerBilibiliWebBridge(this);
     registerImmersiveHotkeys(this);
     installScopedUiFixes(this);
     installLearningControls(this);
