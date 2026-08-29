@@ -8,10 +8,15 @@ const path = require('node:path');
 const hudSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'action-hud.cjs'), 'utf8');
 const hotkeySource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'immersive-hotkeys.cjs'), 'utf8');
 
-test('HUD renders five configurable slots without taking foreground focus', () => {
+test('HUD supports both passive PotPlayer mode and focused browser-input mode', () => {
   for (const slot of ['up','left','center','right','down']) assert.match(hudSource, new RegExp(slot));
-  assert.match(hudSource, /focusable:\s*false/);
+  assert.match(hudSource, /const focusable = Boolean\(options\.focusable\)/);
+  assert.match(hudSource, /before-input-event/);
+  assert.match(hudSource, /ArrowUp/);
+  assert.match(hudSource, /event\?\.preventDefault/);
   assert.match(hudSource, /showInactive/);
+  assert.match(hudSource, /win\.focus/);
+  assert.match(hudSource, /setAlwaysOnTop\?\.\(true, 'screen-saver'\)/);
 });
 
 test('master shortcut supports quick direction execution before delayed HUD display', () => {
@@ -35,4 +40,15 @@ test('visible HUD supports double-pressing the same direction as direction plus 
   assert.match(hotkeySource, /directionDoublePressMs/);
   assert.match(hotkeySource, /selected === slot && now - lastDirectionAt <= doublePressMs/);
   assert.match(hotkeySource, /return execute\(slot\)/);
+});
+
+
+test('Bilibili focused HUD uses local key capture and temporary global handlers only as bootstrap', () => {
+  assert.match(hotkeySource, /shouldUseFocusedWebHud/);
+  assert.match(hotkeySource, /focusable:\s*focusedWebHud/);
+  assert.match(hotkeySource, /onInput:\s*\(key\) => localInputHandler/);
+  assert.match(hotkeySource, /registerTemporaryHandlers\(false\)/);
+  assert.match(hotkeySource, /releaseTemporaryHandlers/);
+  assert.match(hotkeySource, /Promise\.resolve\(hud\?\.show\?\.\(\)\)/);
+  assert.match(hotkeySource, /focusedWebHud/);
 });
