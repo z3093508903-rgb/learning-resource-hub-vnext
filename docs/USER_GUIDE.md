@@ -480,3 +480,46 @@ Go Study 的价值不是多一个“资源管理器”。
 而是：
 
 > **当你想继续学习时，不需要重新搭建昨天的学习现场。**
+
+
+---
+
+## 17. 从 Preview 升级到正式版
+
+Go Study 0.3.0 的永久插件 ID 是：
+
+`go-study`
+
+如果当前 Vault 曾经安装过测试版：
+
+`go-study-preview`
+
+正式版第一次启动时会在以下条件下自动迁移：
+
+- 正式版自己的 `data.json` 还不存在；
+- Preview 的 `data.json` 中存在有效项目 / 资源数据。
+
+迁移时：
+
+1. 原 Preview `data.json` **不会被修改或删除**；
+2. Go Study 会额外创建一份 `saved-preview-migration-...` 恢复备份；
+3. 数据写入正式版 `go-study/data.json`；
+4. 确认正式版项目和设置都正常后，再停用 / 删除 Preview。
+
+如果正式版已经拥有自己的 `data.json`，Go Study **不会**再自动用 Preview 覆盖它。
+
+---
+
+## 18. 开源与贡献
+
+Go Study 使用 MIT License。
+
+欢迎：
+
+- 提交 Bug；
+- 提交功能建议；
+- 改进说明文档；
+- 提交 Pull Request；
+- 为其他视频平台设计 Adapter。
+
+0.3.0 不会因为“国际化功能数量”临时加入未经验证的 YouTube 适配。未来平台支持优先由真实用户工作流推动。
