@@ -12,6 +12,7 @@ const DEFAULT_PRODUCT_SETTINGS = Object.freeze({
   focusStudyNoteAtEnd: true,
   freeformVideoNotesEnabled: true,
   legacyJvCompatibilityEnabled: false,
+  potPlayerExecutablePath: '',
   shortcutMode: 'mixed',
   actionHudShortcut: 'Alt+S',
   actionHudDelayMs: 300,
@@ -77,6 +78,18 @@ function normalizeCaptureFolder(value) {
     throw new Error('截图目录必须是 Vault 内的安全相对路径。');
   }
   return parts.join('/');
+}
+
+function normalizePotPlayerExecutablePath(value) {
+  const raw = String(value ?? '').trim().replace(/^"(.*)"$/, '$1');
+  if (!raw) return '';
+  if (raw.length > 4096 || /[\r\n\0]/.test(raw)) throw new Error('PotPlayer 程序路径无效。');
+  const windowsDrive = /^[A-Za-z]:[\\/]/.test(raw);
+  const windowsUnc = /^\\\\[^\\]+\\[^\\]+/.test(raw);
+  if ((!windowsDrive && !windowsUnc) || !/\.exe$/i.test(raw)) {
+    throw new Error('PotPlayer 程序路径必须是 Windows 绝对 .exe 路径。');
+  }
+  return raw;
 }
 
 function normalizeTimeDisplayFormat(value) {
@@ -152,6 +165,10 @@ function currentProductSettings(plugin) {
     focusStudyNoteAtEnd: boolOr(ui.focusStudyNoteAtEnd, DEFAULT_PRODUCT_SETTINGS.focusStudyNoteAtEnd),
     freeformVideoNotesEnabled: boolOr(ui.freeformVideoNotesEnabled, DEFAULT_PRODUCT_SETTINGS.freeformVideoNotesEnabled),
     legacyJvCompatibilityEnabled: boolOr(ui.legacyJvCompatibilityEnabled, DEFAULT_PRODUCT_SETTINGS.legacyJvCompatibilityEnabled),
+    potPlayerExecutablePath: (() => {
+      try { return normalizePotPlayerExecutablePath(ui.potPlayerExecutablePath); }
+      catch { return DEFAULT_PRODUCT_SETTINGS.potPlayerExecutablePath; }
+    })(),
     shortcutMode: normalizeShortcutMode(ui.shortcutMode),
     actionHudShortcut: (() => {
       try { return normalizeActionHudShortcut(ui.actionHudShortcut); }
@@ -195,6 +212,7 @@ async function updateProductSetting(plugin, key, value) {
   plugin.state.uiState ||= {};
   let next = value;
   if (key === 'captureFolder') next = normalizeCaptureFolder(value);
+  else if (key === 'potPlayerExecutablePath') next = normalizePotPlayerExecutablePath(value);
   else if (key === 'backupRetention') next = clampInteger(value, 3, 10, DEFAULT_PRODUCT_SETTINGS.backupRetention);
   else if (key === 'timeDisplayFormat') next = normalizeTimeDisplayFormat(value);
   else if (key === 'shortcutMode') next = normalizeShortcutMode(value);
@@ -227,6 +245,7 @@ module.exports = {
   normalizeActionHudDelayMs,
   normalizeActionHudShortcut,
   normalizeCaptureFolder,
+  normalizePotPlayerExecutablePath,
   normalizeOutputTemplate,
   normalizedBacklinkTemplate,
   normalizeShortcutMode,
