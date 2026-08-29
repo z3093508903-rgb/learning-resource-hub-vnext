@@ -126,6 +126,7 @@ test('runtime backlink rejects arbitrary path execution before playback resoluti
 test('entry registers only the fixed go-study Obsidian protocol action', () => {
   const source = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'entry.cjs'), 'utf8');
   assert.match(source, /registerObsidianProtocolHandler\(REFERENCE_ACTION/);
+  assert.match(source, /registerGoStudyReferenceProtocol/);
   assert.match(source, /REFERENCE_ACTION/);
   assert.doesNotMatch(source, /registerObsidianProtocolHandler\([^\n]*path/i);
 });
@@ -164,5 +165,55 @@ test('cross-platform freeform link upgrades to the unique managed Resource by po
     assert.equal(opened, true);
     assert.equal(positionedCall.resource.id, 'local');
     assert.equal(positionedCall.playerTime, '00:00:18');
+  });
+});
+
+
+test('protocol registration failure is fail-safe and keeps Go Study alive', async () => {
+  await withPluginModule(async ({ ExportedPlugin, Notice }) => {
+    const plugin = new ExportedPlugin();
+    plugin.manifest = { id: 'go-study-preview' };
+    plugin.app = { plugins: { enabledPlugins: new Set(['go-study-preview', 'learning-resource-hub-next']) } };
+    plugin.registerObsidianProtocolHandler = () => { throw new Error('duplicate protocol owner'); };
+
+    const status = plugin.registerGoStudyReferenceProtocol();
+
+    assert.equal(status.registered, false);
+    assert.equal(status.legacyConflict, true);
+    assert.match(status.error, /duplicate protocol owner/);
+    assert.ok(Notice.messages.some((message) => message.includes('Go Study 已继续启动')));
+    assert.ok(Notice.messages.some((message) => message.includes('停用旧版')));
+  });
+});
+
+test('legacy coexistence warns even when protocol registration itself succeeds', async () => {
+  await withPluginModule(async ({ ExportedPlugin, Notice }) => {
+    const plugin = new ExportedPlugin();
+    plugin.manifest = { id: 'go-study-preview' };
+    plugin.app = { plugins: { enabledPlugins: new Set(['go-study-preview', 'learning-resource-hub-next']) } };
+    let action = '';
+    plugin.registerObsidianProtocolHandler = (value) => { action = value; };
+
+    const status = plugin.registerGoStudyReferenceProtocol();
+
+    assert.equal(action, 'go-study');
+    assert.equal(status.registered, true);
+    assert.equal(status.legacyConflict, true);
+    assert.ok(Notice.messages.some((message) => message.includes('旧版 Learning Resource Hub Next')));
+  });
+});
+
+test('legacy source plugin id does not mistake itself for a coexistence conflict', async () => {
+  await withPluginModule(async ({ ExportedPlugin, Notice }) => {
+    const plugin = new ExportedPlugin();
+    plugin.manifest = { id: 'learning-resource-hub-next' };
+    plugin.app = { plugins: { enabledPlugins: new Set(['learning-resource-hub-next']) } };
+    plugin.registerObsidianProtocolHandler = () => {};
+
+    const status = plugin.registerGoStudyReferenceProtocol();
+
+    assert.equal(status.registered, true);
+    assert.equal(status.legacyConflict, false);
+    assert.equal(Notice.messages.length, 0);
   });
 });
