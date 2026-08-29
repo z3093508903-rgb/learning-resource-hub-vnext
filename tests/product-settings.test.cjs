@@ -9,6 +9,7 @@ const {
   ensureProductSettings,
   LEGACY_DEFAULT_BACKLINK_TEMPLATE,
   normalizeCaptureFolder,
+  normalizePotPlayerExecutablePath,
   normalizeOutputTemplate,
   resetOutputTemplates,
   updateProductSetting
@@ -26,6 +27,7 @@ test('video enhancement is opt-in while workbench and note-output defaults stay 
   assert.equal(settings.focusStudyNoteAtEnd, true);
   assert.equal(settings.freeformVideoNotesEnabled, true);
   assert.equal(settings.legacyJvCompatibilityEnabled, false);
+  assert.equal(settings.potPlayerExecutablePath, '');
   assert.equal(settings.shortcutMode, 'mixed');
   assert.equal(settings.actionHudShortcut, 'Alt+S');
   assert.equal(settings.actionHudDelayMs, 300);
@@ -50,6 +52,7 @@ test('ensureProductSettings persists normalized defaults into legacy state', () 
   assert.equal(plugin.state.uiState.videoEnhancementEnabled, false);
   assert.equal(plugin.state.uiState.timelineNavigatorEnabled, false);
   assert.equal(plugin.state.uiState.legacyJvCompatibilityEnabled, false);
+  assert.equal(plugin.state.uiState.potPlayerExecutablePath, '');
   assert.equal(plugin.state.uiState.captureFolder, DEFAULT_PRODUCT_SETTINGS.captureFolder);
   assert.equal(plugin.state.uiState.backlinkTemplate, DEFAULT_PRODUCT_SETTINGS.backlinkTemplate);
   assert.equal(plugin.state.uiState.actionHudShortcut, 'Alt+S');
@@ -145,4 +148,23 @@ test('legacy default backlink presentation migrates to timestamp-only without ov
   const customPlugin = { state: { uiState: { backlinkTemplate: '🎬 [{time}]({uri}) · {title}' } } };
   const custom = currentProductSettings(customPlugin);
   assert.equal(custom.backlinkTemplate, '🎬 [{time}]({uri}) · {title}');
+});
+
+
+test('PotPlayer executable setting accepts custom Windows paths and rejects unsafe values', async () => {
+  assert.equal(
+    normalizePotPlayerExecutablePath('"D:\\Portable Apps\\PotPlayer\\PotPlayerMini64.exe"'),
+    'D:\\Portable Apps\\PotPlayer\\PotPlayerMini64.exe'
+  );
+  assert.equal(normalizePotPlayerExecutablePath(''), '');
+  assert.throws(() => normalizePotPlayerExecutablePath('relative\\PotPlayer.exe'), /Windows 绝对/);
+  assert.throws(() => normalizePotPlayerExecutablePath('D:\\PotPlayer\\readme.txt'), /\.exe/);
+
+  const plugin = { state: { uiState: {} }, async persist() {} };
+  const settings = await updateProductSetting(
+    plugin,
+    'potPlayerExecutablePath',
+    'D:\\Apps\\PotPlayer\\PotPlayer.exe'
+  );
+  assert.equal(settings.potPlayerExecutablePath, 'D:\\Apps\\PotPlayer\\PotPlayer.exe');
 });
