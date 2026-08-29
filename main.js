@@ -1621,8 +1621,6 @@ module.exports = {
 'use strict';
 
 const { normalizeFreeformLocator } = __rhLoad("resource-reference.cjs");
-const { launchPotPlayerTarget } = __rhLoad("native-potplayer.cjs");
-
 const VIDEO_EXTENSIONS = new Set([
   'mp4', 'mkv', 'avi', 'mov', 'webm', 'flv', 'wmv', 'm4v', 'ts', 'm2ts'
 ]);
@@ -1656,7 +1654,7 @@ async function openPortableFreeformReference(reference, options = {}) {
     if (kind === 'windows-local' && !localVideoAllowed(locator)) {
       throw new Error('Go Study 自由回链只允许打开受支持的视频文件。');
     }
-    const launcher = options.launchPotPlayerTarget || launchPotPlayerTarget;
+    const launcher = options.launchPotPlayerTarget || __rhLoad("native-potplayer.cjs").launchPotPlayerTarget;
     const launched = await launcher(locator, reference.position, options.launchOptions || {});
     return {
       transport: launched?.transport || 'native-potplayer-cli',
