@@ -12,7 +12,7 @@
 
 ## 当前 Milestone
 
-**Go Study 0.3.0-beta.20.12.2 — Pre-RC / HUD Direction Race Hotfix**
+**Go Study 0.3.0-beta.20.12.3 — Pre-RC / Focused Web HUD + Strong Topmost Hotfix**
 
 Stable / Merge：**HOLD**
 
@@ -1195,3 +1195,47 @@ Root cause 不是单纯浏览器抢键，而是 HUD 手势语义随 `actionHudDe
 3. 第一次应显示并选中，第二次执行；
 4. 浏览器不应响应方向键；
 5. 慢速操作必须与快速操作一致。
+
+
+## beta20.12.3：Focused Web HUD + Strong Topmost
+
+beta20.12.2 真人结果：FAIL / regression。
+
+新反馈：
+- B站网页模式按 HUD 后，输入笔记弹窗有时完全不出现；
+- Companion 置顶有时不能压在 Chrome / Edge 前台。
+
+处理原则：
+- 不继续在“裸方向键临时全局注册”上修补；
+- 从 beta20.12.1 基线重新实现网页 HUD 输入；
+- PotPlayer 继续使用原 non-focusable HUD，不影响其 foreground 检测。
+
+Web HUD aggressive mode：
+- 仅当 fresh Bilibili active source 且 browser/Companion 是当前工作上下文时启用；
+- HUD BrowserWindow `focusable:true`；
+- `before-input-event` 本地消费 Arrow / Enter / Escape；
+- HUD 立即 show + focus；
+- 刚启动的短窗口仍临时注册全局方向键作为 bootstrap safety net；
+- HUD 拿到焦点后立即释放这批裸全局键；
+- Chrome / Edge 不再参与 HUD 方向选择。
+
+Topmost：
+- Quick Note 输入框使用 `setAlwaysOnTop(true, 'screen-saver') + moveTop + focus`；
+- Companion pinned 状态使用同样的强置顶层级；
+- PotPlayer HUD 保持原被动 showInactive 路径。
+
+验证：
+- 409 / 409 tests PASS；
+- Release readiness PASS；
+- Preview `0.3.0-beta.20.12.3`；
+- Obsidian ZIP SHA256：`ba4d44b3754c0939957133258545f7b325ada87d0f76cf7d6ed47b32794da69f`；
+- Browser Bridge 仍为 `0.1.1`。
+
+真人重点：
+1. B站 active tab；
+2. Companion pinned；
+3. Alt+S → HUD 应立即出现并拿键盘；
+4. 方向键不能进入浏览器；
+5. 执行 note action 后 Quick Note 必须出现在最前；
+6. Companion pin 后点击浏览器，Companion 仍应保持在其上；
+7. PotPlayer 模式必须无回归。
