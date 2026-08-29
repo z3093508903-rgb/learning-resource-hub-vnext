@@ -365,6 +365,22 @@ function resolveNativeCompanionWindow(win, options = {}) {
   return bestScore <= 180 ? best : null;
 }
 
+function applyStrongCompanionTopmost(nativeWindow, enabled) {
+  if (!nativeWindow) return false;
+  const on = Boolean(enabled);
+  try {
+    if (typeof nativeWindow.setAlwaysOnTop === 'function') {
+      nativeWindow.setAlwaysOnTop(on, on ? 'screen-saver' : 'normal');
+    }
+  } catch {
+    try { nativeWindow.setAlwaysOnTop?.(on); } catch {}
+  }
+  if (on) {
+    try { nativeWindow.moveTop?.(); } catch {}
+  }
+  return true;
+}
+
 function syncCompanionNativeState(plugin, session, options = {}) {
   const win = session?.win;
   if (!win) return false;
@@ -382,9 +398,7 @@ function syncCompanionNativeState(plugin, session, options = {}) {
   try {
     if (typeof nativeWindow.setTitle === 'function' && nativeWindow.getTitle?.() !== title) nativeWindow.setTitle(title);
   } catch {}
-  try {
-    if (typeof nativeWindow.setAlwaysOnTop === 'function') nativeWindow.setAlwaysOnTop(Boolean(state.alwaysOnTop));
-  } catch {}
+  applyStrongCompanionTopmost(nativeWindow, state.alwaysOnTop);
   return true;
 }
 
@@ -621,7 +635,7 @@ async function setCompanionAlwaysOnTop(plugin, value, options = {}) {
   const session = currentCompanionWindow(plugin);
   if (session?.win) {
     syncCompanionNativeState(plugin, session, options);
-    try { session.nativeWindow?.setAlwaysOnTop?.(state.alwaysOnTop); } catch {}
+    applyStrongCompanionTopmost(session.nativeWindow, state.alwaysOnTop);
     updatePinButton(plugin, session);
   }
   if (plugin?.state?.uiState?.studyMode) plugin.state.uiState.studyMode.alwaysOnTop = state.alwaysOnTop;
@@ -745,6 +759,7 @@ module.exports = {
   applyCompanionChrome,
   applyCompanionLayout,
   applyGeometry,
+  applyStrongCompanionTopmost,
   builtinGeometry,
   clampGeometry,
   closeCompanionNoteWindow,
