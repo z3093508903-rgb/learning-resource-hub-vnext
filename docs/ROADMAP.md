@@ -1,21 +1,43 @@
 # Go Study — Roadmap
 
-## Phase 0：beta.15 真人验收（现在）
+## Phase 0：Pre-RC 发布收口（现在）
 
 目标：
 
-证明 Universal Capture + Project Notes 能在真实 Windows + Obsidian 环境稳定工作。
+不再增加新功能，把已经形成的核心学习链路在真实 Windows + Obsidian + PotPlayer 环境钉死，然后进入 Release Candidate。
+
+当前核心链：
+
+~~~text
+Resource / Freeform
+→ Start / Resume
+→ PotPlayer
+→ Alt+S HUD
+→ Companion Markdown
+→ timestamp-only backlink
+→ Timeline note navigation
+~~~
 
 退出条件：
 
-- `CURRENT.md` 的 beta.15 真人验收项全部 PASS，或明确记录 Accepted Limitation；
-- 视频增强关闭时普通资源管理仍正常；
-- Native PotPlayer 路线不依赖 AutoHotkey / markdown2potplayer；
-- Freeform 不要求先加入 Project；
-- Restart Persistence 通过；
-- Backup Restore 通过；
-- Preview 包行为与文档一致；
-- 准备 Merge 的分支 release check 通过。
+- data.json restart persistence PASS；
+- external recovery / backup restore PASS；
+- Capture Target 不错写；
+- PotPlayer seek / current media / HUD PASS；
+- Freeform Bilibili Ctrl+点击浏览器 PASS；
+- Managed v3 resource-loss fallback PASS；
+- legacy v1 relink PASS；
+- Timeline 只出现在相关 Markdown，Hover 稳定，点击只定位笔记；
+- Companion caret 行首 / 行中 / 行尾点击正常；
+- light mode Add / Import / 保存位置 Modal 可读；
+- named backup 不被自动 retention 删除；
+- Obsidian 原生 file-tree / Markdown-tab 拖入 Study Mode：
+  - 要么修复并真机 PASS；
+  - 要么从首发功能声明中撤下，不能声称支持；
+- release:check 全绿；
+- 未经用户批准不 Merge Draft PR。
+
+当前候选：beta20.9.1，详见 CURRENT.md 与 handoff/CURRENT_HANDOFF.md。
 
 ## Phase 1：学习连续性稳定化
 
