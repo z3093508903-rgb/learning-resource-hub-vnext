@@ -266,14 +266,18 @@ function normalizeBilibiliWebState(payload, now = Date.now()) {
   const url = normalizeBilibiliPageUrl(body.url);
   const positionSeconds = timestampSeconds(body.positionSeconds ?? body.currentTime);
   const duration = Number(body.duration);
+  const visible = body.visible !== false;
   return {
     url,
     title: cleanBilibiliTitle(body.title) || url,
     positionSeconds,
     duration: Number.isFinite(duration) && duration >= 0 ? duration : null,
     paused: Boolean(body.paused),
-    visible: body.visible !== false,
+    visible,
     focused: Boolean(body.focused),
+    activeTab: body.activeTab == null ? visible : Boolean(body.activeTab),
+    tabId: Number.isFinite(Number(body.tabId)) ? Number(body.tabId) : null,
+    windowId: Number.isFinite(Number(body.windowId)) ? Number(body.windowId) : null,
     receivedAt: Number(now)
   };
 }
@@ -286,8 +290,10 @@ function currentBilibiliWebState(plugin, options = {}) {
   if (now - Number(state.receivedAt || 0) > maxAgeMs) {
     throw new Error('B站网页桥接已超时。请切回正在播放的 B站标签页后重试。');
   }
-  if (!state.visible || !state.focused) {
-    throw new Error('B站网页当前不是前台标签页。');
+  // A Companion popout may own the OS focus while the Bilibili tab is still the
+  // active, visible video source. Do not require document.hasFocus() here.
+  if (!state.visible || !state.activeTab) {
+    throw new Error('B站网页当前不是活动视频标签页。');
   }
   return state;
 }
@@ -315,6 +321,14 @@ async function requestBilibiliWebBridge(plugin, action = 'current', options = {}
       transport: 'bilibili-web'
     }
   };
+}
+
+function dispatchBilibiliBridgeStatus(plugin) {
+  try {
+    globalThis.document?.dispatchEvent?.(new CustomEvent('go-study-bilibili-bridge-status', {
+      detail: bridgeStatus(plugin)
+    }));
+  } catch {}
 }
 
 function bridgeStatus(plugin) {
@@ -370,7 +384,17 @@ function registerBilibiliWebBridge(plugin, options = {}) {
       try {
         const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
         const state = normalizeBilibiliWebState(payload, Date.now());
-        if (plugin) plugin._goStudyBilibiliWebState = state;
+        if (plugin) {
+          plugin._goStudyBilibiliWebState = state;
+          if (plugin._goStudyBilibiliWebDisconnectTimer) {
+            try { clearTimeout(plugin._goStudyBilibiliWebDisconnectTimer); } catch {}
+          }
+          plugin._goStudyBilibiliWebDisconnectTimer = setTimeout(() => {
+            plugin._goStudyBilibiliWebDisconnectTimer = null;
+            dispatchBilibiliBridgeStatus(plugin);
+          }, BILIBILI_WEB_STATE_MAX_AGE_MS + 250);
+          dispatchBilibiliBridgeStatus(plugin);
+        }
         res.setHeader?.('Content-Type', 'application/json; charset=utf-8');
         res.end(JSON.stringify({ ok: true, version: 1 }));
       } catch {
@@ -386,7 +410,10 @@ function registerBilibiliWebBridge(plugin, options = {}) {
   }
 
   server.on?.('listening', () => {
-    if (plugin) plugin._goStudyBilibiliWebBridgeStatus = { listening: true, port, error: '' };
+    if (plugin) {
+      plugin._goStudyBilibiliWebBridgeStatus = { listening: true, port, error: '' };
+      dispatchBilibiliBridgeStatus(plugin);
+    }
   });
   server.on?.('error', (error) => {
     if (plugin) {
@@ -395,6 +422,7 @@ function registerBilibiliWebBridge(plugin, options = {}) {
         port,
         error: error instanceof Error ? error.message : String(error || '')
       };
+      dispatchBilibiliBridgeStatus(plugin);
     }
   });
 
@@ -405,8 +433,15 @@ function registerBilibiliWebBridge(plugin, options = {}) {
 
   const cleanup = () => {
     try { server.close?.(); } catch {}
+    if (plugin?._goStudyBilibiliWebDisconnectTimer) {
+      try { clearTimeout(plugin._goStudyBilibiliWebDisconnectTimer); } catch {}
+      plugin._goStudyBilibiliWebDisconnectTimer = null;
+    }
     if (plugin?._goStudyBilibiliWebServer === server) plugin._goStudyBilibiliWebServer = null;
-    if (plugin) plugin._goStudyBilibiliWebState = null;
+    if (plugin) {
+      plugin._goStudyBilibiliWebState = null;
+      dispatchBilibiliBridgeStatus(plugin);
+    }
   };
   plugin?.register?.(cleanup);
   return server;
@@ -420,6 +455,7 @@ module.exports = {
   bridgeStatus,
   cleanBilibiliTitle,
   currentBilibiliWebState,
+  dispatchBilibiliBridgeStatus,
   isBilibiliVideoUrl,
   normalizeBilibiliPageUrl,
   normalizeBilibiliWebState,
@@ -2884,6 +2920,7 @@ module.exports = {
 const { Menu, Notice } = require('obsidian');
 const { immersiveStatus } = __rhLoad("immersive-hotkeys.cjs");
 const { currentProductSettings } = __rhLoad("product-settings.cjs");
+const { bridgeStatus } = __rhLoad("bilibili-web-bridge.cjs");
 const {
   OpenListFolderRemapModal,
   OpenListResourceRelinkModal
@@ -2917,6 +2954,23 @@ function learningControlsCss(pluginId) {
 }
 ${scope} .rh-next-immersive-status.is-ready { color: var(--text-success); }
 ${scope} .rh-next-immersive-status.is-error { color: var(--text-error); }
+${scope} .rh-next-immersive-status.has-web-listening,
+${scope} .rh-next-immersive-status.has-web-connected { position: relative; }
+${scope} .rh-next-immersive-status.has-web-listening::after,
+${scope} .rh-next-immersive-status.has-web-connected::after {
+  content: '';
+  position: absolute;
+  right: 1px;
+  bottom: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  box-shadow: 0 0 0 1px var(--background-primary);
+}
+${scope} .rh-next-immersive-status.has-web-connected::after {
+  background: var(--text-success);
+}
 .go-study-settings-heading {
   margin-top: 1.6em;
   margin-bottom: .35em;
@@ -2924,15 +2978,24 @@ ${scope} .rh-next-immersive-status.is-error { color: var(--text-error); }
 `;
 }
 
+function webBridgeStatusText(plugin) {
+  const web = bridgeStatus(plugin);
+  if (web.connected) return 'B站网页桥接已连接';
+  if (web.listening) return 'B站网页桥接已启动 · 等待网页连接';
+  if (web.error) return `B站网页桥接异常：${web.error}`;
+  return 'B站网页桥接未启动';
+}
+
 function statusText(plugin) {
   const settings = currentProductSettings(plugin);
   if (!settings.videoEnhancementEnabled) return '视频笔记增强已关闭。';
   const status = immersiveStatus(plugin);
+  const webText = webBridgeStatusText(plugin);
   if (status.registered) {
     const count = status.registeredAccelerators?.length || 0;
-    return `Windows 视频笔记增强已就绪 · ${count || 4} 个全局快捷键`;
+    return `视频笔记增强已就绪 · ${count || 4} 个全局快捷键 · ${webText}`;
   }
-  return status.error || '视频笔记增强尚未就绪。';
+  return `${status.error || '视频笔记增强尚未就绪。'} · ${webText}`;
 }
 
 function renderImmersiveStatus(plugin, root, doc = globalThis.document) {
@@ -2944,17 +3007,21 @@ function renderImmersiveStatus(plugin, root, doc = globalThis.document) {
     return null;
   }
   const status = immersiveStatus(plugin);
+  const web = bridgeStatus(plugin);
+  const webClass = web.connected ? 'has-web-connected' : web.listening ? 'has-web-listening' : '';
   if (existing) {
-    existing.className = `rh-next-immersive-status ${status.registered ? 'is-ready' : 'is-error'}`;
+    existing.className = `rh-next-immersive-status ${status.registered ? 'is-ready' : 'is-error'} ${webClass}`.trim();
     existing.textContent = status.registered ? '●' : '○';
     existing.title = statusText(plugin);
     existing.setAttribute('aria-label', statusText(plugin));
+    existing.dataset.goStudyBilibiliStatus = web.connected ? 'connected' : web.listening ? 'listening' : 'off';
     return existing;
   }
   const button = doc.createElement('button');
   button.type = 'button';
-  button.className = `rh-next-immersive-status ${status.registered ? 'is-ready' : 'is-error'}`;
+  button.className = `rh-next-immersive-status ${status.registered ? 'is-ready' : 'is-error'} ${webClass}`.trim();
   button.setAttribute('data-go-study-immersive-status', 'true');
+  button.dataset.goStudyBilibiliStatus = web.connected ? 'connected' : web.listening ? 'listening' : 'off';
   button.setAttribute('aria-label', statusText(plugin));
   button.title = statusText(plugin);
   button.textContent = status.registered ? '●' : '○';
@@ -3017,10 +3084,12 @@ function installLearningControls(plugin, doc = globalThis.document) {
   observer?.observe?.(doc.body, { childList: true, subtree: true });
   const statusListener = () => inject();
   doc.addEventListener?.('go-study-immersive-status', statusListener);
+  doc.addEventListener?.('go-study-bilibili-bridge-status', statusListener);
 
   plugin.register?.(() => {
     observer?.disconnect?.();
     doc.removeEventListener?.('go-study-immersive-status', statusListener);
+    doc.removeEventListener?.('go-study-bilibili-bridge-status', statusListener);
     style.remove?.();
   });
   return { observer, style, inject };
@@ -3034,7 +3103,8 @@ module.exports = {
   renderImmersiveStatus,
   safePluginId,
   showCourseManagementMenu,
-  statusText
+  statusText,
+  webBridgeStatusText
 };
 
 },
@@ -10426,6 +10496,8 @@ const {
   buildPositionMarkdown
 } = __rhLoad("resource-note.cjs");
 
+const BILIBILI_BRIDGE_RELEASES_URL = 'https://github.com/z3093508903-rgb/learning-resource-hub-vnext/releases';
+
 class BackupNameModal extends Modal {
   constructor(app, title, initialValue, onSubmit) {
     super(app);
@@ -10495,8 +10567,16 @@ function videoStatusText(plugin) {
   const settings = currentProductSettings(plugin);
   if (!settings.videoEnhancementEnabled) return '已关闭。Go Study 不会注册视频笔记快捷键，也不会显示视频增强状态点。';
   const status = immersiveStatus(plugin);
-  if (status.registered) return `已就绪 · ${status.registeredAccelerators?.length || 0} 个全局快捷键已注册。`;
-  return status.error || '已开启，但当前没有成功注册全局快捷键。';
+  const web = bridgeStatus(plugin);
+  const webText = web.connected
+    ? 'B站网页桥接已连接'
+    : web.listening
+      ? 'B站网页桥接已启动，等待 B站网页'
+      : web.error
+        ? `B站网页桥接异常：${web.error}`
+        : 'B站网页桥接未启动';
+  if (status.registered) return `已就绪 · ${status.registeredAccelerators?.length || 0} 个全局快捷键已注册 · ${webText}。`;
+  return `${status.error || '已开启，但当前没有成功注册全局快捷键。'} · ${webText}。`;
 }
 
 async function setInterfaceTips(plugin, value) {
@@ -10740,15 +10820,36 @@ class GoStudySettingsTab extends PluginSettingTab {
         }));
 
     const webBridge = bridgeStatus(this.plugin);
-    new Setting(containerEl)
+    const webBridgeSetting = new Setting(containerEl)
       .setName('B站网页桥接（可选）')
       .setDesc(
         webBridge.connected
-          ? '已连接前台 B站视频 · HUD 可直接读取网页 currentTime，无需 PotPlayer。'
+          ? '已连接活动 B站视频标签页 · 即使 Companion 置顶、浏览器失去系统焦点，HUD 仍可读取网页时间。'
           : webBridge.listening
-            ? `等待浏览器扩展连接 · 本地桥接 127.0.0.1:${webBridge.port}。Preview 安装包内附 Go Study Bilibili Bridge 扩展。`
-            : `本地桥接未启动${webBridge.error ? `：${webBridge.error}` : '。'}`
+            ? `桥接服务已启动 · 等待浏览器扩展连接（127.0.0.1:${webBridge.port}）。`
+            : `桥接服务未启动${webBridge.error ? `：${webBridge.error}` : '。'}`
       );
+    webBridgeSetting.addButton((button) => button
+      .setButtonText('下载 / 安装桥接')
+      .onClick(async () => {
+        await shell.openExternal(BILIBILI_BRIDGE_RELEASES_URL);
+        new Notice('请下载最新 go-study-bilibili-bridge ZIP，解压后在 Chrome / Edge 扩展页开启开发者模式并“加载解压缩的扩展”。正式上架浏览器商店后这里会改为商店安装入口。', 9000);
+      }));
+    webBridgeSetting.addButton((button) => button
+      .setButtonText(webBridge.connected ? '已连接' : '检查连接')
+      .setDisabled(Boolean(webBridge.connected))
+      .onClick(() => {
+        const current = bridgeStatus(this.plugin);
+        new Notice(
+          current.connected
+            ? 'B站网页桥接已连接。'
+            : current.listening
+              ? '桥接服务已启动，但还没收到活动 B站视频。请刷新 B站视频页并保持该标签页为当前标签。'
+              : `B站网页桥接未启动${current.error ? `：${current.error}` : '。'}`,
+          6500
+        );
+        this.display();
+      }));
 
     new Setting(containerEl)
       .setName('未收录视频也启用增强')
