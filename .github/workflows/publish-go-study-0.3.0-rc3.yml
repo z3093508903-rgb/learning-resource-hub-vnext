@@ -1,0 +1,113 @@
+name: Publish Go Study 0.3.0 RC3
+
+on:
+  push:
+    branches:
+      - release/go-study-0.3.0-rc3
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      RC_VERSION: 0.3.0-rc.3
+      RC_ID: go-study-preview
+      RC_NAME: Go Study RC
+      RELEASE_TAG: go-study-rc-v0.3.0-rc.3
+      BRIDGE_VERSION: 0.1.1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Package RC
+        shell: bash
+        run: |
+          rm -rf dist-rc
+          mkdir -p dist-rc/go-study-preview
+          node <<'NODE'
+          const fs = require('node:fs');
+          const path = require('node:path');
+          const out = path.join('dist-rc', 'go-study-preview');
+          const manifest = JSON.parse(fs.readFileSync('manifest.json', 'utf8'));
+          manifest.id = process.env.RC_ID;
+          manifest.name = process.env.RC_NAME;
+          manifest.version = process.env.RC_VERSION;
+          manifest.description = 'Go Study 0.3.0 RC3: resilient OpenList playback fallback for project launch and managed timestamps.';
+          fs.writeFileSync(path.join(out, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');
+
+          let bundle = fs.readFileSync('main.js', 'utf8');
+          const oldView = 'learning-resource-hub-next-workbench';
+          const newView = 'go-study-preview-workbench';
+          if (!bundle.includes(oldView)) throw new Error('Expected workbench view marker not found.');
+          bundle = bundle.split(oldView).join(newView);
+          for (const marker of [
+            'resolveOpenListPlaybackUrl',
+            'openListNetworkFailure',
+            '已尝试直接播放地址',
+            'registerGoStudyReferenceProtocol'
+          ]) if (!bundle.includes(marker)) throw new Error('Missing RC3 marker: ' + marker);
+          fs.writeFileSync(path.join(out, 'main.js'), bundle);
+          fs.copyFileSync('styles.css', path.join(out, 'styles.css'));
+          NODE
+
+          cat > dist-rc/go-study-preview/TESTING.md <<'EOF'
+          # Go Study 0.3.0 RC3
+
+          ## OpenList playback regression
+          This RC specifically addresses ERR_CONNECTION_REFUSED before PotPlayer launch.
+
+          1. From a project page, click a CURRENT OpenList video resource.
+          2. Expected:
+             - If OpenList API works, Go Study gets the latest sign and launches Native PotPlayer.
+             - If OpenList API returns a network-level refusal/timeout, Go Study does NOT abort before player launch.
+             - It warns that OpenList API is unavailable, then tries baseUrl + /d/<remotePath> directly in PotPlayer.
+          3. Open a CURRENT managed OpenList timestamp.
+          4. Expected: same resilient playback path, plus the saved seek time.
+          5. Bilibili Freeform/native playback must remain unchanged.
+
+          ## Compatibility boundary
+          Guaranteed legacy compatibility:
+          - historical jv://open?... links when Legacy JV compatibility is enabled.
+
+          Current Go Study links remain supported.
+          Intermediate beta-era PotPlayer link experiments are NOT a stable compatibility promise and are not release blockers.
+          EOF
+
+          cd dist-rc
+          zip -qr "go-study-0.3.0-rc.3.zip" go-study-preview
+          cd ..
+
+          cd browser-extension
+          zip -qr "../dist-rc/go-study-bilibili-bridge-${BRIDGE_VERSION}.zip" bilibili-bridge
+          cd ..
+
+      - name: Publish RC prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "Release already exists"; exit 1
+          fi
+          gh release create "$RELEASE_TAG" \
+            --target "${{ github.sha }}" \
+            --title "Go Study 0.3.0 RC3" \
+            --notes "RC3 fixes real-machine OpenList launch failures where Go Study aborted on OpenList API ERR_CONNECTION_REFUSED before Native PotPlayer could start. Current OpenList project playback and managed timestamps now share one resilient resolver: signed /d URL when API is healthy, direct unsigned /d fallback on network-level API failures. Full validation: 418/418 tests passing." \
+            --prerelease \
+            "dist-rc/go-study-0.3.0-rc.3.zip" \
+            "dist-rc/go-study-bilibili-bridge-${BRIDGE_VERSION}.zip" \
+            "dist-rc/go-study-preview/main.js" \
+            "dist-rc/go-study-preview/manifest.json" \
+            "dist-rc/go-study-preview/styles.css" \
+            "dist-rc/go-study-preview/TESTING.md"
+
+      - name: Remove one-shot publisher
+        shell: bash
+        run: |
+          rm .github/workflows/publish-go-study-0.3.0-rc3.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/workflows/publish-go-study-0.3.0-rc3.yml
+          git commit -m "ci: remove one-shot Go Study 0.3.0 RC3 publisher"
+          git push origin HEAD:${GITHUB_REF_NAME}
