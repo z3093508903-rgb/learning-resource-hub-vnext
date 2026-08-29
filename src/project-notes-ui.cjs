@@ -1028,24 +1028,26 @@ function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
     nativeDropEl = null;
   };
 
+  const completeDrop = async (path) => {
+    const droppedPath = String(path || pointerCandidate || '').trim();
+    pointerCandidate = '';
+    pointerStart = null;
+    removeDrop();
+    if (!droppedPath) return;
+    try {
+      const result = await enterCurrentPotPlayerStudyMode(plugin, droppedPath, '');
+      new Notice(`已进入学习模式 · ${noteDisplayName({ path: droppedPath })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
+    } catch (error) {
+      new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+    }
+  };
+
   const showDrop = (path) => {
     const selectedPath = String(path || '').trim();
     if (!selectedPath) return;
     if (nativeDropEl?.dataset?.goStudyNativeNotePath === selectedPath) return;
     removeDrop();
-    nativeDropEl = workbenchStudyDropTarget(doc, doc.body, async () => {
-      const droppedPath = String(selectedPath || pointerCandidate || '').trim();
-      pointerCandidate = '';
-      pointerStart = null;
-      removeDrop();
-      if (!droppedPath) return;
-      try {
-        const result = await enterCurrentPotPlayerStudyMode(plugin, droppedPath, '');
-        new Notice(`已进入学习模式 · ${noteDisplayName({ path: droppedPath })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
-      } catch (error) {
-        new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
-      }
-    });
+    nativeDropEl = workbenchStudyDropTarget(doc, doc.body, async () => completeDrop(selectedPath));
     nativeDropEl.classList?.add?.('is-native-obsidian');
     if (nativeDropEl?.dataset) nativeDropEl.dataset.goStudyNativeNotePath = selectedPath;
   };
@@ -1079,7 +1081,18 @@ function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
     removeDrop();
   };
 
-  const onPointerUp = () => {
+  const onPointerUp = (event) => {
+    if (pointerCandidate && nativeDropEl?.getBoundingClientRect) {
+      const rect = nativeDropEl.getBoundingClientRect();
+      const x = Number(event?.clientX || 0);
+      const y = Number(event?.clientY || 0);
+      if (x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+        event?.preventDefault?.();
+        event?.stopPropagation?.();
+        void completeDrop(pointerCandidate);
+        return;
+      }
+    }
     pointerCandidate = '';
     pointerStart = null;
     removeDrop();
