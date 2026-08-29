@@ -41,7 +41,7 @@ function bilibiliTimestampUrl(value, seconds) {
 
 function cleanBilibiliTitle(value) {
   return String(value || '')
-    .replace(/[_\s-]*哔哩哔哩(?:\s*bilibili)?\s*$/i, '')
+    .replace(/[_\s-]*哔哩哔哩(?:[_\s-]*bilibili)?\s*$/i, '')
     .replace(/\s*[-_–—]\s*bilibili\s*$/i, '')
     .trim()
     .slice(0, 300);
