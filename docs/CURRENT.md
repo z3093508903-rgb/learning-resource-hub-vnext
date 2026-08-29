@@ -586,3 +586,53 @@ Hover 展开后仍显示：
 - ZIP SHA256 `a5a6ebe78d3bf4d24627900831c2f75df646ac0fef74bf3e2676b084893cb5bf`
 
 状态：VALIDATING。等待 Windows 实机 P0 验收，不合并。
+
+
+## beta20.7：Obsidian 原生拖动 + Companion 光标修复
+
+beta20.6 Windows 实机发现两个发布前阻断体验：
+
+1. Study Mode 拖入入口只覆盖 Go Study 工作台项目笔记，Obsidian 原生左侧文件树与已打开 Markdown 标签页拖动时不会出现入口；
+2. Companion 小窗虽然是真实 Markdown Editor，但鼠标点击位置与光标落点存在明显错位感，难以像普通笔记一样控制输入位置。
+
+### 原生 Obsidian Markdown 拖动
+
+新增 document-level Study Mode drag bridge：
+
+- 原生文件树通过 `data-path` 识别 Markdown；
+- 已打开标签页通过 `workspace.getLeavesOfType('markdown') + leaf.tabHeaderEl` 解析真实文件路径；
+- 正常 HTML5 `dragstart` 可直接触发；
+- 对可能采用 pointer drag 的标签页额外加入 8px pointer-move threshold fallback；
+- pointer 模式释放在 drop target 内也可完成 Drop；
+- 出现与已有 Study Mode 相同的右侧浮动入口；
+- Drop 后读取当前已经打开的 PotPlayer 媒体（`foregroundOnly: false`）；
+- 不重启 PotPlayer，不强制收录 Resource；
+- Go Study 工作台自身拖动行被 native bridge 排除，避免双 drop target。
+
+### Companion 光标错位
+
+根因高度指向 beta18 Companion CSS：
+
+`workspace-leaf-content { zoom: var(--go-study-companion-scale) }`
+
+CSS zoom 会缩放 CodeMirror 所在容器，在 Electron / Chromium 下可能造成可视坐标与 editor hit-testing 坐标不同步。
+
+修复：
+- CodeMirror 所在 workspace leaf 强制 `zoom: 1 !important`；
+- 不再缩放交互坐标系；
+- 视觉紧凑改为仅通过字体尺寸 `calc(1em * var(--go-study-companion-scale))` 实现；
+- 目标：鼠标点哪里，Caret 就落到哪里，行为与普通 Obsidian Markdown 一致。
+
+Hotfix：
+- branch `fix/native-drag-companion-cursor-beta20-7`
+- Draft PR #36
+- Preview `Go Study Preview 0.3.0-beta.20.7`
+- release target `d80de6eaf529ea1701064964feb222e8f3ea317b`
+- CI #252 PASS
+- **349 / 349 tests PASS**
+- ZIP SHA256 `c43d4aa855f11682a20fc5a5b6f34909d9ba4f9f8da0fc131cb8a30403fcb95b`
+
+状态：VALIDATING。重点等待 Windows 实机确认：
+- 左文件树 Markdown 拖动入口；
+- 已打开 Markdown tab 拖动入口；
+- Companion 行首 / 行中 / 行尾点击光标落点。
