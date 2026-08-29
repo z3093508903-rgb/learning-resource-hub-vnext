@@ -18,10 +18,10 @@ test('auto-collapse preference gates sidebar collapse', () => {
   assert.match(runtimeSource, /return super\.collapseSidebar\(\)/);
 });
 
-test('custom backup retention only tightens the existing ten-backup cap', () => {
+test('custom backup retention applies to the external recovery history', () => {
   assert.match(runtimeSource, /backupRetention/);
-  assert.match(runtimeSource, /pruneStateBackups/);
-  assert.match(runtimeSource, /retention < 10/);
+  assert.match(runtimeSource, /pruneRecoveryBackups/);
+  assert.match(runtimeSource, /currentProductSettings\(this\)\.backupRetention/);
 });
 
 test('Companion reverse-event poller is no longer mounted in normal runtime', () => {
