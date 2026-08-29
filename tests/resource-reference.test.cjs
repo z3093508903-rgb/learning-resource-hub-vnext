@@ -216,7 +216,7 @@ test('freeform v2 can preserve an optional browser source beside the playback lo
     web: 'https://www.bilibili.com/video/BV1TEST?p=2',
     position: { type: 'time', seconds: 65 }
   });
-  assert.match(uri, /web=https%3A%2F%2Fwww\.bilibili\.com%2Fvideo%2FBV1TEST%3Fp%3D2/);
+  assert.match(uri, /web=https%3A%2F%2Fwww%2Ebilibili%2Ecom%2Fvideo%2FBV1TEST%3Fp%3D2/);
   const parsed = parseReferenceUri(uri);
   assert.equal(parsed.locator, 'D:\\Loose\\lesson.mp4');
   assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1TEST?p=2');
