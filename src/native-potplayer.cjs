@@ -1,6 +1,8 @@
 'use strict';
 
-const { execFile } = require('node:child_process');
+const { execFile, spawn } = require('node:child_process');
+const fs = require('node:fs');
+const path = require('node:path');
 const { clipboard } = require('electron');
 
 const DEFAULT_IMMERSIVE_SHORTCUTS = Object.freeze({
@@ -225,17 +227,143 @@ function resolveElectronGlobalShortcut(options = {}) {
   return null;
 }
 
+
+function potPlayerExecutableCandidates(env = process.env) {
+  const roots = [
+    String(env.ProgramW6432 || '').trim(),
+    String(env.ProgramFiles || '').trim(),
+    String(env['ProgramFiles(x86)'] || '').trim(),
+    String(env.LOCALAPPDATA || '').trim()
+  ].filter(Boolean);
+  const candidates = [];
+  for (const root of roots) {
+    for (const relative of [
+      ['DAUM', 'PotPlayer', 'PotPlayerMini64.exe'],
+      ['DAUM', 'PotPlayer', 'PotPlayerMini.exe'],
+      ['PotPlayer', 'PotPlayerMini64.exe'],
+      ['PotPlayer', 'PotPlayerMini.exe']
+    ]) candidates.push(path.join(root, ...relative));
+  }
+  return [...new Set(candidates)];
+}
+
+function normalizeSeekSeconds(position) {
+  if (position && typeof position === 'object') {
+    const seconds = Number(position.seconds);
+    return Number.isFinite(seconds) && seconds >= 0 ? seconds : null;
+  }
+  const raw = String(position ?? '').trim();
+  if (!raw) return null;
+  const numeric = Number(raw);
+  if (Number.isFinite(numeric) && numeric >= 0) return numeric;
+  const parts = raw.split(':');
+  if (parts.length < 2 || parts.length > 3) return null;
+  const values = parts.map(Number);
+  if (values.some((value) => !Number.isFinite(value) || value < 0)) return null;
+  const seconds = values.pop();
+  const minutes = values.pop() || 0;
+  const hours = values.pop() || 0;
+  if (seconds >= 60 || minutes >= 60) return null;
+  return hours * 3600 + minutes * 60 + seconds;
+}
+
+function normalizePotPlayerTarget(value) {
+  const raw = String(value || '').trim();
+  if (!raw || raw.length > 8192 || /[\\x00-\\x1F]/.test(raw)) throw new Error('PotPlayer 启动目标无效。');
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error();
+    return url.toString();
+  } catch {}
+  const windowsDrive = /^[A-Za-z]:[\\\\/]/.test(raw);
+  const windowsUnc = /^\\\\\\\\[^\\\\]+\\\\[^\\\\]+/.test(raw);
+  if (!windowsDrive && !windowsUnc) throw new Error('PotPlayer 只允许打开 HTTP(S) 地址或 Windows 绝对媒体路径。');
+  return raw;
+}
+
+async function resolvePotPlayerExecutable(options = {}) {
+  const existsSync = options.existsSync || fs.existsSync;
+  const explicit = String(options.executable || '').trim();
+  if (explicit && existsSync(explicit)) return explicit;
+
+  const candidates = options.candidates || potPlayerExecutableCandidates(options.env || process.env);
+  const found = candidates.find((candidate) => {
+    try { return existsSync(candidate); } catch { return false; }
+  });
+  if (found) return found;
+
+  try {
+    const probeScript = `
+$ErrorActionPreference = 'SilentlyContinue'
+$exe = ''
+$names = @('PotPlayerMini64','PotPlayerMini')
+$proc = Get-Process | Where-Object { $names -contains $_.ProcessName -and $_.Path } | Select-Object -First 1
+if ($proc -and $proc.Path) { $exe = [string]$proc.Path }
+if (-not $exe) {
+  foreach ($key in @(
+    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini64.exe',
+    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini.exe',
+    'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini64.exe',
+    'HKCU:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\PotPlayerMini.exe'
+  )) {
+    $value = (Get-ItemProperty -Path $key -ErrorAction SilentlyContinue).'(default)'
+    if ($value -and (Test-Path -LiteralPath $value)) { $exe = [string]$value; break }
+  }
+}
+[pscustomobject]@{ ok = $true; executable = $exe } | ConvertTo-Json -Compress
+`;
+    const probe = await (options.runPowerShell || runPowerShell)(probeScript, options);
+    const executable = String(probe?.executable || '').trim();
+    if (executable && existsSync(executable)) return executable;
+  } catch {}
+
+  throw new Error('没有找到 PotPlayer 可执行文件。请确认已安装 PotPlayer；Go Study 不再依赖 note2potplayer.exe。');
+}
+
+async function launchPotPlayerTarget(target, position = null, options = {}) {
+  if (process.platform !== 'win32' && !options.allowNonWindows) {
+    throw new Error('Go Study 原生 PotPlayer 启动目前只支持 Windows。');
+  }
+  const normalizedTarget = normalizePotPlayerTarget(target);
+  const executable = await resolvePotPlayerExecutable(options);
+  const seconds = normalizeSeekSeconds(position);
+  const args = [normalizedTarget, '/current'];
+  if (seconds != null) args.push('/seek=' + String(seconds));
+
+  const spawnImpl = options.spawn || spawn;
+  const child = spawnImpl(executable, args, {
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: false,
+    shell: false
+  });
+  child?.unref?.();
+  return {
+    ok: true,
+    transport: 'native-potplayer-cli',
+    executable,
+    target: normalizedTarget,
+    positionApplied: seconds != null,
+    positionSeconds: seconds
+  };
+}
+
 module.exports = {
   DEFAULT_IMMERSIVE_SHORTCUTS,
   POTPLAYER_PROCESS_NAMES,
   immersiveShortcuts,
+  launchPotPlayerTarget,
   nativeCapture,
   nativeCurrent,
   nativePlay,
+  normalizePotPlayerTarget,
+  normalizeSeekSeconds,
   normalizeShortcut,
+  potPlayerExecutableCandidates,
   potPlayerProbeScript,
   powershellExecutable,
   requestNativePotPlayer,
+  resolvePotPlayerExecutable,
   resolveElectronGlobalShortcut,
   runPowerShell,
   sleep,
