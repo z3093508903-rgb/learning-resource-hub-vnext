@@ -28,3 +28,12 @@ Chrome / Edge:
 7. Use the existing Go Study HUD hotkey.
 
 Web mode currently supports timestamp, note, and note + timestamp actions. Screenshot actions remain PotPlayer-only.
+
+
+## Companion focus behavior
+
+The Bilibili tab only needs to remain the **active visible tab in its browser window**.
+
+Companion may remain always-on-top and may own the Windows keyboard focus. Go Study does not require the browser document itself to report `document.hasFocus() === true`.
+
+This allows the global Go Study HUD to keep writing into Companion while the Bilibili video continues playing behind the topmost note window.
