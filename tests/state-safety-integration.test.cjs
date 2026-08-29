@@ -41,3 +41,12 @@ test('selectable restore modal separates named backups from automatic snapshots'
   assert.match(settingsSource, /命名备份 · 长期保留/);
   assert.match(settingsSource, /自动恢复快照/);
 });
+
+
+test('stable startup supports one-time Preview migration without overwriting stable data', () => {
+  assert.match(mainSource, /previewMigrationCandidate\(this\)/);
+  assert.match(mainSource, /protectPreviewMigration\(this, candidate\)/);
+  assert.match(mainSource, /!safetySnapshot\.rawText && !meaningfulState\(loaded\)/);
+  assert.match(mainSource, /await this\.saveData\(this\.state\)/);
+  assert.match(mainSource, /原 Preview data\.json 保持不变/);
+});
