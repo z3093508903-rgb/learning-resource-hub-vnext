@@ -5,7 +5,7 @@
 
 ## 0. 一句话状态
 
-Go Study 已推进到 **beta20.10 发布前收口 / Native Obsidian Drag Bridge 阶段**。
+Go Study 已推进到 **beta20.11 发布前收口 / Companion Polish & Standalone Note Window 阶段**。
 
 核心链路已经成形：
 
@@ -21,7 +21,7 @@ Resource / Freeform
 
 当前不要继续扩功能。优先完成最后几个真机阻断问题：
 
-1. beta20.9.3 Windows 真人验收已全部 PASS；当前 P0 转为 Obsidian 原生左侧文件树 / 已打开 Markdown 标签页拖入 Study Mode；
+1. beta20.9.3 播放链路与 beta20.10 Native Drag 已真人 PASS；当前只收口 Companion 的几个体验问题，然后进入 Full RC Audit；
 2. Obsidian 原生左侧文件树 / 已打开 Markdown 标签页拖入 Study Mode：beta20.7 尝试修复，但用户实机仍报告没有出现拖入小窗入口；
 3. Companion 鼠标点击与 caret 落点：beta20.7 已移除 CodeMirror 容器 CSS zoom，但没有收到明确通过结论，需要补一次真机复验；
 4. beta20.9 的 Managed v3 fallback / legacy v1 relink / light-mode modal / named backup 需要最终回归。
@@ -648,6 +648,53 @@ beta20.10 已：
 4. tab drag；
 5. tab reorder 不受影响；
 6. 若不出现 target，读取 Console 的 `Go Study native drag diagnostic`，不要重新引入 pointer hijack。
+
+
+## 12B. beta20.11 Companion Polish
+
+### beta20.10 真人结果
+
+- 原生 Markdown Drag Target 已出现并可用；
+- 功能方向通过；
+- 普通 Obsidian drag ownership 仍是不可破坏边界。
+
+### beta20.11 用户要求
+
+1. 修 Native Drag 成功 Notice 乱码；
+2. Project Note Box 内笔记也要可拖；
+3. Companion 不再要求 PotPlayer 必须打开；
+4. 长笔记打开时聚焦末尾，程序化写入后保持 caret 可见。
+
+### 实现
+
+- Success Notice 只显示笔记名，不显示 PotPlayer title；
+- ProjectNoteBoxModal rows / Vault search rows 可拖入 fixed Companion Target；
+- `openDraggedNoteCompanion()`：
+  - optional `requestNativePotPlayer('current')`；
+  - 有 media → `enterStudyMode`；
+  - 无 media → `openCompanionNoteWindow(... locked:false ...)`；
+- global Companion Drop Target 默认文案改为“笔记小窗”；
+- `revealCompanionEditorCursor()`：
+  - open 时可 moveToEnd + focus；
+  - Capture 后 focus:false，只 reveal / scroll；
+  - 只作用于 active Companion editor；
+- learning-capture 在程序化插入后调用 reveal helper。
+
+自动验证：
+- 394 / 394 tests PASS；
+- Release readiness PASS；
+- Preview `0.3.0-beta.20.11`；
+- ZIP SHA256 `4f2f5a25d7592306b8240aff45cd47613ac20b15c35329b8b924afb935287cda`。
+
+### 真人验收
+
+1. 拖入成功 Notice 无乱码；
+2. Project Note Box 里的笔记可拖；
+3. 完全退出 PotPlayer 后仍可拖 Markdown → Companion；
+4. 无 PotPlayer 模式不弹错误，不强制 Capture lock；
+5. PotPlayer 开着时同一入口仍自动进入 Study Mode；
+6. 长笔记打开自动聚焦末尾；
+7. HUD Capture 后 Companion 新内容自动滚回可见，但 PotPlayer 仍保持焦点。
 
 ---
 
