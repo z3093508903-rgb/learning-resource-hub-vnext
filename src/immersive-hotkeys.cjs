@@ -252,13 +252,23 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
     void runCaptureAction(plugin, action, options).catch(() => {});
   };
 
+  const revealHudNow = () => {
+    if (visible || closed) return;
+    visible = true;
+    if (showTimer) {
+      clearTimeout(showTimer);
+      showTimer = null;
+    }
+    void hud?.show?.();
+  };
+
   const chooseDirection = (slot) => {
-    if (!visible) return execute(slot);
     const now = Date.now();
     const doublePressMs = Math.max(180, Math.min(650, Number(options.directionDoublePressMs || 420)));
     if (selected === slot && now - lastDirectionAt <= doublePressMs) return execute(slot);
     selected = slot;
     lastDirectionAt = now;
+    revealHudNow();
     void hud?.select?.(slot);
   };
 
@@ -289,6 +299,7 @@ function beginActionHud(plugin, globalShortcut, options = {}) {
 
   const delay = Number(settings.actionHudDelayMs || 0);
   showTimer = setTimeout(() => {
+    showTimer = null;
     if (closed) return;
     visible = true;
     void hud?.show?.();
