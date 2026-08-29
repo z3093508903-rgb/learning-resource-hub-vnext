@@ -11,6 +11,7 @@ const { requestNativePotPlayer } = require('./native-potplayer.cjs');
 const { requestPotPlayerBridge } = require('./potplayer-bridge.cjs');
 const { currentProductSettings, normalizeCaptureFolder } = require('./product-settings.cjs');
 const { updateResumePosition } = require('./resource-resolver.cjs');
+const { revealCompanionEditorCursor } = require('./companion-note-window.cjs');
 const {
   buildContextCaptureMarkdown,
   buildContextCaptureNoteMarkdown,
@@ -110,6 +111,7 @@ async function insertPreparedMarkdown(plugin, prepared, markdown) {
     throw new Error('最近的学习笔记已经关闭或不可编辑。');
   }
   prepared.editor.replaceSelection(markdown);
+  revealCompanionEditorCursor(plugin, prepared.editor, { focus: false, center: false });
   await persistRecordedPosition(plugin, prepared.resource, prepared.position);
   return { ...prepared, markdown };
 }
@@ -267,6 +269,7 @@ async function insertPlainTypedNote(plugin, noteText, options = {}) {
   const editor = activeEditor(plugin, options.editor);
   const markdown = buildPlainNoteMarkdown(noteText, noteOutputOptions(plugin));
   editor.replaceSelection(markdown);
+  revealCompanionEditorCursor(plugin, editor, { focus: false, center: false });
   return { mode: 'plain', editor, markdown };
 }
 async function commitPreparedPlainTypedNote(plugin, prepared, noteText) {
