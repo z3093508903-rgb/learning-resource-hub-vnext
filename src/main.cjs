@@ -25,7 +25,7 @@ try {
   dialog = dialog || remote.dialog;
 } catch { /* Current Obsidian versions expose Electron directly. */ }
 const model = require('./model.cjs');
-const { launchPotPlayerTarget } = require('./native-potplayer.cjs');
+const { launchPotPlayerTarget: launchNativePotPlayerTarget } = require('./native-potplayer.cjs');
 const { legacyJvCompatibilityEnabled, parseLegacyJvUri } = require('./legacy-jv.cjs');
 const {
   clampMemoHeight,
@@ -609,6 +609,20 @@ class ResourceHubNextPlugin extends Plugin {
     await shell.openExternal(safeTarget);
   }
 
+  async launchPotPlayerTarget(target, position = 0) {
+    this.state.uiState ||= {};
+    const configured = String(this.state.uiState.potPlayerExecutablePath || '').trim();
+    const result = await launchNativePotPlayerTarget(target, position, {
+      executable: configured
+    });
+    const detected = String(result?.executable || '').trim();
+    if (detected && detected !== configured) {
+      this.state.uiState.potPlayerExecutablePath = detected;
+      await this.persist();
+    }
+    return result;
+  }
+
   async openResourceAction(resource, actionType, target, options = {}) {
     if (!resource || !target) return false;
     try {
@@ -629,7 +643,7 @@ class ResourceHubNextPlugin extends Plugin {
         const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
         const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, 0);
+        await this.launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, 0);
       } else if (target.type === 'openlist-file') {
         const source = this.state.sources[target.sourceId] || Object.values(this.state.sources).find((item) => item.type === 'openlist' && !item.deletedAt);
         if (!source) throw new Error('请先配置 OpenList 来源连接。');
@@ -640,11 +654,11 @@ class ResourceHubNextPlugin extends Plugin {
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
         await shell.openExternal(`${baseUrl}/d${encoded}${sign}`);
       } else if (target.type === 'potplayer') {
-        await launchPotPlayerTarget(target.target, 0);
+        await this.launchPotPlayerTarget(target.target, 0);
       } else if (target.type === 'uri') {
         const legacyBili = model.parseBiliVideoUrl(target.uri);
         const legacyOpenListFolder = model.parseOpenListUrl(target.uri, Object.values(this.state.sources));
-        if (legacyBili) await launchPotPlayerTarget(legacyBili.canonicalUrl, 0);
+        if (legacyBili) await this.launchPotPlayerTarget(legacyBili.canonicalUrl, 0);
         else if (legacyOpenListFolder) {
           new Notice('检测到旧版 OpenList 目录条目，请重新导入为可播放的视频合集。', 5000);
           this.openAddModal({ mode: 'source', sourceType: 'openlist', openListInput: target.uri, projectId: this.state.uiState.currentProjectId || '' });
@@ -653,7 +667,7 @@ class ResourceHubNextPlugin extends Plugin {
           const validated = model.validateExternalUri(target.uri, ['https:', 'http:', 'jv:']);
           if (/^jv:/i.test(validated) && legacyJvCompatibilityEnabled(this)) {
             const reference = parseLegacyJvUri(validated);
-            await launchPotPlayerTarget(reference.locator, reference.position);
+            await this.launchPotPlayerTarget(reference.locator, reference.position);
           } else {
             await shell.openExternal(validated);
           }
