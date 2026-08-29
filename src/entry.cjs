@@ -32,7 +32,6 @@ const {
 } = require('./resource-resolver.cjs');
 const { matchingManagedResource, matchingManagedResourceByPortableName } = require('./media-session.cjs');
 const { openPortableFreeformReference } = require('./freeform-playback.cjs');
-const { launchPotPlayerTarget } = require('./native-potplayer.cjs');
 const { browserModifierActive, browserUrlAtPosition } = require('./freeform-link-ui.cjs');
 const {
   browserUrlForReference,
@@ -186,7 +185,11 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     try {
       const playerTime = formatPotPlayerTime(reference.position);
       new Notice(`正在跳转临时视频 · ${playerTime}`);
-      const opened = await openPortableFreeformReference(reference, { shell, platform: process.platform });
+      const opened = await openPortableFreeformReference(reference, {
+        shell,
+        platform: process.platform,
+        launchPotPlayerTarget: (target, position) => this.launchPotPlayerTarget(target, position)
+      });
       const suffix = opened.positionApplied ? ` · ${playerTime}` : ' · 当前平台暂未应用精确时间';
       new Notice(`已打开临时视频${suffix}`);
       return true;
@@ -209,13 +212,13 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
         const baseUrl = String(source.baseUrl).replace(/\/+$/, '');
         const encoded = target.remotePath.split('/').map((part) => encodeURIComponent(part)).join('/');
         const sign = entry?.sign ? `?sign=${encodeURIComponent(entry.sign)}` : '';
-        await launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, playerTime);
+        await this.launchPotPlayerTarget(`${baseUrl}/d${encoded}${sign}`, playerTime);
       } else if (target.type === 'potplayer') {
-        await launchPotPlayerTarget(target.target, playerTime);
+        await this.launchPotPlayerTarget(target.target, playerTime);
       } else if (target.type === 'uri') {
         const legacyBili = model.parseBiliVideoUrl(target.uri);
         if (!legacyBili) throw new Error('当前回链只允许跳转到受支持的视频资源。');
-        await launchPotPlayerTarget(legacyBili.canonicalUrl, playerTime);
+        await this.launchPotPlayerTarget(legacyBili.canonicalUrl, playerTime);
       } else {
         throw new Error('当前资源没有支持定位播放的启动方式。');
       }
