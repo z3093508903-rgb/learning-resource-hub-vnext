@@ -21,6 +21,7 @@ const { currentProductSettings } = require('./product-settings.cjs');
 const { rememberNoteTarget } = require('./note-target.cjs');
 const { requestNativePotPlayer } = require('./native-potplayer.cjs');
 const { enterStudyMode } = require('./study-mode.cjs');
+const { openCompanionNoteWindow } = require('./companion-note-window.cjs');
 
 function markdownFiles(plugin) {
   const vault = plugin?.app?.vault;
@@ -321,24 +322,58 @@ function studyRowButton(container, file, secondary, onClick, options = {}) {
   return row;
 }
 
-async function enterCurrentPotPlayerStudyMode(plugin, filePath, projectId = '') {
+async function optionalCurrentPotPlayerMedia() {
+  try {
+    const current = await requestNativePotPlayer('current', { foregroundOnly: false });
+    return current?.media?.path ? current.media : null;
+  } catch {
+    return null;
+  }
+}
+
+async function openDraggedNoteCompanion(plugin, filePath, projectId = '') {
   const path = String(filePath || '').trim();
   const file = plugin?.app?.vault?.getAbstractFileByPath?.(path);
   if (!file || Array.isArray(file.children) || String(file.extension || '').toLowerCase() !== 'md') {
-    throw new Error('只能把 Markdown 笔记拖入学习小窗。');
+    throw new Error('只能把 Markdown 笔记拖入右侧小窗。');
   }
-  const current = await requestNativePotPlayer('current', { foregroundOnly: false });
-  if (!current?.media?.path) throw new Error('没有读取到当前 PotPlayer 视频。');
-  const result = await enterStudyMode(plugin, {
+
+  const media = await optionalCurrentPotPlayerMedia();
+  if (media?.path) {
+    const result = await enterStudyMode(plugin, {
+      filePath: file.path,
+      projectId,
+      freeformMedia: media,
+      alwaysOnTop: true
+    });
+    return { ...result, media, companionMode: 'study' };
+  }
+
+  const result = await openCompanionNoteWindow(plugin, {
     filePath: file.path,
-    projectId,
-    freeformMedia: current.media,
-    alwaysOnTop: true
+    locked: false,
+    layoutId: 'right-rail',
+    forceLayout: true,
+    alwaysOnTop: true,
+    focusAtEnd: true
   });
-  return { ...result, media: current.media };
+  return { ...result, media: null, companionMode: 'note', studyMode: false };
 }
 
-function workbenchStudyDropTarget(doc, parent, onDrop) {
+async function enterCurrentPotPlayerStudyMode(plugin, filePath, projectId = '') {
+  const result = await openDraggedNoteCompanion(plugin, filePath, projectId);
+  if (!result.media?.path) throw new Error('没有读取到当前 PotPlayer 视频。');
+  return result;
+}
+
+function companionOpenNotice(result, filePath) {
+  const name = noteDisplayName({ path: filePath });
+  return result?.media?.path
+    ? `已进入学习模式 · ${name}`
+    : `已打开笔记小窗 · ${name}`;
+}
+
+function workbenchStudyDropTarget(doc, parent, onDrop, options = {}) {
   const target = parent.createDiv
     ? parent.createDiv({ cls: 'go-study-study-mode-drop-target is-workbench' })
     : (() => {
@@ -347,7 +382,7 @@ function workbenchStudyDropTarget(doc, parent, onDrop) {
         parent.appendChild(el);
         return el;
       })();
-  target.setAttribute?.('aria-label', '拖入笔记，使用当前 PotPlayer 视频进入学习模式');
+  target.setAttribute?.('aria-label', options.ariaLabel || '拖入 Markdown，打开右侧笔记小窗');
 
   const copy = target.createDiv ? target.createDiv({ cls: 'go-study-study-mode-drop-copy' }) : (() => {
     const el = doc.createElement('div'); el.className = 'go-study-study-mode-drop-copy'; target.appendChild(el); return el;
@@ -356,9 +391,9 @@ function workbenchStudyDropTarget(doc, parent, onDrop) {
     if (copy.createEl) return copy.createEl(tag, { text });
     const el = doc.createElement(tag); el.textContent = text; copy.appendChild(el); return el;
   };
-  makeText('span', '拖入');
-  makeText('span', '右侧小窗');
-  makeText('strong', '学习模式');
+  makeText('span', options.firstLine || '拖入');
+  makeText('span', options.secondLine || '右侧小窗');
+  makeText('strong', options.strongText || '笔记小窗');
 
   const doodle = target.createDiv ? target.createDiv({ cls: 'go-study-study-mode-doodle' }) : (() => {
     const el = doc.createElement('div'); el.className = 'go-study-study-mode-doodle'; target.appendChild(el); return el;
@@ -633,11 +668,61 @@ class ProjectNoteBoxModal extends Modal {
     this.query = '';
     this.bodyEl = null;
     this.createFolderOverride = null;
+    this.dragSelection = null;
+    this.companionDropEl = null;
   }
 
   onOpen() {
     this.modalEl.addClass?.('rh-next-modal', 'go-study-project-note-box-modal');
     this.render();
+  }
+
+  removeCompanionDrop() {
+    this.companionDropEl?.remove?.();
+    this.companionDropEl = null;
+  }
+
+  showCompanionDrop(selection) {
+    if (!selection?.file?.path) return;
+    this.dragSelection = selection;
+    const doc = this.modalEl?.ownerDocument || globalThis.document;
+    if (!doc?.body) return;
+    this.removeCompanionDrop();
+    this.companionDropEl = workbenchStudyDropTarget(doc, doc.body, async () => {
+      const current = this.dragSelection;
+      this.dragSelection = null;
+      this.removeCompanionDrop();
+      if (!current?.file?.path) return;
+      try {
+        const result = await openDraggedNoteCompanion(this.plugin, current.file.path, this.projectId);
+        new Notice(companionOpenNotice(result, current.file.path), 3600);
+        this.close();
+      } catch (error) {
+        new Notice(`打开右侧笔记小窗失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      }
+    });
+    this.companionDropEl.classList?.add?.('is-project-note-box');
+  }
+
+  enableCompanionDrag(row, file, note = null) {
+    if (!row || !file?.path) return row;
+    row.setAttribute?.('draggable', 'true');
+    row.classList?.add?.('go-study-study-note-row');
+    row.addEventListener('dragstart', (event) => {
+      const selection = { file, note, row, event };
+      this.showCompanionDrop(selection);
+      try {
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData('text/plain', String(file.path || ''));
+      } catch {}
+      row.classList?.add?.('is-dragging');
+    });
+    row.addEventListener('dragend', () => {
+      row.classList?.remove?.('is-dragging');
+      this.dragSelection = null;
+      this.removeCompanionDrop();
+    });
+    return row;
   }
 
   render() {
@@ -725,6 +810,7 @@ class ProjectNoteBoxModal extends Modal {
     for (const note of notes) {
       const file = resolveNoteFile(this.plugin, note);
       const row = list.createDiv({ cls: `rh-next-picker-row go-study-note-management-row ${note.missingAt || !file ? 'is-missing' : ''}`.trim() });
+      if (file) this.enableCompanionDrag(row, file, note);
       setIcon(row.createSpan(), file ? 'file-text' : 'file-warning');
       const body = row.createDiv();
       const name = body.createEl('strong', { text: noteDisplayName(file || note) });
@@ -763,7 +849,7 @@ class ProjectNoteBoxModal extends Modal {
     }
     for (const file of matches) {
       const already = linked.has(file.path.toLowerCase());
-      rowButton(list, file, already ? `${file.path} · 已在笔记盒` : `${file.path} · 点击关联`, async () => {
+      const row = rowButton(list, file, already ? `${file.path} · 已在笔记盒` : `${file.path} · 点击关联`, async () => {
         const result = linkProjectNote(this.plugin.state, this.projectId, file.path);
         setRecentProjectNote(this.plugin.state, this.projectId, result.note.id);
         await this.plugin.persist();
@@ -771,10 +857,15 @@ class ProjectNoteBoxModal extends Modal {
         await this.plugin.workbenchLeaf?.view?.render?.();
         this.close();
       });
+      this.enableCompanionDrag(row, file, findProjectNoteByPath(this.plugin.state, this.projectId, file.path));
     }
   }
 
-  onClose() { this.contentEl.empty(); }
+  onClose() {
+    this.dragSelection = null;
+    this.removeCompanionDrop();
+    this.contentEl.empty();
+  }
 }
 
 class StudyNotePickerModal extends Modal {
@@ -1114,10 +1205,10 @@ function installNativeObsidianStudyDrag(plugin, doc = globalThis.document) {
     removeDrop();
     if (!droppedPath) return;
     try {
-      const result = await enterCurrentPotPlayerStudyMode(plugin, droppedPath, '');
-      new Notice(`已进入学习模式 · ${noteDisplayName({ path: droppedPath })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
+      const result = await openDraggedNoteCompanion(plugin, droppedPath, '');
+      new Notice(companionOpenNotice(result, droppedPath), 3600);
     } catch (error) {
-      new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
+      new Notice(`打开右侧笔记小窗失败：${error instanceof Error ? error.message : String(error)}`, 6000);
     }
   };
 
@@ -1197,8 +1288,8 @@ function installProjectNoteEntryPoints(plugin, doc = globalThis.document) {
       removeWorkbenchDrop();
       if (!selection?.path) return;
       try {
-        const result = await enterCurrentPotPlayerStudyMode(plugin, selection.path, selection.projectId);
-        new Notice(`已进入学习模式 · ${noteDisplayName({ path: selection.path })} · ${String(result.media?.title || '').replace(/\s+-\s+PotPlayer\s*$/i, '') || '当前视频'}`, 4200);
+        const result = await openDraggedNoteCompanion(plugin, selection.path, selection.projectId);
+        new Notice(companionOpenNotice(result, selection.path), 3600);
       } catch (error) {
         new Notice(`进入零散视频学习模式失败：${error instanceof Error ? error.message : String(error)}`, 6000);
       }
@@ -1273,6 +1364,7 @@ module.exports = {
   createPickerShell,
   createProjectNote,
   enterCurrentPotPlayerStudyMode,
+  openDraggedNoteCompanion,
   installPickerUxStyles,
   installNativeObsidianStudyDrag,
   markdownPathFromDragEvent,
