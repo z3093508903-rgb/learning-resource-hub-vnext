@@ -90,21 +90,23 @@ test('search results and project notes share the same draggable study-mode entry
 });
 
 
-test('project navigation Markdown rows can be dragged into the same right-rail Study Mode for current loose video', () => {
+test('project navigation Markdown rows open Companion with optional PotPlayer study context', () => {
   const mainSource = fs.readFileSync(path.resolve(__dirname, '..', 'src', 'main.cjs'), 'utf8');
   assert.match(mainSource, /data-go-study-study-note-path/);
   assert.match(mainSource, /draggable: 'true'/);
   assert.match(uiSource, /workbenchStudyDropTarget/);
   assert.match(uiSource, /is-workbench/);
+  assert.match(uiSource, /optionalCurrentPotPlayerMedia/);
   assert.match(uiSource, /requestNativePotPlayer\('current', \{ foregroundOnly: false \}\)/);
   assert.match(uiSource, /enterStudyMode\(plugin, \{/);
-  assert.match(uiSource, /freeformMedia: current\.media/);
-  assert.match(uiSource, /进入零散视频学习模式失败/);
+  assert.match(uiSource, /openCompanionNoteWindow\(plugin, \{/);
+  assert.match(uiSource, /locked: false/);
+  assert.match(uiSource, /companionMode: 'note'/);
 });
 
-test('dragging a navigation note into freeform Study Mode does not reopen or restart PotPlayer', () => {
-  const start = uiSource.indexOf('async function enterCurrentPotPlayerStudyMode');
-  const end = uiSource.indexOf('function workbenchStudyDropTarget', start);
+test('dragged-note Companion never starts or restarts PotPlayer', () => {
+  const start = uiSource.indexOf('async function openDraggedNoteCompanion');
+  const end = uiSource.indexOf('async function enterCurrentPotPlayerStudyMode', start);
   const block = uiSource.slice(start, end);
   assert.match(block, /requestNativePotPlayer\('current'/);
   assert.doesNotMatch(block, /openResource|openPositionedPlayTarget|nativePlay|requestNativePotPlayer\('play'/);
@@ -123,7 +125,7 @@ test('native Obsidian file-tree and tab drags can summon the global Study Mode t
   assert.doesNotMatch(uiSource, /doc\.addEventListener\('pointermove'/);
   assert.doesNotMatch(uiSource, /doc\.addEventListener\('pointerdown'/);
   assert.match(uiSource, /is-native-obsidian/);
-  assert.match(uiSource, /enterCurrentPotPlayerStudyMode\(plugin, droppedPath, ''\)/);
+  assert.match(uiSource, /openDraggedNoteCompanion\(plugin, droppedPath, ''\)/);
 });
 
 test('native drag bridge ignores Go Study workbench rows so only one drop target owns those drags', () => {
@@ -153,4 +155,29 @@ test('native drag diagnostic records composedPath and dataTransfer without preve
   const block = uiSource.slice(start, end);
   assert.doesNotMatch(block, /preventDefault/);
   assert.doesNotMatch(block, /stopPropagation/);
+});
+
+
+test('project note box rows are draggable into the same Companion target', () => {
+  assert.match(uiSource, /class ProjectNoteBoxModal/);
+  assert.match(uiSource, /enableCompanionDrag\(row, file, note\)/);
+  assert.match(uiSource, /showCompanionDrop\(selection\)/);
+  assert.match(uiSource, /openDraggedNoteCompanion\(this\.plugin, current\.file\.path, this\.projectId\)/);
+  assert.match(uiSource, /is-project-note-box/);
+});
+
+test('drag success feedback never renders raw PotPlayer media titles', () => {
+  assert.match(uiSource, /function companionOpenNotice/);
+  assert.match(uiSource, /已进入学习模式/);
+  assert.match(uiSource, /已打开笔记小窗/);
+  assert.doesNotMatch(uiSource, /result\.media\?\.title/);
+});
+
+test('global direct-drag target is now generic Companion UI, not a PotPlayer-only promise', () => {
+  const start = uiSource.indexOf('function workbenchStudyDropTarget');
+  const end = uiSource.indexOf('function pickerHeading', start);
+  const block = uiSource.slice(start, end);
+  assert.match(block, /右侧小窗/);
+  assert.match(block, /笔记小窗/);
+  assert.doesNotMatch(block, /使用当前 PotPlayer 视频进入学习模式/);
 });
