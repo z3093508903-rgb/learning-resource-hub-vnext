@@ -4,19 +4,19 @@
 
 ## RC 基线
 
-- Product branch：`release/go-study-0.3.0-rc1`
-- Branch HEAD：`2604ff769554792cb7f7b2abad41c48405ccc46c`
-- RC release target：`b76dd0d944b3e8f2c6ceb73c5b05525f17c80f20`
-- Release：`Go Study 0.3.0 RC1`
-- Tag：`go-study-rc-v0.3.0-rc.1`
-- RC ZIP SHA256：`00ec2d449f759b7bd3ac0dcc04294aa41b5c9092e8165c5023de9683dbbfbe22`
+- Product branch：`release/go-study-0.3.0-rc2`
+- Branch HEAD：`79cba03059a2a3777a4a03fd1139f9791cabf55a`
+- RC release target：`9a07975df00a29bb54b6b589c93aaf4897621801`
+- Release：`Go Study 0.3.0 RC2`
+- Tag：`go-study-rc-v0.3.0-rc.2`
+- RC ZIP SHA256：`8c4b7e676638cb05e744eb1fcedfb4de7772f1ef7845d24bb0e5381ba94791d6`
 - Bilibili Bridge：`0.1.1`
 - Bridge ZIP SHA256：`cf7970e76894167945b21427900124feef342de42b8e20e76e1558edc71cb7c4`
 
 自动验证：
 
-- **412 / 412 tests PASS**
-- build：38 source modules / 772597 bytes
+- **413 / 413 tests PASS**
+- build：38 source modules / 775671 bytes
 - committed `main.js` current
 - Release readiness PASS
 
@@ -51,6 +51,16 @@ Stable / Merge：**HOLD**
 | Anki | not part of this non-Anki RC gate | not required for current decision | DEFERRED from this gate |
 
 ## Static audit details
+
+### RC2 selectable restore
+
+RC1 UI gap fixed in RC2:
+
+- recovery is no longer limited to the newest snapshot;
+- Settings -> Data & Safety now exposes **选择备份恢复**;
+- the picker separates named pinned backups from automatic snapshots;
+- every entry can be restored independently;
+- the current state is protected before restoring the selected entry.
 
 ### 1. State safety
 
@@ -163,11 +173,13 @@ Normal published usage should still keep only one generation enabled.
 
 ### B. Named backup / restore
 
-1. Create named backup `RC1-before-restore`.
-2. Make one obvious reversible change.
-3. Restore that named backup.
-4. Confirm the state rolled back.
-5. Confirm the named backup still exists.
+1. Create named backup `RC2-before-restore`.
+2. Produce at least one newer automatic snapshot after it.
+3. Make one obvious reversible change.
+4. Click **选择备份恢复**.
+5. Choose the older named backup rather than the latest snapshot.
+6. Confirm the state rolled back to that exact backup.
+7. Confirm the named backup still exists.
 
 ### C. OpenList
 
