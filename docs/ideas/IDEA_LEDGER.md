@@ -218,3 +218,53 @@ beta.17 当前策略：
 3. 再评估双方条件注册 / protocol ownership migration。
 
 本问题与时间戳 CSS 无直接因果关系。
+
+
+---
+
+## Cross-device / reinstall state sync
+
+状态：**DEFERRED**
+
+背景：
+
+Markdown 笔记可以通过 Vault 同步保留，但 Go Study 的 Project / Resource / Source / Resource ID 映射主要存储在插件状态中。如果：
+
+- 更换设备；
+- 新装同一插件；
+- data.json 未同步；
+- 只同步了 Markdown；
+
+旧 Managed Resource ID 回链可能失去当前资源上下文。
+
+beta20.9 已先做“链接自身兜底”：
+- 新 Managed v3 backlink 隐藏携带 locator / name / title / web；
+- Resource ID 仍是首要身份；
+- 丢当前 Resource 时可降级 Freeform；
+- legacy v1 可使用 recovery / 一次性 relink alias。
+
+未来同步候选：
+
+1. **Import / Export Go Study State**
+   - 导出 Project / Module / Resource / Source / alias；
+   - 导入时尽量保留 Resource ID；
+   - 适合低频双端用户，但需要手工同步。
+
+2. **Vault 内 portable resource manifest**
+   - 把可同步的 Resource identity / portable metadata 保存到 Vault 内；
+   - 跟 Markdown 一起被 Obsidian Sync / Git / 云盘同步；
+   - 本地绝对路径仍需要 device-specific locator mapping。
+
+3. **Device-specific locator map / multi-locator**
+   - 同一个 Resource ID 在 Windows / macOS 使用不同本地 locator；
+   - 不把单一绝对路径当作跨设备身份。
+
+4. **Account / cloud sync**
+   - 只有真实多设备用户需求足够强时再进入 Roadmap。
+
+当前决策：
+
+- **不因为未来同步需求阻塞首发。**
+- 双端用户当前预计较少；
+- 先保证单个 Markdown timestamp 尽可能自描述、可恢复；
+- 完整同步保持独立产品能力，不混入 backlink resolver。
