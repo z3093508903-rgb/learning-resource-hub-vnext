@@ -622,6 +622,33 @@ Discovery 顺序：
 
 只在 debug 模式显示一次诊断，然后根据真实 DOM / event source 修。
 
+
+## 12A. beta20.10 Native Drag Boundary
+
+用户明确：Go Study 的小窗不能强行占用 Obsidian 原生拖动。
+
+必须保持：
+- file tree 正常移动 / 重排；
+- tab 正常重排；
+- 非 Go Study 目标区域 drop 完全由 Obsidian 处理；
+- 只有进入 Go Study 小 Drop Target 后才允许 `preventDefault / stopPropagation`。
+
+beta20.10 已：
+- 删除 Native Bridge 的 pointer fallback；
+- 仅旁观 `dragstart / dragend / drop`；
+- 引入 `composedPath()` / extra data-* / dataTransfer 诊断；
+- 发布 Preview `0.3.0-beta.20.10`；
+- 388 / 388 tests PASS；
+- ZIP SHA256 `ab3d97d7ee9e1c3f7d9bf6a2a4d40f0ae1e7136836ebb0768c20d3dd82511080`。
+
+下一步只做人机验收：
+1. file tree drag；
+2. file tree normal move 不受影响；
+3. drop target 接管；
+4. tab drag；
+5. tab reorder 不受影响；
+6. 若不出现 target，读取 Console 的 `Go Study native drag diagnostic`，不要重新引入 pointer hijack。
+
 ---
 
 ## 13. Companion caret 问题
