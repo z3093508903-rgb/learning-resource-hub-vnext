@@ -17,7 +17,33 @@ Go Study 是一个 Obsidian Desktop 学习工作台。
 
 ---
 
-## 2. 它解决什么问题
+## 2. Free & Open Source / 免费开源承诺
+
+**Go Study is free and open source.**
+
+**Core features will not be locked behind a paywall.**  
+If this project saves you time, you can optionally support its continued development.
+
+> **Go Study 免费且开源，0.3.0 已有的核心学习功能将永久免费且开源，不会在后续版本中被移到付费墙后。**
+>
+> 如果它确实帮你节省了一些时间，可以选择赞助项目继续开发。
+
+未来如果新增必须持续承担运营成本的能力，例如：
+
+- AI 服务；
+- 云同步；
+- 托管服务；
+- 持续产生服务器、存储或 API 成本的在线功能；
+
+这些新增服务**可能**作为可选付费能力提供。
+
+但这不会改变当前核心功能的免费与开源承诺。
+
+赞助完全自愿，也不会影响功能、更新或使用体验。
+
+---
+
+## 3. 它解决什么问题
 
 ### 传统工作流
 
@@ -63,7 +89,7 @@ Go Study 是一个 Obsidian Desktop 学习工作台。
 
 ---
 
-## 3. 第一次使用
+## 4. 第一次使用
 
 ### 3.1 创建项目
 
@@ -103,7 +129,7 @@ Bilibili 可以：
 
 ---
 
-## 4. Companion 笔记小窗
+## 5. Companion 笔记小窗
 
 Companion 是一个轻量的 Obsidian Markdown 小窗。
 
@@ -145,7 +171,7 @@ Pin 开启后，Companion 会保持在浏览器 / 播放器上方。
 
 ---
 
-## 5. Alt + S HUD
+## 6. Alt + S HUD
 
 默认主快捷键：
 
@@ -180,7 +206,7 @@ HUD 是 Go Study 的快速记录动作盘。
 
 ---
 
-## 6. Bilibili Web Bridge
+## 7. Bilibili Web Bridge
 
 Bilibili Bridge 是可选增强。
 
@@ -230,7 +256,7 @@ https://www.bilibili.com/video/BVxxxx?t=69.4
 
 ---
 
-## 7. Timeline
+## 8. Timeline
 
 Timeline 是一个可选的视频笔记增强。
 
@@ -254,7 +280,7 @@ Timeline 是一个可选的视频笔记增强。
 
 ---
 
-## 8. 项目笔记盒
+## 9. 项目笔记盒
 
 项目笔记盒是项目级 Markdown 集合。
 
@@ -270,7 +296,7 @@ Timeline 是一个可选的视频笔记增强。
 
 ---
 
-## 9. OpenList
+## 10. OpenList
 
 OpenList 适合把远程 / NAS / 网盘映射的视频加入学习项目。
 
@@ -285,7 +311,7 @@ OpenList 适合把远程 / NAS / 网盘映射的视频加入学习项目。
 
 ---
 
-## 10. 数据与备份
+## 11. 数据与备份
 
 Go Study 会在插件数据目录外维护恢复快照。
 
@@ -321,7 +347,7 @@ Go Study 会在插件数据目录外维护恢复快照。
 
 ---
 
-## 11. 历史链接兼容
+## 12. 历史链接兼容
 
 Go Study 正式保留：
 
@@ -347,7 +373,7 @@ Go Study 正式保留：
 
 ---
 
-## 12. 常见问题
+## 13. 常见问题
 
 ### Q：必须安装 PotPlayer 吗？
 
@@ -367,6 +393,14 @@ PotPlayer 是高级视频能力适配器。
 不是。
 
 它是实际的 Obsidian Markdown leaf，所以修改仍发生在真实 Vault 文件中。
+
+### Q：为什么没有 YouTube 专门适配？
+
+0.3.0 首发优先适配了已经实际验证的 Bilibili 学习工作流。
+
+目前 YouTube 没有专门的网页时间戳 / HUD Bridge。你仍然可以把 Companion 当作独立的置顶 Markdown 小窗使用，但 Go Study 不会承诺自动读取 YouTube 播放进度。
+
+后续如果有真实海外用户需求，会再根据 YouTube 用户的实际学习方式设计 Adapter，而不是为了首发平台数量仓促加入。
 
 ### Q：为什么 B站网页截图不支持？
 
@@ -388,7 +422,7 @@ Go Study 保持 Project-level Notes Box，而不是强行一对一绑定。
 
 ---
 
-## 13. 推荐工作流
+## 14. 推荐工作流
 
 ### B站轻量学习
 
@@ -423,7 +457,7 @@ B站网页
 
 ---
 
-## 14. Go Study 的设计边界
+## 15. Go Study 的设计边界
 
 Go Study 当前刻意不做：
 
@@ -433,12 +467,13 @@ Go Study 当前刻意不做：
 - OCR
 - 强制 Resource ↔ Note 一对一绑定
 - 强制外部脚本 Runtime
+- 首发前临时加入未经真实用户验证的 YouTube 专门适配
 
 这些未来可以讨论，但不会为了“看起来功能多”而破坏当前学习闭环。
 
 ---
 
-## 15. 最重要的一句话
+## 16. 最重要的一句话
 
 Go Study 的价值不是多一个“资源管理器”。
 
