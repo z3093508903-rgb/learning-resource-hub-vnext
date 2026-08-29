@@ -1393,7 +1393,7 @@ const {
 const { registerResourceRelinkCommands } = __rhLoad("resource-relink-ui.cjs");
 const { registerLearningCaptureCommands } = __rhLoad("learning-capture.cjs");
 
-const LEGACY_GO_STUDY_PLUGIN_ID = 'learning-resource-hub-next';
+const LEGACY_GO_STUDY_PLUGIN_IDS = ['go-study-preview', 'learning-resource-hub-next'];
 
 class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
   async onload() {
@@ -1432,8 +1432,9 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
 
   legacyGoStudyProtocolConflict() {
     const currentId = String(this.manifest?.id || '').trim();
-    if (!currentId || currentId === LEGACY_GO_STUDY_PLUGIN_ID) return false;
-    return this.enabledPluginIds().has(LEGACY_GO_STUDY_PLUGIN_ID);
+    if (!currentId) return false;
+    const enabled = this.enabledPluginIds();
+    return LEGACY_GO_STUDY_PLUGIN_IDS.some((pluginId) => pluginId !== currentId && enabled.has(pluginId));
   }
 
   registerGoStudyReferenceProtocol() {
@@ -1467,7 +1468,7 @@ class ResourceHubNextPlugin extends BaseResourceHubNextPlugin {
     if ((legacyConflict || !registered) && !this._goStudyProtocolWarningShown) {
       this._goStudyProtocolWarningShown = true;
       const message = legacyConflict
-        ? 'Go Study 检测到旧版 Learning Resource Hub Next 同时启用。Go Study 已继续启动，但旧版可能争用时间戳回链协议；请停用旧版并重新加载 Obsidian。'
+        ? 'Go Study 检测到 Preview / 旧版插件同时启用。Go Study 已继续启动，但旧版本可能争用时间戳回链协议；完成数据迁移后请停用旧版本并重新加载 Obsidian。'
         : `Go Study 已继续启动，但时间戳回链协议注册失败：${error || '协议可能已被其他插件占用'}。资源工作台仍可使用，请检查是否同时启用了旧版插件。`;
       new Notice(message, 10000);
     }
@@ -3357,6 +3358,8 @@ const {
   meaningfulState,
   protectBeforePersist,
   pruneRecoveryBackups,
+  previewMigrationCandidate,
+  protectPreviewMigration,
   readRawPluginData,
   recoveryDirectory,
   recoveryEntries,
@@ -3487,6 +3490,23 @@ class ResourceHubNextPlugin extends Plugin {
       console.warn('Go Study: failed to prune startup recovery snapshots.', error);
     }
     let loaded = await this.loadData();
+    let previewMigration = null;
+
+    // Stable 0.3.0 uses the permanent plugin id "go-study". If this Vault has
+    // never created stable data.json but still has the validated Preview data,
+    // import that state once. Never overwrite an existing stable data.json.
+    if (!safetySnapshot.rawText && !meaningfulState(loaded)) {
+      const candidate = previewMigrationCandidate(this);
+      if (candidate.eligible) {
+        const protectedMigration = protectPreviewMigration(this, candidate);
+        loaded = candidate.data;
+        previewMigration = {
+          sourcePluginId: candidate.pluginId,
+          sourcePath: candidate.filePath,
+          recoveryPath: protectedMigration.recoveryPath || ''
+        };
+      }
+    }
 
     // Obsidian loadData() and direct data.json inspection should describe the same state.
     // If loadData unexpectedly returns empty while a meaningful raw data.json exists,
@@ -3508,14 +3528,28 @@ class ResourceHubNextPlugin extends Plugin {
       markLoadedBaseline(this, this.state);
     }
 
+    if (previewMigration && !this._goStudyStateSafety?.readOnlySafety) {
+      try {
+        await this.saveData(this.state);
+        refreshPersistBaseline(this);
+        new Notice(
+          'Go Study 已从 Preview 安全迁移现有项目与设置。原 Preview data.json 保持不变，并已额外创建迁移备份。',
+          9000
+        );
+      } catch (error) {
+        console.error('Go Study: failed to persist Preview migration into stable data.json.', error);
+        new Notice('Go Study 已读取 Preview 数据，但写入正式版 data.json 失败。原 Preview 数据未被修改，请先不要卸载 Preview。', 10000);
+      }
+    }
+
     this.memoResizeBindings = new Set();
     this.workbenchLeaf = null;
     this.sidebarWasCollapsed = null;
     this.openListTokens = new Map();
     this.openListLoginTasks = new Map();
     this.registerView(VIEW_TYPE, (leaf) => new ResourceHubNextView(leaf, this));
-    this.registerHoverLinkSource?.(VIEW_TYPE, { display: 'Learning Resource Hub Next', defaultMod: true });
-    this.addRibbonIcon('library-big', '打开学习资源工作台 Next', () => void this.openWorkbench());
+    this.registerHoverLinkSource?.(VIEW_TYPE, { display: 'Go Study', defaultMod: true });
+    this.addRibbonIcon('library-big', '打开 Go Study', () => void this.openWorkbench());
     this.addCommand({ id: 'open-workbench', name: '打开工作台', callback: () => void this.openWorkbench() });
     this.addCommand({ id: 'quick-add', name: '添加资源', callback: () => void this.openAddModal() });
     this.addSettingTab?.(new ResourceHubNextSettingTab(this.app, this));
@@ -3765,7 +3799,7 @@ class ResourceHubNextPlugin extends Plugin {
     const basePath = this.app?.vault?.adapter?.getBasePath?.();
     if (!basePath) throw new Error('当前仓库不支持本地备份。');
     const configDir = this.app?.vault?.configDir || '.obsidian';
-    const fallback = path.join(basePath, configDir, 'plugins', this.manifest?.id || 'learning-resource-hub-next');
+    const fallback = path.join(basePath, configDir, 'plugins', this.manifest?.id || 'go-study');
     const manifestDir = String(this.manifest?.dir || '').trim();
     if (!manifestDir) return fallback;
     const candidate = path.isAbsolute(manifestDir) ? manifestDir : path.join(basePath, manifestDir);
@@ -10642,7 +10676,7 @@ const {
   buildPositionMarkdown
 } = __rhLoad("resource-note.cjs");
 
-const BILIBILI_BRIDGE_RELEASES_URL = 'https://github.com/z3093508903-rgb/learning-resource-hub-vnext/releases';
+const BILIBILI_BRIDGE_RELEASES_URL = 'https://github.com/z3093508903-rgb/go-study/releases';
 const GO_STUDY_PROJECT_URL = 'https://github.com/z3093508903-rgb/go-study';
 
 class BackupNameModal extends Modal {
@@ -16002,6 +16036,56 @@ function readRawPluginData(plugin) {
   }
 }
 
+function siblingPluginData(plugin, pluginId) {
+  const basePath = plugin?.app?.vault?.adapter?.getBasePath?.();
+  if (!basePath) return { filePath: '', raw: '', data: null, error: null };
+  const configDir = plugin?.app?.vault?.configDir || '.obsidian';
+  const safeId = String(pluginId || '').trim();
+  if (!safeId || safeId === String(plugin?.manifest?.id || '').trim()) {
+    return { filePath: '', raw: '', data: null, error: null };
+  }
+  const filePath = path.join(basePath, configDir, 'plugins', safeId, 'data.json');
+  if (!fs.existsSync(filePath)) return { filePath, raw: '', data: null, error: null };
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const data = raw.trim() ? JSON.parse(raw) : null;
+    return { filePath, raw, data, error: null };
+  } catch (error) {
+    return { filePath, raw: '', data: null, error };
+  }
+}
+
+function previewMigrationCandidate(plugin) {
+  if (String(plugin?.manifest?.id || '').trim() !== 'go-study') {
+    return { eligible: false, pluginId: '', filePath: '', raw: '', data: null, error: null };
+  }
+  const current = readRawPluginData(plugin);
+  if (current.raw) {
+    return { eligible: false, pluginId: '', filePath: current.filePath, raw: '', data: null, error: null };
+  }
+  const preview = siblingPluginData(plugin, 'go-study-preview');
+  const eligible = Boolean(preview.raw && meaningfulState(preview.data));
+  return {
+    eligible,
+    pluginId: eligible ? 'go-study-preview' : '',
+    ...preview
+  };
+}
+
+function protectPreviewMigration(plugin, candidate) {
+  if (!candidate?.eligible || !candidate?.raw) return { recoveryPath: '' };
+  const dir = recoveryDirectory(plugin);
+  if (!dir) return { recoveryPath: '' };
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    const recoveryPath = path.join(dir, `saved-preview-migration-${safeStamp()}.json`);
+    fs.writeFileSync(recoveryPath, candidate.raw, 'utf8');
+    return { recoveryPath };
+  } catch (error) {
+    return { recoveryPath: '', error };
+  }
+}
+
 function recoveryDirectory(plugin) {
   const basePath = plugin?.app?.vault?.adapter?.getBasePath?.();
   if (!basePath) return '';
@@ -16173,6 +16257,8 @@ module.exports = {
   meaningfulState,
   pluginDataPath,
   pluginDirectory,
+  previewMigrationCandidate,
+  protectPreviewMigration,
   protectBeforePersist,
   protectRawPluginData,
   pruneRecoveryBackups,
@@ -16182,6 +16268,7 @@ module.exports = {
   renameRecoveryEntry,
   refreshPersistBaseline,
   stateCounts,
+  siblingPluginData,
   stateWeight,
   startupSafetySnapshot,
   writeNamedRecoveryState,
