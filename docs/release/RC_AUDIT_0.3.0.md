@@ -4,19 +4,19 @@
 
 ## RC 基线
 
-- Product branch：`release/go-study-0.3.0-rc3`
-- Branch HEAD：`62e94509eda352be922da147af61595c2b05a9cf`
-- RC release target：`c0a602028dd51a6a195117b55746f8e5cca7db57`
-- Release：`Go Study 0.3.0 RC3`
-- Tag：`go-study-rc-v0.3.0-rc.3`
-- RC ZIP SHA256：`a409529706d3f266ef78bc72f5133d42f300d631f96d0721af3795e7d156dece`
+- Product branch：`release/go-study-0.3.0-rc4`
+- Branch HEAD：`7939905d7f0c40d52a1117103a79ffc73f52371f`
+- RC release target：`451010743198280f03025fccc3a8ddc2ab49518f`
+- Release：`Go Study 0.3.0 RC4`
+- Tag：`go-study-rc-v0.3.0-rc.4`
+- RC ZIP SHA256：`4eca80f42898add4d02ad4291e61f5afd592eb7ff5953cd9420dfe0db23c7365`
 - Bilibili Bridge：`0.1.1`
 - Bridge ZIP SHA256：`cf7970e76894167945b21427900124feef342de42b8e20e76e1558edc71cb7c4`
 
 自动验证：
 
-- **418 / 418 tests PASS**
-- build：38 source modules / 776664 bytes
+- **413 / 413 tests PASS**
+- build：38 source modules / 775671 bytes
 - committed `main.js` current
 - Release readiness PASS
 
@@ -45,14 +45,29 @@ Stable / Merge：**HOLD**
 | Legacy v1 recovery / relink | PASS | final RC regression pending | RECHECK |
 | Vault rename / delete / recreate | PASS | historical path behavior accepted; RC smoke pending | RECHECK |
 | Light theme modal readability | PASS | final RC regression pending | RECHECK |
-| OpenList auth + playback + seek | unit/model coverage PASS | real service required | BLOCK until checked |
+| OpenList auth + playback + seek | unit/model coverage PASS | storage mounted后项目页播放已确认正常；时间戳 seek 继续 smoke | RECHECK |
 | Legacy plugin protocol coexistence | RC1 fail-safe PASS | pending one reload test | RECHECK |
 | Clean Vault cold start | load/build PASS | pending RC1 | BLOCK until checked |
 | Anki | not part of this non-Anki RC gate | not required for current decision | DEFERRED from this gate |
 
 ## Static audit details
 
-### RC3 OpenList playback fallback
+### RC4 withdraws RC3 false-positive fallback
+
+RC3 was created after `ERR_CONNECTION_REFUSED` during OpenList playback acceptance.
+
+The real cause was later confirmed to be **unmounted backing network storage**. After mounting it, the existing OpenList/PotPlayer path worked normally.
+
+Decision:
+
+- RC3 fallback is withdrawn;
+- do not hide missing mount/service readiness by silently attempting unsigned playback;
+- RC4 returns to RC2 behavior and remains the valid baseline;
+- OpenList manual acceptance is considered valid only with required storage/service mounted.
+
+RC3: **WITHDRAWN / superseded by RC4**
+
+### RC3 OpenList playback fallback (historical, withdrawn)
 
 Real-machine RC uncovered that project-page OpenList launch and Managed OpenList timestamps could fail before Native PotPlayer startup with `net::ERR_CONNECTION_REFUSED`.
 
