@@ -211,6 +211,224 @@ module.exports = {
 };
 
 },
+"bilibili-web-bridge.cjs": (module, exports, require) => {
+'use strict';
+
+const http = require('node:http');
+
+const BILIBILI_WEB_BRIDGE_PORT = 27124;
+const BILIBILI_WEB_STATE_MAX_AGE_MS = 2500;
+const BILIBILI_WEB_MAX_BYTES = 16 * 1024;
+
+function isBilibiliVideoUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    const host = url.hostname.toLowerCase();
+    const bilibili = host === 'bilibili.com' || host.endsWith('.bilibili.com');
+    return (url.protocol === 'https:' || url.protocol === 'http:')
+      && bilibili
+      && /^\/video\//i.test(url.pathname);
+  } catch {
+    return false;
+  }
+}
+
+function normalizeBilibiliPageUrl(value) {
+  if (!isBilibiliVideoUrl(value)) throw new Error('invalid_bilibili_url');
+  const url = new URL(String(value || '').trim());
+  url.hash = '';
+  url.searchParams.delete('t');
+  return url.toString();
+}
+
+function timestampSeconds(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds < 0) throw new Error('invalid_position');
+  return Math.round(seconds * 1000) / 1000;
+}
+
+function bilibiliTimestampUrl(value, seconds) {
+  const url = new URL(normalizeBilibiliPageUrl(value));
+  url.searchParams.set('t', String(timestampSeconds(seconds)));
+  return url.toString();
+}
+
+function cleanBilibiliTitle(value) {
+  return String(value || '')
+    .replace(/[_\s-]*哔哩哔哩(?:[_\s-]*bilibili)?\s*$/i, '')
+    .replace(/\s*[-_–—]\s*bilibili\s*$/i, '')
+    .trim()
+    .slice(0, 300);
+}
+
+function normalizeBilibiliWebState(payload, now = Date.now()) {
+  const body = payload && typeof payload === 'object' ? payload : {};
+  const url = normalizeBilibiliPageUrl(body.url);
+  const positionSeconds = timestampSeconds(body.positionSeconds ?? body.currentTime);
+  const duration = Number(body.duration);
+  return {
+    url,
+    title: cleanBilibiliTitle(body.title) || url,
+    positionSeconds,
+    duration: Number.isFinite(duration) && duration >= 0 ? duration : null,
+    paused: Boolean(body.paused),
+    visible: body.visible !== false,
+    focused: Boolean(body.focused),
+    receivedAt: Number(now)
+  };
+}
+
+function currentBilibiliWebState(plugin, options = {}) {
+  const state = plugin?._goStudyBilibiliWebState;
+  if (!state) throw new Error('没有检测到 B站网页视频。请确认已安装 Go Study Bilibili Bridge，并让 B站视频标签页保持前台。');
+  const now = Number.isFinite(Number(options.now)) ? Number(options.now) : Date.now();
+  const maxAgeMs = Math.max(500, Number(options.maxAgeMs || BILIBILI_WEB_STATE_MAX_AGE_MS));
+  if (now - Number(state.receivedAt || 0) > maxAgeMs) {
+    throw new Error('B站网页桥接已超时。请切回正在播放的 B站标签页后重试。');
+  }
+  if (!state.visible || !state.focused) {
+    throw new Error('B站网页当前不是前台标签页。');
+  }
+  return state;
+}
+
+async function requestBilibiliWebBridge(plugin, action = 'current', options = {}) {
+  if (action === 'ping') {
+    const state = currentBilibiliWebState(plugin, options);
+    return { ok: true, transport: 'bilibili-web', version: 1, media: { ...state } };
+  }
+  if (action !== 'current') throw new Error('B站网页模式目前只支持读取当前位置，不支持网页截图控制。');
+  const state = currentBilibiliWebState(plugin, options);
+  return {
+    ok: true,
+    transport: 'bilibili-web',
+    version: 1,
+    control: { pausedByGoStudy: false },
+    media: {
+      path: state.url,
+      web: state.url,
+      title: state.title,
+      positionSeconds: state.positionSeconds,
+      duration: state.duration,
+      paused: state.paused,
+      source: 'bilibili-web',
+      transport: 'bilibili-web'
+    }
+  };
+}
+
+function bridgeStatus(plugin) {
+  const raw = plugin?._goStudyBilibiliWebBridgeStatus || {};
+  let connected = false;
+  try {
+    currentBilibiliWebState(plugin);
+    connected = true;
+  } catch {}
+  return {
+    listening: Boolean(raw.listening),
+    port: Number(raw.port || BILIBILI_WEB_BRIDGE_PORT),
+    error: String(raw.error || ''),
+    connected
+  };
+}
+
+function registerBilibiliWebBridge(plugin, options = {}) {
+  if (plugin?._goStudyBilibiliWebServer) return plugin._goStudyBilibiliWebServer;
+  const httpImpl = options.http || http;
+  const port = Number(options.port || BILIBILI_WEB_BRIDGE_PORT);
+  const host = '127.0.0.1';
+
+  const server = httpImpl.createServer((req, res) => {
+    res.setHeader?.('Access-Control-Allow-Origin', '*');
+    res.setHeader?.('Access-Control-Allow-Headers', 'content-type');
+    res.setHeader?.('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    if (req.method === 'OPTIONS') {
+      res.statusCode = 204;
+      res.end();
+      return;
+    }
+    if (req.method !== 'POST' || req.url !== '/v1/state') {
+      res.statusCode = 404;
+      res.end('not_found');
+      return;
+    }
+
+    let bytes = 0;
+    const chunks = [];
+    req.on('data', (chunk) => {
+      bytes += chunk.length;
+      if (bytes > BILIBILI_WEB_MAX_BYTES) {
+        res.statusCode = 413;
+        res.end('too_large');
+        req.destroy?.();
+        return;
+      }
+      chunks.push(Buffer.from(chunk));
+    });
+    req.on('end', () => {
+      if (res.writableEnded) return;
+      try {
+        const payload = JSON.parse(Buffer.concat(chunks).toString('utf8') || '{}');
+        const state = normalizeBilibiliWebState(payload, Date.now());
+        if (plugin) plugin._goStudyBilibiliWebState = state;
+        res.setHeader?.('Content-Type', 'application/json; charset=utf-8');
+        res.end(JSON.stringify({ ok: true, version: 1 }));
+      } catch {
+        res.statusCode = 400;
+        res.end('invalid_state');
+      }
+    });
+  });
+
+  if (plugin) {
+    plugin._goStudyBilibiliWebServer = server;
+    plugin._goStudyBilibiliWebBridgeStatus = { listening: false, port, error: '' };
+  }
+
+  server.on?.('listening', () => {
+    if (plugin) plugin._goStudyBilibiliWebBridgeStatus = { listening: true, port, error: '' };
+  });
+  server.on?.('error', (error) => {
+    if (plugin) {
+      plugin._goStudyBilibiliWebBridgeStatus = {
+        listening: false,
+        port,
+        error: error instanceof Error ? error.message : String(error || '')
+      };
+    }
+  });
+
+  try { server.listen(port, host); }
+  catch (error) {
+    if (plugin) plugin._goStudyBilibiliWebBridgeStatus = { listening: false, port, error: String(error || '') };
+  }
+
+  const cleanup = () => {
+    try { server.close?.(); } catch {}
+    if (plugin?._goStudyBilibiliWebServer === server) plugin._goStudyBilibiliWebServer = null;
+    if (plugin) plugin._goStudyBilibiliWebState = null;
+  };
+  plugin?.register?.(cleanup);
+  return server;
+}
+
+module.exports = {
+  BILIBILI_WEB_BRIDGE_PORT,
+  BILIBILI_WEB_MAX_BYTES,
+  BILIBILI_WEB_STATE_MAX_AGE_MS,
+  bilibiliTimestampUrl,
+  bridgeStatus,
+  cleanBilibiliTitle,
+  currentBilibiliWebState,
+  isBilibiliVideoUrl,
+  normalizeBilibiliPageUrl,
+  normalizeBilibiliWebState,
+  registerBilibiliWebBridge,
+  requestBilibiliWebBridge,
+  timestampSeconds
+};
+
+},
 "capture-actions.cjs": (module, exports, require) => {
 'use strict';
 
@@ -530,6 +748,12 @@ function companionEditorEndPosition(editor) {
   }
 }
 
+function sameCursor(a, b) {
+  return Boolean(a && b)
+    && Number(a.line) === Number(b.line)
+    && Number(a.ch) === Number(b.ch);
+}
+
 function revealCompanionEditorCursor(plugin, editor, options = {}) {
   if (!editor) return false;
   const target = plugin?._goStudyCompanionTarget;
@@ -548,38 +772,50 @@ function revealCompanionEditorCursor(plugin, editor, options = {}) {
   if (!cursor && typeof editor.getCursor === 'function') {
     try { cursor = editor.getCursor(); } catch {}
   }
+
   if (options.focus !== false) {
     try { editor.focus?.(); } catch {}
   }
 
-  const reveal = () => {
-    let current = cursor;
-    if (typeof editor.getCursor === 'function') {
-      try { current = editor.getCursor() || current; } catch {}
+  if (options.scroll !== false && cursor && typeof editor.scrollIntoView === 'function') {
+    try {
+      editor.scrollIntoView({ from: cursor, to: cursor }, Boolean(options.center));
+    } catch {
+      try { editor.scrollIntoView({ from: cursor, to: cursor }); } catch {}
     }
-    if (current && typeof editor.scrollIntoView === 'function') {
-      try {
-        editor.scrollIntoView({ from: current, to: current }, Boolean(options.center));
-      } catch {
-        try { editor.scrollIntoView({ from: current, to: current }); } catch {}
-      }
-    }
+  }
+  return true;
+}
 
-    const leaf = target?.leaf || plugin?._goStudyCompanionWindow?.leaf;
-    const scroller = leaf?.view?.containerEl?.querySelector?.('.cm-scroller');
-    const end = companionEditorEndPosition(editor);
-    if (scroller && current && end && end.line - Number(current.line || 0) <= 2) {
-      try { scroller.scrollTop = scroller.scrollHeight; } catch {}
-    }
-  };
+function scheduleCompanionEditorCursorReveal(plugin, editor, options = {}) {
+  if (!editor || plugin?._goStudyCompanionTarget?.editor !== editor) return false;
+  let expected = null;
+  if (typeof editor.getCursor === 'function') {
+    try { expected = editor.getCursor(); } catch {}
+  }
+  if (!expected) return false;
 
-  reveal();
-  const win = target?.leaf?.view?.containerEl?.ownerDocument?.defaultView
-    || plugin?._goStudyCompanionWindow?.win;
-  try {
-    if (typeof win?.requestAnimationFrame === 'function') win.requestAnimationFrame(reveal);
-    else setTimeout(reveal, 0);
-  } catch {}
+  if (plugin?._goStudyCompanionRevealTimer) {
+    try { clearTimeout(plugin._goStudyCompanionRevealTimer); } catch {}
+  }
+
+  const delayMs = Math.max(0, Math.min(300, Number(options.delayMs ?? 48)));
+  const timer = setTimeout(() => {
+    if (plugin) plugin._goStudyCompanionRevealTimer = null;
+    if (plugin?._goStudyCompanionTarget?.editor !== editor) return;
+    let current = null;
+    try { current = editor.getCursor?.(); } catch {}
+    // If the user typed, clicked or moved the caret after the programmatic insert,
+    // never fight their editor position.
+    if (!sameCursor(current, expected)) return;
+    revealCompanionEditorCursor(plugin, editor, {
+      focus: false,
+      center: Boolean(options.center),
+      scroll: true
+    });
+  }, delayMs);
+
+  if (plugin) plugin._goStudyCompanionRevealTimer = timer;
   return true;
 }
 
@@ -710,6 +946,10 @@ function detachCompanionTarget(plugin) {
 function cleanupCompanionSession(plugin, session, options = {}) {
   if (!session || session.cleaned) return;
   session.cleaned = true;
+  if (plugin?._goStudyCompanionRevealTimer) {
+    try { clearTimeout(plugin._goStudyCompanionRevealTimer); } catch {}
+    plugin._goStudyCompanionRevealTimer = null;
+  }
   try { if (session.timer) session.win?.clearInterval?.(session.timer); } catch {}
   try { session.win?.removeEventListener?.('resize', session.captureGeometry); } catch {}
   try { session.win?.removeEventListener?.('beforeunload', session.beforeUnload); } catch {}
@@ -845,8 +1085,10 @@ async function openCompanionNoteWindow(plugin, options = {}) {
   revealCompanionEditorCursor(plugin, view.editor, {
     moveToEnd: focusAtEnd,
     focus: options.focusEditor !== false,
-    center: false
+    center: false,
+    scroll: false
   });
+  scheduleCompanionEditorCursorReveal(plugin, view.editor, { delayMs: 72, center: false });
   syncCompanionNativeState(plugin, session, options);
   installCompanionPinControl(plugin, session);
   installGeometryTracking(plugin, session);
@@ -1008,6 +1250,7 @@ module.exports = {
   normalizeCompanionScale,
   normalizeStoredGeometry,
   revealCompanionEditorCursor,
+  scheduleCompanionEditorCursorReveal,
   openCompanionNoteWindow,
   registerCompanionNoteCommands,
   resolveCompanionNotePath,
@@ -1883,11 +2126,18 @@ function resultTimeSuffix(action, result) {
 }
 
 async function promptForPreparedNote(plugin, prepared, action, options = {}) {
+  const webMode = String(prepared?.player?.transport || '') === 'bilibili-web';
+  const pausedByGoStudy = Boolean(prepared?.player?.control?.pausedByGoStudy);
+  const subtitle = webMode
+    ? 'B站网页模式 · Enter 保存 · Shift+Enter 换行 · Esc 取消'
+    : pausedByGoStudy
+      ? '视频已暂停 · Enter 保存 · Shift+Enter 换行 · Esc 取消'
+      : 'Enter 保存 · Shift+Enter 换行 · Esc 取消';
   return (options.showQuickNoteInput || showQuickNoteInput)(plugin, {
     title: action.time
       ? `${action.label} · ${formatPositionClock(prepared.position)}`
       : action.label,
-    subtitle: '视频已暂停 · Enter 保存 · Shift+Enter 换行 · Esc 取消',
+    subtitle,
     placeholder: '写下这一刻的笔记…',
     ...(options.promptOptions || {})
   });
@@ -1930,7 +2180,7 @@ async function runCaptureAction(plugin, actionValue, options = {}) {
       }
     } else if (action.note) {
       prepared = await prepareCurrentLearningPosition(plugin, {
-        nativeOnly: true,
+        nativeOnly: false,
         pause: true,
         ...options.captureOptions
       });
@@ -1945,7 +2195,7 @@ async function runCaptureAction(plugin, actionValue, options = {}) {
         : await commitPreparedPlainTypedNote(plugin, prepared, note);
       await resumePreparedPlayback(plugin, prepared, 'save', options);
     } else if (action.time) {
-      result = await insertCurrentLearningPosition(plugin, { nativeOnly: true, ...options.captureOptions });
+      result = await insertCurrentLearningPosition(plugin, { nativeOnly: false, ...options.captureOptions });
     } else {
       throw new Error('当前动作没有任何采集内容。');
     }
@@ -1953,9 +2203,12 @@ async function runCaptureAction(plugin, actionValue, options = {}) {
     await successFeedback(plugin, `✓ ${action.label}${resultTimeSuffix(action, result)}`, options);
     return result;
   } catch (error) {
-    const message = compactError(error);
+    let message = compactError(error);
+    if (action.image && /PotPlayer|B站网页|网页模式/.test(message)) {
+      message = '网页学习目前支持时间戳、纯笔记、评论 + 时间戳；截图动作仍需要 PotPlayer。';
+    }
     if (!/PotPlayer 当前不是前台窗口/.test(message)) {
-      await feedback(`⚠ ${message}`, { ...options, toastOptions: { ...(options.toastOptions || {}), durationMs: 2200 } });
+      await feedback(`⚠ ${message}`, { ...options, toastOptions: { ...(options.toastOptions || {}), durationMs: 2600 } });
     }
     throw error;
   } finally {
@@ -2233,9 +2486,10 @@ const {
 } = __rhLoad("note-target.cjs");
 const { requestNativePotPlayer } = __rhLoad("native-potplayer.cjs");
 const { requestPotPlayerBridge } = __rhLoad("potplayer-bridge.cjs");
+const { requestBilibiliWebBridge } = __rhLoad("bilibili-web-bridge.cjs");
 const { currentProductSettings, normalizeCaptureFolder } = __rhLoad("product-settings.cjs");
 const { updateResumePosition } = __rhLoad("resource-resolver.cjs");
-const { revealCompanionEditorCursor } = __rhLoad("companion-note-window.cjs");
+const { scheduleCompanionEditorCursorReveal } = __rhLoad("companion-note-window.cjs");
 const {
   buildContextCaptureMarkdown,
   buildContextCaptureNoteMarkdown,
@@ -2262,7 +2516,10 @@ function resolveLearningContext(plugin, playerMedia) {
     plugin.activeMediaSession,
     playerMedia,
     (resource) => plugin.resourceActions(resource),
-    { allowFreeform: settings.freeformVideoNotesEnabled }
+    {
+      allowFreeform: settings.freeformVideoNotesEnabled,
+      preferFreeform: String(playerMedia?.source || playerMedia?.transport || '') === 'bilibili-web'
+    }
   );
 }
 
@@ -2312,12 +2569,27 @@ async function requestLearningPlayer(plugin, action, options = {}) {
     }
   }
 
+  let webError = null;
+  if (action === 'current' && options.web !== false) {
+    try {
+      return await (options.webRequest || requestBilibiliWebBridge)(plugin, action, options.webOptions || {});
+    } catch (error) {
+      webError = error;
+      if (options.webOnly) throw error;
+    }
+  }
+
   try {
     return await requestPotPlayerBridge(options.requestUrl || requestUrl, action, options.bridgeOptions || {});
   } catch (bridgeError) {
-    if (nativeError) {
-      const message = nativeError instanceof Error ? nativeError.message : String(nativeError);
-      throw new Error(`Go Study 原生视频控制失败：${message}`);
+    if (nativeError || webError) {
+      const nativeMessage = nativeError instanceof Error ? nativeError.message : String(nativeError || '');
+      const webMessage = webError instanceof Error ? webError.message : String(webError || '');
+      const detail = [
+        nativeMessage ? `PotPlayer：${nativeMessage}` : '',
+        webMessage ? `B站网页：${webMessage}` : ''
+      ].filter(Boolean).join('；');
+      throw new Error(detail || (bridgeError instanceof Error ? bridgeError.message : String(bridgeError)));
     }
     throw bridgeError;
   }
@@ -2335,7 +2607,7 @@ async function insertPreparedMarkdown(plugin, prepared, markdown) {
     throw new Error('最近的学习笔记已经关闭或不可编辑。');
   }
   prepared.editor.replaceSelection(markdown);
-  revealCompanionEditorCursor(plugin, prepared.editor, { focus: false, center: false });
+  scheduleCompanionEditorCursorReveal(plugin, prepared.editor, { focus: false, center: false });
   await persistRecordedPosition(plugin, prepared.resource, prepared.position);
   return { ...prepared, markdown };
 }
@@ -2493,7 +2765,7 @@ async function insertPlainTypedNote(plugin, noteText, options = {}) {
   const editor = activeEditor(plugin, options.editor);
   const markdown = buildPlainNoteMarkdown(noteText, noteOutputOptions(plugin));
   editor.replaceSelection(markdown);
-  revealCompanionEditorCursor(plugin, editor, { focus: false, center: false });
+  scheduleCompanionEditorCursorReveal(plugin, editor, { focus: false, center: false });
   return { mode: 'plain', editor, markdown };
 }
 async function commitPreparedPlainTypedNote(plugin, prepared, noteText) {
@@ -6913,7 +7185,9 @@ function matchingManagedResource(state, mediaPath, resolveActions, preferredReso
 function resolveUniversalMediaSession(state, activeSession, bridgeMedia, resolveActions, options = {}) {
   const position = validatedBridgePosition(bridgeMedia);
   const preferredResourceId = String(activeSession?.resourceId || '');
-  const resource = matchingManagedResource(state, bridgeMedia.path, resolveActions, preferredResourceId);
+  const resource = options.preferFreeform
+    ? null
+    : matchingManagedResource(state, bridgeMedia.path, resolveActions, preferredResourceId);
   if (resource) {
     return {
       mode: 'managed',
@@ -10121,6 +10395,7 @@ const {
   updateImmersiveShortcut
 } = __rhLoad("immersive-hotkeys.cjs");
 const { immersiveShortcuts, resolvePotPlayerExecutable } = __rhLoad("native-potplayer.cjs");
+const { bridgeStatus } = __rhLoad("bilibili-web-bridge.cjs");
 const {
   diagnoseTimelineNavigator,
   refreshTimelineNavigator
@@ -10451,11 +10726,11 @@ class GoStudySettingsTab extends PluginSettingTab {
     const enabled = settings.videoEnhancementEnabled;
     const shortcuts = immersiveShortcuts(this.plugin);
 
-    section(containerEl, '视频笔记增强', 'Windows + PotPlayer 原生增强。关闭时 Go Study 仍然可以作为普通资源管理器完整使用。');
+    section(containerEl, '视频笔记增强', '全局 HUD 可用于 PotPlayer；安装可选的 B站网页桥接扩展后，也可直接从前台 B站网页记录时间戳和笔记。');
 
     new Setting(containerEl)
       .setName('启用视频笔记增强')
-      .setDesc('开启后注册全局快捷键，并启用 PotPlayer 时间点、截图和快速笔记能力。无需 markdown2potplayer / AutoHotkey。')
+      .setDesc('开启后注册全局快捷键。PotPlayer 支持时间戳、截图和快速笔记；B站网页桥接支持时间戳、纯笔记和评论 + 时间戳。')
       .addToggle((toggle) => toggle
         .setValue(enabled)
         .onChange(async (value) => {
@@ -10463,6 +10738,17 @@ class GoStudySettingsTab extends PluginSettingTab {
           registerImmersiveHotkeys(this.plugin);
           this.display();
         }));
+
+    const webBridge = bridgeStatus(this.plugin);
+    new Setting(containerEl)
+      .setName('B站网页桥接（可选）')
+      .setDesc(
+        webBridge.connected
+          ? '已连接前台 B站视频 · HUD 可直接读取网页 currentTime，无需 PotPlayer。'
+          : webBridge.listening
+            ? `等待浏览器扩展连接 · 本地桥接 127.0.0.1:${webBridge.port}。Preview 安装包内附 Go Study Bilibili Bridge 扩展。`
+            : `本地桥接未启动${webBridge.error ? `：${webBridge.error}` : '。'}`
+      );
 
     new Setting(containerEl)
       .setName('未收录视频也启用增强')
@@ -13893,6 +14179,7 @@ const {
   normalizeOutputTemplate,
   normalizeTimeDisplayFormat
 } = __rhLoad("product-settings.cjs");
+const { bilibiliTimestampUrl, isBilibiliVideoUrl } = __rhLoad("bilibili-web-bridge.cjs");
 
 function formatPositionClock(position, mode = 'smart') {
   const normalized = normalizeReferencePosition(position);
@@ -14022,11 +14309,16 @@ function freeformWebLocator(media = {}) {
 function buildFreeformPositionMarkdown(media, position, options = {}) {
   const normalized = normalizeReferencePosition(position);
   const locator = String(media?.path || '').trim();
-  const uri = buildFreeformReferenceUri({
+  const source = String(media?.source || media?.transport || '').trim().toLowerCase();
+  const web = freeformWebLocator(media);
+  const directBilibili = source === 'bilibili-web' && isBilibiliVideoUrl(web || locator)
+    ? bilibiliTimestampUrl(web || locator, normalized.seconds)
+    : '';
+  const uri = directBilibili || buildFreeformReferenceUri({
     locator,
     name: freeformLocatorName(locator),
     title: freeformMediaTitle(media),
-    web: freeformWebLocator(media),
+    web,
     position: normalized
   });
   const time = formatPositionClock(normalized, options.timeFormat || DEFAULT_PRODUCT_SETTINGS.timeDisplayFormat);
@@ -15086,6 +15378,7 @@ const { installFreeformBrowserModifier } = __rhLoad("freeform-link-ui.cjs");
 const { GoStudySettingsTab } = __rhLoad("product-settings-tab.cjs");
 const { currentProductSettings, ensureProductSettings } = __rhLoad("product-settings.cjs");
 const { registerCompanionNoteCommands } = __rhLoad("companion-note-window.cjs");
+const { registerBilibiliWebBridge } = __rhLoad("bilibili-web-bridge.cjs");
 const { enterStudyMode, exitStudyMode, studyModeState } = __rhLoad("study-mode.cjs");
 const { installTimelineNavigator } = __rhLoad("timeline-navigator.cjs");
 const {
@@ -15127,6 +15420,7 @@ class ResourceHubNextRuntimePlugin extends ResourceHubNextPlugin {
     installTimelineNavigator(this);
     registerRememberedNoteTarget(this);
     registerCompanionNoteCommands(this);
+    registerBilibiliWebBridge(this);
     registerImmersiveHotkeys(this);
     installScopedUiFixes(this);
     installLearningControls(this);
