@@ -958,13 +958,14 @@ class GoStudySettingsTab extends PluginSettingTab {
     new Setting(containerEl)
       .setName('恢复备份位置')
       .setDesc(backupDir || '当前环境无法解析本地恢复目录。')
-      .addButton((button) => button
-        .setButtonText('选择备份恢复')
-        .setCta?.()
-        .setDisabled(!entries.length)
-        .onClick(() => {
+      .addButton((button) => {
+        button.setButtonText('选择备份恢复');
+        button.setCta?.();
+        button.setDisabled(!entries.length);
+        button.onClick(() => {
           new BackupRestoreModal(this.app, this.plugin, () => this.display()).open();
-        }))
+        });
+      })
       .addButton((button) => button
         .setButtonText('打开备份文件夹')
         .setDisabled(!backupDir)
