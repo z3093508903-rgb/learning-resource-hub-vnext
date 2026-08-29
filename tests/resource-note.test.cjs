@@ -169,3 +169,23 @@ test('default managed and freeform backlinks show only the time while source met
   const parsed = parseReferenceUri(uri);
   assert.equal(parsed.title, '零散视频标题');
 });
+
+
+test('new managed timestamps hide source details visually but embed a self-describing v3 fallback', () => {
+  const resource = {
+    id: 'resource-bili',
+    title: '剪辑第一课',
+    launcher: { type: 'potplayer', target: 'https://www.bilibili.com/video/BV1EDIT?p=2' },
+    metadata: { sourceUrl: 'https://www.bilibili.com/video/BV1EDIT?p=2' }
+  };
+  const markdown = buildPositionMarkdown(resource, { type: 'time', seconds: 95 });
+  assert.match(markdown, /^\[01:35\]\(obsidian:\/\/go-study\?/);
+  assert.doesNotMatch(markdown, /剪辑第一课/);
+  const uri = markdown.match(/\((obsidian:\/\/go-study\?[^)]+)\)/)?.[1];
+  const parsed = parseReferenceUri(uri);
+  assert.equal(parsed.version, 3);
+  assert.equal(parsed.resourceId, 'resource-bili');
+  assert.equal(parsed.title, '剪辑第一课');
+  assert.equal(parsed.web, 'https://www.bilibili.com/video/BV1EDIT?p=2');
+  assert.match(parsed.locator, /^https:\/\/www\.bilibili\.com\/video\/BV1EDIT/);
+});
